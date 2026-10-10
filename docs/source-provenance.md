@@ -7,6 +7,7 @@ are maintained here from this snapshot onward.
 
 Included components: Protocol, Agent, CLI, Aspire hosting integration, their behavioral tests,
 package-only Aspire quickstart, build metadata, client documentation, and company-approved brand assets.
+The Groundhog icon, wordmarks and social preview come from this project's owner-approved brand kit.
 The Unifinity wordmark is a company brand asset supplied for this project; its inclusion does not bring
 website code, configuration, fonts, or history into this repository.
 
