@@ -11,8 +11,7 @@ It does not deploy or host the relay.
 
 ## Aspire
 
-The setup below targets the upcoming **0.2.0-preview.3**. Until publication, use the
-[published preview.2 setup](https://github.com/Unifinity-Software/groundhog-client/tree/agent-v0.2.0-preview.2).
+The setup below uses **0.2.0-preview.3**.
 
 Requires .NET 10 and Aspire 13.6.1 or later. In your AppHost directory:
 
