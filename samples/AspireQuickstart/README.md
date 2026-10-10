@@ -2,8 +2,8 @@
 
 Run a small web app on your computer and open it through a public HTTPS address. Groundhog runs inside the Aspire AppHost: you do not need to install the Groundhog CLI or host a backend.
 
-This source sample targets the upcoming **0.2.0-preview.4**. Until it is published, use the
-[published preview.3 walkthrough](https://github.com/Unifinity-Software/groundhog-client/tree/agent-v0.2.0-preview.3/samples/AspireQuickstart).
+This walkthrough targets **0.2.0-preview.4**. If that version has not appeared on NuGet yet, use the
+[published preview.3 walkthrough](https://github.com/Unifinity-Software/groundhog-client/tree/agent-v0.2.0-preview.3/samples/AspireQuickstart) until publication completes.
 
 ## 1. Check your tools
 
@@ -35,11 +35,11 @@ Clone this repository, or download its ZIP from GitHub's **Code** menu and extra
 ```text
 git clone https://github.com/Unifinity-Software/groundhog-client.git
 cd groundhog-client
-git switch --detach agent-v0.2.0-preview.3
+git switch --detach agent-v0.2.0-preview.4
 cd samples/AspireQuickstart
 ```
 
-For a ZIP, download the **published preview.3 tag** linked at the top of this guide rather than the default branch, extract it, and open a terminal in its `samples/AspireQuickstart` folder. You should see the `AppHost` and `Web` folders. This sample installs the integration from NuGet; its only project reference is the example web app.
+For a ZIP, download the **[preview.4 ZIP](https://github.com/Unifinity-Software/groundhog-client/archive/refs/tags/agent-v0.2.0-preview.4.zip)** rather than the default branch, extract it, and open a terminal in its `samples/AspireQuickstart` folder. You should see the `AppHost` and `Web` folders. This sample installs the integration from NuGet; its only project reference is the example web app.
 
 ## 4. Start Aspire and enter your two values
 
@@ -60,7 +60,7 @@ Follow the dashboard link Aspire prints. When the unresolved-parameters form app
 
 Turn on **Save to user secrets**, then submit the form. This remembers the values on this computer so you do not have to paste the key every time. User secrets live outside the repository and are not encrypted. Leave the toggle off if you do not want Aspire to remember the values.
 
-There is no service-address question in preview.3. The client connects to the hosted Groundhog service automatically. If you see `groundhog-relay`, stop the old sample and use the preview.3 checkout described below before starting again.
+There is no service-address question in preview.4. The client connects to the hosted Groundhog service automatically. If you see `groundhog-relay`, stop the old sample and use the preview.4 checkout described below before starting again.
 
 Keep your key out of source files, screenshots and terminal commands. For manual configuration, use the AppHost project's **Manage User Secrets** editor with `Parameters:groundhog-name` and `Parameters:groundhog-key`.
 
@@ -98,7 +98,7 @@ The app will stop serving through the public address. Starting the sample again 
 
 | What you see | What to do |
 | --- | --- |
-| `NU1102`, or NuGet only finds an older preview | Check the requested version first. Use the published preview.3 tag if the source requests upcoming preview.4; use the restore command below only for a stale response to a published version. |
+| `NU1102`, or NuGet only finds an older preview | Check that the requested version is published. If preview.4 is still being released, use the preview.3 walkthrough linked above. Otherwise refresh the cached response with the restore command below. |
 | `groundhog-relay` is still requested | You are running an older sample. Stop it and update the checkout with the commands below. Updating a NuGet cache alone does not update your sample's AppHost source. |
 | The tunnel rejects the credentials | Check that the name matches the website and the key belongs to that tunnel. A regenerated key replaces the previous key. Correct the saved values and restart the sample. |
 | The tunnel stays Connecting or Reconnecting | Check your internet connection and the tunnel's console logs in Aspire. The local app can run while Groundhog is unreachable. |
@@ -108,16 +108,16 @@ To run the published sample alongside an existing Git checkout, first stop the r
 
 ```text
 git fetch origin --tags
-git worktree add ../groundhog-quickstart-preview3 agent-v0.2.0-preview.3
-cd ../groundhog-quickstart-preview3/samples/AspireQuickstart
+git worktree add ../groundhog-quickstart-preview4 agent-v0.2.0-preview.4
+cd ../groundhog-quickstart-preview4/samples/AspireQuickstart
 aspire start --apphost AppHost/AppHost.csproj
 ```
 
 This leaves your old branch, local edits, and `aspire.config.json` untouched. The sample uses the same AppHost user-secrets ID, so the saved name/key remain on your computer. An old `groundhog-relay` secret can remain unused; the new source does not prompt for it. Use the explicit `--apphost` path above rather than copying the old Aspire configuration. If the new folder already exists, open it or choose a different unused folder name.
 
-For a ZIP checkout, extract a fresh copy from the published preview.3 tag. Confirm you start the AppHost in that new folder; an old terminal or shortcut can still point at preview.2. Do not copy connection keys into the new source folder.
+For a ZIP checkout, extract a fresh copy from the preview.4 tag. Confirm you start the AppHost in that new folder; an old terminal or shortcut can still point at preview.2. Do not copy connection keys into the new source folder.
 
-For `NU1102`, check the requested version first: the default branch currently targets unpublished preview.4, so use the published preview.3 tag above. If the requested version is published but NuGet returns an older cached result, run:
+For `NU1102`, check that the requested version is published. If preview.4 is still being released, use the preview.3 walkthrough linked above. If the requested version is published but NuGet returns an older cached result, run:
 
 ```powershell
 dotnet restore AppHost/AppHost.csproj --source https://api.nuget.org/v3/index.json --no-http-cache

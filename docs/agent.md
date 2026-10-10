@@ -23,7 +23,7 @@ You need the .NET 10 SDK or runtime (including the ASP.NET Core runtime, which t
 Install the preview from nuget.org:
 
 ```text
-dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.3
+dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.4
 groundhog --version
 ```
 
@@ -31,7 +31,7 @@ For a local tool scoped to your repository:
 
 ```text
 dotnet new tool-manifest
-dotnet tool install Groundhog.Cli --version 0.2.0-preview.3
+dotnet tool install Groundhog.Cli --version 0.2.0-preview.4
 dotnet tool run groundhog -- --help
 ```
 

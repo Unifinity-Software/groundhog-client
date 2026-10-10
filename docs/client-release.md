@@ -3,7 +3,7 @@
 The four client packages share one semantic version: `Groundhog.Protocol`, `Groundhog.Agent`,
 `Groundhog.Aspire.Hosting` and `Groundhog.Cli`. `agent-v<version>` on a tested merge commit to `master`
 publishes them to nuget.org and attaches packages and symbols to a GitHub Release. The server is not published
-as a NuGet package. Preview versions use a suffix such as `0.2.0-preview.2`.
+as a NuGet package. Preview versions use a suffix such as `0.2.0-preview.4`.
 
 ## One-time publishing setup
 
@@ -43,9 +43,9 @@ Run the complete affected local suites before pushing code or creating the relea
 local work. Fix failures and repeat affected checks after corrections.
 
 ```text
-dotnet build Groundhog.Client.slnx -c Release -p:Version=0.2.0-preview.2
+dotnet build Groundhog.Client.slnx -c Release -p:Version=0.2.0-preview.4
 dotnet test --solution Groundhog.Client.slnx -c Release --no-build
-dotnet pack Groundhog.Client.slnx -c Release --no-build -p:Version=0.2.0-preview.2 -o artifacts/packages
+dotnet pack Groundhog.Client.slnx -c Release --no-build -p:Version=0.2.0-preview.4 -o artifacts/packages
 ```
 
 The full client solution uses local fake relays and does not require Azurite, a server checkout or production
