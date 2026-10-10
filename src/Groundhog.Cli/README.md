@@ -4,7 +4,7 @@ The `groundhog` command of Groundhog, a self-hosted HTTPS tunnel for local devel
 machine a public HTTPS address through your own Groundhog relay.
 
 ```
-dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.1
+dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.2
 groundhog host myapp --port 5173 --relay https://tunnel.example.com
 ```
 
@@ -31,7 +31,7 @@ are required. Before connecting, check `GET /_groundhog/v1/health` on the relay'
 contain `"status":"ok"` and include protocol `1`.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
-`dotnet tool install Groundhog.Cli --version 0.2.0-preview.1` and `dotnet tool run groundhog -- --help`.
+`dotnet tool install Groundhog.Cli --version 0.2.0-preview.2` and `dotnet tool run groundhog -- --help`.
 Preview source and guide links may require repository access until the public client repository is established.
 
 MIT licensed.

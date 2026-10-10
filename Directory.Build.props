@@ -21,7 +21,7 @@
   -->
   <PropertyGroup>
     <VersionPrefix>0.2.0</VersionPrefix>
-    <VersionSuffix>preview.1</VersionSuffix>
+    <VersionSuffix>preview.2</VersionSuffix>
     <Authors>Unifinity Software Corporation</Authors>
     <Company>Unifinity Software Corporation</Company>
     <Copyright>Copyright (c) Unifinity Software Corporation</Copyright>
@@ -43,7 +43,7 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(IsPackable)' == 'true'">
-    <None Include="$(MSBuildThisFileDirectory)assets/brand/icon-192.png" Pack="true" PackagePath="/icon.png" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)assets/brand/app-icons/icon-192.png" Pack="true" PackagePath="/icon.png" Visible="false" />
   </ItemGroup>
 
   <!-- Test projects (names ending in .Tests): public test classes don't need XML docs. -->

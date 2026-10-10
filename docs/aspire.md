@@ -16,7 +16,7 @@ once it's connected (reconnecting, what your app sees).
 Add the `Groundhog.Aspire.Hosting` package to the AppHost project from nuget.org:
 
 ```
-dotnet add package Groundhog.Aspire.Hosting --version 0.2.0-preview.1
+dotnet add package Groundhog.Aspire.Hosting --version 0.2.0-preview.2
 ```
 
 It needs Aspire 13.6.1 or later and .NET 10. The complete runnable package consumer is
