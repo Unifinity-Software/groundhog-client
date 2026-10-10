@@ -1,0 +1,56 @@
+name: Build
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      os:
+        description: Platform for full client and package smoke checks
+        type: choice
+        default: ubuntu-latest
+        options: [ubuntu-latest, windows-latest, macos-latest]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ inputs.os || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Build
+        run: dotnet build Groundhog.Client.slnx -c Release
+      - name: Full client tests
+        run: dotnet test --solution Groundhog.Client.slnx -c Release --no-build
+      - name: Pack
+        run: dotnet pack Groundhog.Client.slnx -c Release --no-build -o artifacts/packages
+      - name: Package consumers
+        run: |
+          version="$(dotnet msbuild src/Groundhog.Aspire.Hosting/Groundhog.Aspire.Hosting.csproj -getProperty:Version)"
+          source="$GITHUB_WORKSPACE/artifacts/packages"
+          cache="$RUNNER_TEMP/groundhog-consumer-packages"
+          dotnet build samples/AspireQuickstart/AppHost/AppHost.csproj -c Release \
+            -p:RestoreAdditionalProjectSources="$source" -p:RestorePackagesPath="$cache"
+          dotnet test --project tests/Groundhog.Aspire.Hosting.Tests/Groundhog.Aspire.Hosting.Tests.csproj -c Release \
+            -p:UsePublishedClientPackages=true -p:ClientPackageVersion="$version" \
+            -p:RestoreAdditionalProjectSources="$source" -p:RestorePackagesPath="$cache"
+          dotnet tool install Groundhog.Cli --version "$version" --tool-path "$RUNNER_TEMP/groundhog-tool" \
+            --add-source "$source" --no-cache
+          "$RUNNER_TEMP/groundhog-tool/groundhog" --version
+          "$RUNNER_TEMP/groundhog-tool/groundhog" --help
+          GROUNDHOG_CLI_SMOKE_PATH="$RUNNER_TEMP/groundhog-tool/groundhog" \
+            dotnet test --project tests/Groundhog.Cli.Tests/Groundhog.Cli.Tests.csproj -c Release --no-build

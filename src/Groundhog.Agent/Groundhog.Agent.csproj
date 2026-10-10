@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Groundhog.Agent</PackageId>
+    <Description>The Groundhog agent as a library: keeps a tunnel connected to a Groundhog relay and forwards its requests to a local app.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kestrel serves HTTP/2 over the relay's WebSockets; YARP forwards each request to the local app. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Yarp.ReverseProxy" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Groundhog.Protocol\Groundhog.Protocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Groundhog.Agent.Tests" />
+  </ItemGroup>
+
+</Project>

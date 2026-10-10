@@ -1,0 +1,53 @@
+<Project>
+  <!-- Shared settings for every project in the repository. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- XML docs for every public API (packages are published); also lets the build flag unused usings. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <!-- Projects opt in to packing with <IsPackable>true</IsPackable>. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    Package metadata. Together with LICENSE, these lines are the only place that names the copyright holder;
+    the organisation-string guard (eng/check-org-strings.sh) allows exactly these elements.
+  -->
+  <PropertyGroup>
+    <VersionPrefix>0.2.0</VersionPrefix>
+    <VersionSuffix>preview.1</VersionSuffix>
+    <Authors>Unifinity Software Corporation</Authors>
+    <Company>Unifinity Software Corporation</Company>
+    <Copyright>Copyright (c) Unifinity Software Corporation</Copyright>
+    <RepositoryUrl>https://github.com/Unifinity-Software/groundhog-client</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/Unifinity-Software/groundhog-client</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>tunnel;https;relay;websocket;local-development</PackageTags>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <!-- Every package ships the README.md that sits next to its project file. -->
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)/README.md')">
+    <None Include="$(MSBuildProjectDirectory)/README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)assets/brand/icon-192.png" Pack="true" PackagePath="/icon.png" Visible="false" />
+  </ItemGroup>
+
+  <!-- Test projects (names ending in .Tests): public test classes don't need XML docs. -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+</Project>

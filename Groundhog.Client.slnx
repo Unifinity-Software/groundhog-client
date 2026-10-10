@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Groundhog.Protocol/Groundhog.Protocol.csproj" />
+    <Project Path="src/Groundhog.Agent/Groundhog.Agent.csproj" />
+    <Project Path="src/Groundhog.Cli/Groundhog.Cli.csproj" />
+    <Project Path="src/Groundhog.Aspire.Hosting/Groundhog.Aspire.Hosting.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Groundhog.Protocol.Tests/Groundhog.Protocol.Tests.csproj" />
+    <Project Path="tests/Groundhog.Agent.Tests/Groundhog.Agent.Tests.csproj" />
+    <Project Path="tests/Groundhog.Cli.Tests/Groundhog.Cli.Tests.csproj" />
+    <Project Path="tests/Groundhog.Aspire.Hosting.Tests/Groundhog.Aspire.Hosting.Tests.csproj" />
+  </Folder>
+</Solution>

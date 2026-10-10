@@ -1,0 +1,12 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.6.1">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AspireUseCliBundle>true</AspireUseCliBundle>
+    <UserSecretsId>groundhog-aspire-quickstart</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+    <PackageReference Include="Groundhog.Aspire.Hosting" />
+    <ProjectReference Include="../Web/Web.csproj" />
+  </ItemGroup>
+</Project>

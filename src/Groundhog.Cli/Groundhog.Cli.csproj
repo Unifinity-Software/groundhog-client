@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>groundhog</ToolCommandName>
+    <PackageId>Groundhog.Cli</PackageId>
+    <Description>The groundhog command: give a local dev server a public HTTPS address through your own Groundhog relay.</Description>
+    <!-- Run on newer .NET runtimes too, so installing a later SDK doesn't break the tool. -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Groundhog.Agent\Groundhog.Agent.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Groundhog.Cli.Tests" />
+  </ItemGroup>
+
+</Project>

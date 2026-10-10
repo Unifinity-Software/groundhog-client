@@ -1,0 +1,35 @@
+# Build output
+bin/
+obj/
+artifacts/
+*.nupkg
+*.snupkg
+
+# Test results
+TestResults/
+*.trx
+coverage*.xml
+
+# IDE and OS
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+.DS_Store
+Thumbs.db
+
+# Local configuration and secrets
+appsettings.*.local.json
+*.local.bicepparam
+*.env
+.env*
+
+# Browser-automation scratch (Playwright MCP / CLI write console logs and page snapshots here)
+.playwright-mcp/
+.playwright-cli/
+
+# Front-end dependencies and build output (the Node projects also ignore these locally)
+node_modules/
+dist/

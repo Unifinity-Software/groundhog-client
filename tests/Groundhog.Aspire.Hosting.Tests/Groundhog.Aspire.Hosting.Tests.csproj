@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- xUnit.net v3 test projects are executables run through Microsoft.Testing.Platform (see global.json). -->
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The fake relay and the local test app are small in-process Kestrel servers. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="xunit.v3" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The agent tests' fake relay and local app, shared rather than written twice. -->
+    <Compile Include="..\Groundhog.Agent.Tests\FakeRelay.cs" Link="Shared\FakeRelay.cs" />
+    <Compile Include="..\Groundhog.Agent.Tests\TunnelFixture.cs" Link="Shared\TunnelFixture.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Groundhog.Aspire.Hosting\Groundhog.Aspire.Hosting.csproj" Condition="'$(UsePublishedClientPackages)' != 'true'" />
+    <PackageReference Include="Groundhog.Aspire.Hosting" VersionOverride="$(ClientPackageVersion)" Condition="'$(UsePublishedClientPackages)' == 'true'" />
+  </ItemGroup>
+
+</Project>

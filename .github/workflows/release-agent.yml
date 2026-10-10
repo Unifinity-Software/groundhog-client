@@ -1,0 +1,180 @@
+name: Release agent
+
+# Pushing agent-v<version> publishes Protocol, Agent, Cli and Aspire.Hosting to NuGet and attaches the same
+# packages and symbols to a GitHub Release. A suffix such as agent-v0.2.0-preview.1 becomes a pre-release.
+# Publishes the same artifacts to nuget.org using trusted publishing. Only a merged master commit whose
+# pull request passed Build may be tagged. Run the full affected local checks before that pull request.
+on:
+  push:
+    tags: ['agent-v*']
+
+permissions:
+  contents: write
+  actions: read
+  pull-requests: read
+  id-token: write
+
+concurrency:
+  group: release-agent-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+jobs:
+  release:
+    environment: nuget
+    # RUNNER_LABELS is a JSON string or array of runner labels; see CONTRIBUTING.md. Tags are pushed by
+    # maintainers only, so this never runs code from a fork.
+    runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '"ubuntu-latest"') }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require a tested master commit
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await exec.exec('git', ['merge-base', '--is-ancestor', context.sha, 'origin/master']);
+            const prs = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+              ...context.repo, commit_sha: context.sha,
+            });
+            const pr = prs.find(p => p.merged_at && p.base.ref === 'master' && p.merge_commit_sha === context.sha);
+            if (!pr) {
+              throw new Error('Release commit must be the merge commit of a pull request to master.');
+            }
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              ...context.repo, workflow_id: 'build.yml', head_sha: pr.head.sha, event: 'pull_request',
+            });
+            const latest = data.workflow_runs.filter(r => r.head_sha === pr.head.sha)
+              .sort((a, b) => b.id - a.id)[0];
+            if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') {
+              throw new Error('The latest Build run for the merged pull request must have succeeded.');
+            }
+
+      - name: Read the version from the tag
+        id: version
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#agent-v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag $TAG isn't agent-v<major>.<minor>.<patch>[-<prerelease>]."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Check publishing configuration
+        shell: bash
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          if [[ -z "$NUGET_USER" ]]; then
+            echo '::error::Set NUGET_USER to the NuGet login profile with the trusted publishing policy.'
+            exit 1
+          fi
+
+      - name: Pack
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for project in Groundhog.Protocol Groundhog.Agent Groundhog.Cli Groundhog.Aspire.Hosting; do
+            dotnet pack "src/$project/$project.csproj" -c Release -p:Version="$VERSION" -o artifacts/release
+          done
+          ls -l artifacts/release
+
+      - name: NuGet login
+        id: nuget
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Publish to nuget.org
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
+        run: |
+          # NuGet indexes asynchronously. Push the complete graph without waiting between dependencies.
+          # dotnet also pushes an adjacent .snupkg. Retry only missing versions after a partial release.
+          for package in artifacts/release/*.nupkg; do
+            dotnet nuget push "$package" --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json --skip-duplicate
+          done
+
+      # github-script (pinned by commit) calls the REST API with the job's token, so the runner needs no gh CLI.
+      - name: Attach to the GitHub Release
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { TAG: tag, VERSION: version } = process.env;
+            const dir = 'artifacts/release';
+            const files = fs.readdirSync(dir).filter(name => /\.(s?nupkg)$/.test(name)).sort();
+            if (files.filter(name => name.endsWith('.nupkg')).length !== 4) {
+              core.setFailed(`Expected 4 packages: ${files.join(', ')}`);
+              return;
+            }
+
+            let release;
+            try {
+              ({ data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag }));
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              const body = [
+                'The groundhog command (Groundhog.Cli), the Groundhog.Agent library, the Groundhog.Aspire.Hosting integration',
+                'and Groundhog.Protocol.',
+                '',
+                'Install from nuget.org:',
+                '',
+                '```',
+                `dotnet add package Groundhog.Aspire.Hosting --version ${version}`,
+                `dotnet tool install --global Groundhog.Cli --version ${version}`,
+                '```',
+                '',
+                'See docs/agent.md and docs/aspire.md for usage. Requires .NET 10 or later.',
+              ].join('\n');
+              ({ data: release } = await github.rest.repos.createRelease({
+                ...context.repo,
+                tag_name: tag,
+                name: `Agent ${version}`,
+                body,
+                prerelease: version.includes('-'),
+              }));
+            }
+
+            for (const name of files) {
+              // Re-running replaces an asset of the same name.
+              const existing = release.assets.find(asset => asset.name === name);
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset({ ...context.repo, asset_id: existing.id });
+              }
+
+              const data = fs.readFileSync(path.join(dir, name));
+              await github.rest.repos.uploadReleaseAsset({
+                ...context.repo,
+                release_id: release.id,
+                name,
+                data,
+                headers: { 'content-type': 'application/octet-stream', 'content-length': data.length },
+              });
+              core.info(`Attached ${name}`);
+            }
+
+            core.notice(`Release: ${release.html_url}`);

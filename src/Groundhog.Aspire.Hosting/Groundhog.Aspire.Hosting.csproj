@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Groundhog.Aspire.Hosting</PackageId>
+    <Description>.NET Aspire integration for Groundhog: run a tunnel agent as an AppHost resource and expose its public address.</Description>
+    <PackageTags>$(PackageTags);aspire;hosting</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The agent runs in the AppHost's own process, so nothing else needs installing. -->
+    <ProjectReference Include="..\Groundhog.Agent\Groundhog.Agent.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Groundhog.Aspire.Hosting.Tests" />
+  </ItemGroup>
+
+</Project>
