@@ -155,6 +155,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                 TunnelName = tunnelName,
                 Credential = await resource.CredentialSource(cancellationToken).ConfigureAwait(false),
                 LocalTarget = target,
+                Client = GroundhogClientInfo.FromAssembly("Groundhog.Aspire.Hosting", typeof(GroundhogTunnelRunner).Assembly),
             };
 
             // Validates every setting; messages never repeat the credential.

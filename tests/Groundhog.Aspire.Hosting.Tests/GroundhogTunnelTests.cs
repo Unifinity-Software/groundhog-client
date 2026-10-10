@@ -122,6 +122,10 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
 
         var running = await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
         Assert.Equal("https://aspire-up.tunnel.example.com/", Assert.Single(running.Snapshot.Urls).Url);
+        var attempt = await fixture.Relay.Tunnel("aspire-up").Attempts.Reader.ReadAsync(Cancellation);
+        Assert.Equal("Groundhog.Aspire.Hosting", attempt.ClientPackage);
+        Assert.Equal(Groundhog.Agent.GroundhogClientInfo.FromAssembly("Groundhog.Aspire.Hosting",
+            typeof(GroundhogTunnelRunner).Assembly).Version, attempt.ClientVersion);
         Assert.DoesNotContain(running.Snapshot.Properties, p => p.Value?.ToString()?.Contains(fixture.Key) == true);
 
         var environment = await ResolveEnvironmentAsync(api.Resource);

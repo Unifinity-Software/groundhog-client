@@ -11,6 +11,14 @@ namespace Groundhog.Agent.Tests;
 public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFixture>
 {
     [Fact(Timeout = 30_000)]
+    public async Task Hosting_package_reports_its_own_version_instead_of_the_agent_version()
+    {
+        await using var agent = fixture.StartAgent("client-metadata", client: new GroundhogClientInfo("Groundhog.Aspire.Hosting", "1.2.3-preview.4"));
+        var attempt = await fixture.Relay.Tunnel("client-metadata").Attempts.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(("Groundhog.Aspire.Hosting", "1.2.3-preview.4", GroundhogAgent.Version),
+            (attempt.ClientPackage, attempt.ClientVersion, attempt.Agent));
+    }
+    [Fact(Timeout = 30_000)]
     public async Task Connects_with_the_protocol_headers_and_forwards_with_the_visitors_host()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -21,6 +29,7 @@ public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFi
         Assert.Equal($"{AgentAuthorization.KeyScheme} {fixture.Key}", attempt.Authorization);
         Assert.True(Guid.TryParse(attempt.Session, out _));
         Assert.Equal(GroundhogAgent.Version, attempt.Agent);
+        Assert.Equal(("Groundhog.Agent", GroundhogAgent.Version), (attempt.ClientPackage, attempt.ClientVersion));
         Assert.Equal([GroundhogProtocol.SubProtocol], attempt.SubProtocols);
 
         var connected = await agent.NextStatusAsync();

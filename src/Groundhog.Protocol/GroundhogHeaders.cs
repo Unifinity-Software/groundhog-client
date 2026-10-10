@@ -6,6 +6,12 @@ public static class GroundhogHeaders
     /// <summary>Sent by the agent when connecting: the agent's version.</summary>
     public const string Agent = "X-Groundhog-Agent";
 
+    /// <summary>Optional: the NuGet package hosting the agent (library, Aspire integration or CLI).</summary>
+    public const string ClientPackage = "X-Groundhog-Client-Package";
+
+    /// <summary>Optional: the hosting package's own version, not its agent dependency's version.</summary>
+    public const string ClientVersion = "X-Groundhog-Client-Version";
+
     /// <summary>
     /// Sent by the agent when connecting: one GUID per agent run, shared by all of that run's connections.
     /// </summary>

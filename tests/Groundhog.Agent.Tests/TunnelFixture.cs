@@ -58,7 +58,7 @@ public sealed class TunnelFixture : IAsyncLifetime
     }
 
     /// <summary>Starts an agent for <paramref name="tunnelName"/> against the fake relay.</summary>
-    public RunningAgent StartAgent(string tunnelName, Uri? localTarget = null, TimeProvider? timeProvider = null) =>
+    public RunningAgent StartAgent(string tunnelName, Uri? localTarget = null, TimeProvider? timeProvider = null, GroundhogClientInfo? client = null) =>
         new(new GroundhogAgentOptions
         {
             RelayAddress = Relay.Address,
@@ -67,6 +67,7 @@ public sealed class TunnelFixture : IAsyncLifetime
             LocalTarget = localTarget ?? LocalApp,
             PoolSize = 1,
             TimeProvider = timeProvider ?? TimeProvider.System,
+            Client = client,
         });
 
     /// <summary>An address on loopback where nothing is listening.</summary>

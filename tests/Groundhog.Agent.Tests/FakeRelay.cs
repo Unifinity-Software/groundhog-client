@@ -79,7 +79,9 @@ public sealed class FakeRelay : IAsyncDisposable
             context.Request.Headers.Authorization.ToString(),
             context.Request.Headers[GroundhogHeaders.Session].ToString(),
             context.Request.Headers[GroundhogHeaders.Agent].ToString(),
-            context.WebSockets.WebSocketRequestedProtocols.ToArray()));
+            context.WebSockets.WebSocketRequestedProtocols.ToArray(),
+            context.Request.Headers[GroundhogHeaders.ClientPackage].ToString(),
+            context.Request.Headers[GroundhogHeaders.ClientVersion].ToString()));
 
         if (tunnel.TryTakeRefusal(out var status))
         {
@@ -104,7 +106,8 @@ public sealed class FakeRelay : IAsyncDisposable
 }
 
 /// <summary>What one connect request carried.</summary>
-public sealed record ConnectAttempt(string Authorization, string Session, string Agent, IReadOnlyList<string> SubProtocols);
+public sealed record ConnectAttempt(string Authorization, string Session, string Agent, IReadOnlyList<string> SubProtocols,
+    string ClientPackage, string ClientVersion);
 
 /// <summary>Scripted answers and observed connections for one tunnel name on the <see cref="FakeRelay"/>.</summary>
 public sealed class FakeTunnel(string name)

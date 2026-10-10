@@ -2,7 +2,8 @@
 
 Run a small web app on your computer and open it through a public HTTPS address. Groundhog runs inside the Aspire AppHost: you do not need to install the Groundhog CLI or host a backend.
 
-This walkthrough uses **0.2.0-preview.3**.
+This source sample targets the upcoming **0.2.0-preview.4**. Until it is published, use the
+[published preview.3 walkthrough](https://github.com/Unifinity-Software/groundhog-client/tree/agent-v0.2.0-preview.3/samples/AspireQuickstart).
 
 ## 1. Check your tools
 
