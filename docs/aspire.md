@@ -15,8 +15,7 @@ once it's connected (reconnecting, what your app sees).
 
 ## Install
 
-This guide describes **0.2.0-preview.3**. Until it is published, use the
-[preview.2 guide](https://github.com/Unifinity-Software/groundhog-client/blob/agent-v0.2.0-preview.2/docs/aspire.md).
+This guide uses **0.2.0-preview.3**.
 
 Add the `Groundhog.Aspire.Hosting` package to the AppHost project from nuget.org:
 

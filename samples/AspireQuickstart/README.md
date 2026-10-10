@@ -2,7 +2,7 @@
 
 Run a small web app on your computer and open it through a public HTTPS address. Groundhog runs inside the Aspire AppHost: you do not need to install the Groundhog CLI or host a backend.
 
-This walkthrough targets **0.2.0-preview.3**. Until that preview is published, use the [preview.2 instructions](https://github.com/Unifinity-Software/groundhog-client/tree/agent-v0.2.0-preview.2/samples/AspireQuickstart).
+This walkthrough uses **0.2.0-preview.3**.
 
 ## 1. Check your tools
 
@@ -96,7 +96,7 @@ The app will stop serving through the public address. Starting the sample again 
 | What you see | What to do |
 | --- | --- |
 | `NU1102`, or NuGet only finds an older preview | Run the restore command below, then start again. Check that the preview named in this guide has been published. |
-| `groundhog-relay` is still requested | You have the preview.2 sample. Use the version link above, or update to the new sample after preview.3 is published. |
+| `groundhog-relay` is still requested | You have the preview.2 sample. Use the version link above, or update your sample to preview.3. |
 | The tunnel rejects the credentials | Check that the name matches the website and the key belongs to that tunnel. A regenerated key replaces the previous key. Correct the saved values and restart the sample. |
 | The tunnel stays Connecting or Reconnecting | Check your internet connection and the tunnel's console logs in Aspire. The local app can run while Groundhog is unreachable. |
 | The public URL does not return the JSON | Confirm both `web` and `tunnel` are Running, that you opened this tunnel's public address, and that the AppHost is still running. Check the tunnel console for the request and any forwarding error. |
