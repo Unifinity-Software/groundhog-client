@@ -5,21 +5,24 @@
   <img src="assets/brand/svg/lockups/lockup-tagline-light.svg" alt="Groundhog: self-hosted HTTPS tunnels" width="400">
 </picture>
 
-Groundhog gives local applications a public HTTPS address through an existing Groundhog relay.
+Groundhog gives local applications a public HTTPS address through the hosted Groundhog service or a self-hosted relay.
 This repository owns the MIT-licensed developer clients: the Aspire integration, CLI, Agent and Protocol.
 It does not deploy or host the relay.
 
 ## Aspire
 
+The setup below targets the upcoming **0.2.0-preview.3**. Until publication, use the
+[published preview.2 setup](https://github.com/Unifinity-Software/groundhog-client/tree/agent-v0.2.0-preview.2).
+
 Requires .NET 10 and Aspire 13.6.1 or later. In your AppHost directory:
 
 ```text
-dotnet add package Groundhog.Aspire.Hosting --version 0.2.0-preview.2
+dotnet add package Groundhog.Aspire.Hosting --version 0.2.0-preview.3
 ```
 
 ```csharp
 var key = builder.AddParameter("groundhog-key", secret: true);
-var tunnel = builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "myapp", key)
+var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
     .WithReference(web.GetEndpoint("http"));
 web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
 ```
@@ -32,12 +35,13 @@ does not discover this package.
 ## CLI
 
 ```text
-dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.2
-groundhog host myapp --port 5173 --relay https://tunnel.example.com
+dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.3
+groundhog host myapp --port 5173
 ```
 
 Supply the connection key through `GROUNDHOG_KEY`. See the [CLI guide](docs/agent.md).
-All clients require an existing relay and operator-provided tunnel credentials.
+Create a tunnel in Groundhog first and use its connection key. Aspire and the CLI connect to the hosted
+service automatically; explicit relay addresses remain available for self-hosting.
 
 ## Development
 

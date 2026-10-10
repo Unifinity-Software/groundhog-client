@@ -6,7 +6,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>groundhog</ToolCommandName>
     <PackageId>Groundhog.Cli</PackageId>
-    <Description>The groundhog command: give a local dev server a public HTTPS address through your own Groundhog relay.</Description>
+    <Description>The groundhog command: give a local dev server a public HTTPS address through Groundhog.</Description>
     <!-- Run on newer .NET runtimes too, so installing a later SDK doesn't break the tool. -->
     <RollForward>Major</RollForward>
   </PropertyGroup>

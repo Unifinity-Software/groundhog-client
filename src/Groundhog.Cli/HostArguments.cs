@@ -1,4 +1,5 @@
 using System.Globalization;
+using Groundhog.Agent;
 
 namespace Groundhog.Cli;
 
@@ -20,7 +21,7 @@ internal sealed record HostArguments(string Name, int Port, Uri Relay, string Ke
     {
         string? name = null;
         string? port = null;
-        string? relay = null;
+        string relay = GroundhogService.DefaultRelayAddress;
         string? key = null;
         string? pool = null;
         string? target = null;
@@ -133,11 +134,6 @@ internal sealed record HostArguments(string Name, int Port, Uri Relay, string Ke
             }
 
             portNumber = targetUri.Port;
-        }
-
-        if (relay is null)
-        {
-            return (null, "--relay is required: your relay's address, for example https://tunnel.example.com.", false);
         }
 
         if (!Uri.TryCreate(relay, UriKind.Absolute, out var relayUri))

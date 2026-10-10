@@ -21,6 +21,26 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task HostedServiceNeedsOnlyTunnelNameAndSecretKey()
+    {
+        var builder = CreateBuilder();
+        var key = builder.AddParameter("hosted-key", fixture.Key, secret: true);
+        var name = builder.AddParameter("hosted-name", "quickstart");
+        var constant = builder.AddGroundhogTunnel("constant", "quickstart", key);
+        var parameter = builder.AddGroundhogTunnel("parameter", name, key);
+
+        foreach (var tunnel in new[] { constant, parameter })
+        {
+            Assert.Equal(Groundhog.Agent.GroundhogService.DefaultRelayAddress,
+                await tunnel.Resource.RelayAddressSource(Cancellation));
+            Assert.Equal("quickstart", await tunnel.Resource.TunnelNameSource(Cancellation));
+        }
+        var plainKey = builder.AddParameter("public-key", "not-a-secret");
+        Assert.Throws<ArgumentException>(() => builder.AddGroundhogTunnel("rejected", name, plainKey));
+        Assert.Throws<ArgumentException>(() => builder.AddGroundhogTunnel("also-rejected", "quickstart", plainKey));
+    }
+
+    [Fact]
     public void ReconnectIsEnabledOnlyForTerminalStates()
     {
         var builder = CreateBuilder();
