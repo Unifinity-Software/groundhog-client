@@ -6,7 +6,9 @@ Fix failures and repeat affected checks after corrections; CI verifies work alre
 Pack and verify package consumers when changing public APIs, dependency metadata, or release configuration.
 
 Write original code for this project. Never bring code from unrelated private products.
-Use `example.com` and placeholders in documentation and tests. Never commit secrets or deployment values.
+Use `example.com` and placeholders in documentation and tests. Never commit secrets or private deployment values.
+The owner-approved public service address is an intentional exception: define it once in
+`GroundhogService.DefaultRelayAddress`. Keep an explicit service override available for self-hosting and migrations.
 Use a GitHub `noreply` commit email. Tests should guard real behavior, share expensive fixtures,
 and use fake time rather than waiting on real time.
 

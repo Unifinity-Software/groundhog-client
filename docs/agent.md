@@ -5,7 +5,7 @@ requests your tunnel's public address (for example `https://myapp.tunnel.example
 the app on your machine (for example `http://localhost:5173`) and sends the response back. Nothing on your machine
 accepts incoming connections, so there's no firewall or router to configure.
 
-It comes in two forms:
+It comes in three forms:
 
 - **`groundhog`**, a command-line tool (the `Groundhog.Cli` package, a .NET tool).
 - **`Groundhog.Agent`**, a library for embedding the same behaviour in your own tools.
@@ -23,7 +23,7 @@ You need the .NET 10 SDK or runtime (including the ASP.NET Core runtime, which t
 Install the preview from nuget.org:
 
 ```text
-dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.2
+dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.3
 groundhog --version
 ```
 
@@ -31,20 +31,20 @@ For a local tool scoped to your repository:
 
 ```text
 dotnet new tool-manifest
-dotnet tool install Groundhog.Cli --version 0.2.0-preview.2
+dotnet tool install Groundhog.Cli --version 0.2.0-preview.3
 dotnet tool run groundhog -- --help
 ```
 
 Upgrade with `dotnet tool update --global Groundhog.Cli --version <version>`; remove with
 `dotnet tool uninstall --global Groundhog.Cli`. The tool includes the agent and protocol libraries.
 
-Check `GET /_groundhog/v1/health` on the relay's own address before connecting. It must return
+The CLI connects to the hosted Groundhog service by default; create a tunnel on the website and use its name and key. For self-hosting, optionally check `GET /_groundhog/v1/health` on your relay's address before connecting. It must return
 `"status":"ok"` with protocol `1`. A healthy relay advertising only other protocol versions is incompatible.
 
 ## Use the command
 
 ```
-groundhog host <name> (--port <port> | --target <url>) --relay <url> [options]
+groundhog host <name> (--port <port> | --target <url>) [options]
 ```
 
 | Argument | Meaning |
@@ -54,7 +54,7 @@ groundhog host <name> (--port <port> | --target <url>) --relay <url> [options]
 | `--target <url>` | An HTTP or HTTPS origin instead of `--port`, for example `https://localhost:7132`. No credentials, path, query or fragment. |
 | `--local-ca <file>` | Trust a PEM or DER CA certificate or self-signed server certificate for loopback HTTPS only. |
 | `--insecure-local` | Skip certificate validation for loopback HTTPS only; prints a warning. |
-| `--relay <url>` | Your relay's address, for example `https://tunnel.example.com`. |
+| `--relay <url>` | Optional address override for self-hosting or a service migration, for example `https://tunnel.example.com`. |
 | `--key <key>` | The tunnel's connection key. Prefer the `GROUNDHOG_KEY` environment variable (below). |
 | `--pool <n>` | How many connections to keep open to the relay, 1 to 8. Default 2. |
 | `-v`, `--verbose` | Print one line per request. |
@@ -64,12 +64,12 @@ process list. `--key` wins if you give both. The command never prints the key.
 
 ```bash
 export GROUNDHOG_KEY='<your key>'
-groundhog host myapp --port 5173 --relay https://tunnel.example.com
+groundhog host myapp --port 5173
 ```
 
 ```powershell
 $env:GROUNDHOG_KEY = '<your key>'
-groundhog host myapp --port 5173 --relay https://tunnel.example.com
+groundhog host myapp --port 5173
 ```
 
 It prints one line when it connects, and one each time the connection drops and comes back:

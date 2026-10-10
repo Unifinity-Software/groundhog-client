@@ -11,6 +11,38 @@ namespace Aspire.Hosting;
 /// <summary>Adds Groundhog tunnels to a .NET Aspire AppHost.</summary>
 public static class GroundhogTunnelBuilderExtensions
 {
+    /// <summary>Adds a tunnel through the public Groundhog service using a secret connection key.</summary>
+    /// <param name="builder">The AppHost builder.</param>
+    /// <param name="name">The resource name in the Aspire dashboard.</param>
+    /// <param name="tunnelName">The name created in the Groundhog website.</param>
+    /// <param name="key">The tunnel's connection key, as a secret parameter.</param>
+    /// <returns>The tunnel. Point it at a local endpoint with <see cref="WithReference"/>.</returns>
+    public static IResourceBuilder<GroundhogTunnelResource> AddGroundhogTunnel(
+        this IDistributedApplicationBuilder builder,
+        [ResourceName] string name,
+        string tunnelName,
+        IResourceBuilder<ParameterResource> key)
+        => builder.AddGroundhogTunnel(name, GroundhogService.DefaultRelayAddress, tunnelName, key);
+
+    /// <summary>Adds a tunnel through the public Groundhog service with a parameter for its tunnel name.</summary>
+    /// <param name="builder">The AppHost builder.</param>
+    /// <param name="name">The resource name in the Aspire dashboard.</param>
+    /// <param name="tunnelName">A parameter containing the name created in the Groundhog website.</param>
+    /// <param name="key">The tunnel's connection key, as a secret parameter.</param>
+    /// <returns>The tunnel. Point it at a local endpoint with <see cref="WithReference"/>.</returns>
+    public static IResourceBuilder<GroundhogTunnelResource> AddGroundhogTunnel(
+        this IDistributedApplicationBuilder builder,
+        [ResourceName] string name,
+        IResourceBuilder<ParameterResource> tunnelName,
+        IResourceBuilder<ParameterResource> key)
+    {
+        ArgumentNullException.ThrowIfNull(tunnelName);
+        var credential = KeyCredential(key);
+        return AddTunnel(builder, name, Constant(GroundhogService.DefaultRelayAddress), FromParameter(tunnelName), credential)
+            .WithReferenceRelationship(tunnelName.Resource)
+            .WithReferenceRelationship(key.Resource);
+    }
+
     /// <summary>
     /// Adds a tunnel that gives an endpoint a public HTTPS address through a Groundhog relay, authenticating with
     /// the tunnel's connection key.

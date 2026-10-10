@@ -8,15 +8,20 @@ The agent runs inside the AppHost process through the `Groundhog.Agent` library,
 extra process. The connection key is a secret parameter: it's handed to the agent in memory and never appears on a
 command line, in the dashboard or in a log.
 
-You need a relay, a tunnel on it, and the tunnel's connection key. See [agent.md](agent.md) for what the agent does
+Create a tunnel in the Groundhog website and keep its connection key. The service address is automatic.
+See the [illustrated walkthrough](../samples/AspireQuickstart/README.md) for first-time setup and validation.
+See [agent.md](agent.md) for what the agent does
 once it's connected (reconnecting, what your app sees).
 
 ## Install
 
+This guide describes **0.2.0-preview.3**. Until it is published, use the
+[preview.2 guide](https://github.com/Unifinity-Software/groundhog-client/blob/agent-v0.2.0-preview.2/docs/aspire.md).
+
 Add the `Groundhog.Aspire.Hosting` package to the AppHost project from nuget.org:
 
 ```
-dotnet add package Groundhog.Aspire.Hosting --version 0.2.0-preview.2
+dotnet add package Groundhog.Aspire.Hosting --version 0.2.0-preview.3
 ```
 
 It needs Aspire 13.6.1 or later and .NET 10. The complete runnable package consumer is
@@ -24,7 +29,7 @@ It needs Aspire 13.6.1 or later and .NET 10. The complete runnable package consu
 public repository existed; releases from this repository include public source links. The NuGet README
 contains the essential setup.
 
-Before connecting, check `GET /_groundhog/v1/health` on the relay's own address. A compatible response includes
+For self-hosting, you can check `GET /_groundhog/v1/health` on the relay's own address. A compatible response includes
 `"status":"ok"` and protocol `1`; another protocol version requires a compatible relay or client.
 The sample includes `check-relay.ps1` for this optional preflight. The agent still handles a refused protocol
 with a permanent failure; the integration does not add a startup dependency on the health endpoint.
@@ -43,7 +48,7 @@ var key = builder.AddParameter("groundhog-key", secret: true);
 
 var web = builder.AddProject<Projects.MyApp_Web>("web");
 
-var tunnel = builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "myapp", key)
+var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
     .WithReference(web.GetEndpoint("http"));
 
 web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress)
@@ -52,9 +57,15 @@ web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress)
 builder.Build().Run();
 ```
 
-- `AddGroundhogTunnel(name, relayAddress, tunnelName, key)` adds the tunnel. `name` is the resource's name in the
-  dashboard; `relayAddress` and `tunnelName` are your relay and tunnel. Both can also be parameters, for example
-  `builder.AddParameter("groundhog-relay")`, so each developer can point at their own tunnel through user secrets.
+- `AddGroundhogTunnel(name, tunnelName, key)` connects to the hosted Groundhog service. `name` is the resource's
+  name in the dashboard; `tunnelName` is the name created on the website, without a URL or domain.
+  The tunnel name can also be a parameter. Enable **Save to user secrets** when entering the key to remember it.
+- For self-hosting or a service-address migration, use `AddGroundhogTunnel(name, relayAddress, tunnelName, key)`.
+  The explicit address overrides the default. Both address and tunnel name can be parameters.
+
+The hosted default is shared with the CLI through `GroundhogService.DefaultRelayAddress`. A future default
+hostname change is delivered in a client update; existing installations continue to use their version's
+address unless they supply an explicit override. Keep the old service address reachable during migrations.
 - `key` must be a secret parameter (`secret: true`); anything else is refused when the AppHost is built.
 - `.WithReference(endpoint)` sets where requests go. HTTP and HTTPS endpoints work; an HTTPS endpoint needs a
   certificate this machine trusts (`dotnet dev-certs https --trust` for ASP.NET Core development certificates).
@@ -157,7 +168,7 @@ starts. A deployed app has its own public address: give it that through its own 
 ```csharp
 if (builder.ExecutionContext.IsRunMode)
 {
-    var tunnel = builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "myapp", key)
+    var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
         .WithReference(web.GetEndpoint("http"));
     web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
 }

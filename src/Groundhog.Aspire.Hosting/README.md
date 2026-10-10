@@ -9,24 +9,22 @@ other resources use that address.
 Requires .NET 10 and Aspire 13.6.1 or later. Add the package to your AppHost:
 
 ```text
-dotnet add package Groundhog.Aspire.Hosting --version 0.2.0-preview.2
+dotnet add package Groundhog.Aspire.Hosting --version 0.2.0-preview.3
 ```
 
 Use `dotnet add package` for this integration. Aspire CLI integration discovery currently accepts the
 `Aspire.Hosting.*` and `CommunityToolkit.Aspire.Hosting.*` prefixes, so `aspire add` does not discover this package.
 
-You need an existing Groundhog relay, a tunnel name, and its connection key. Installation does not provision
-the relay or tunnel. Set `Parameters:groundhog-key` through Aspire's secret parameter prompt or the AppHost's
-**Manage User Secrets** editor. Keep the key out of source control and shell history.
-
-Before connecting, request `GET https://tunnel.example.com/_groundhog/v1/health` on the relay's own address.
-The response must have `"status":"ok"` and include `1` in `"protocol"`. Otherwise ask the operator for a
-compatible relay. This preflight is optional; an unreachable relay does not prevent local development.
+Create a tunnel in the Groundhog website and copy its connection key. The hosted service address is automatic.
+Set `Parameters:groundhog-key` through Aspire's secret parameter prompt and enable **Save to user secrets**
+to remember it, or use the AppHost's **Manage User Secrets** editor. Keep the key out of source control and shell history.
+Follow the [illustrated first-tunnel walkthrough](https://github.com/Unifinity-Software/groundhog-client/blob/master/samples/AspireQuickstart/README.md)
+for the website steps, exact fields, and the response that confirms success.
 
 ```csharp
 var key = builder.AddParameter("groundhog-key", secret: true); // set in user secrets
 
-var tunnel = builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "myapp", key)
+var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
     .WithReference(web.GetEndpoint("http"));
 
 web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
@@ -49,7 +47,7 @@ web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
 Add `.WithRequestLogging()` to the tunnel builder to write completed requests to its Aspire console:
 
 ```csharp
-var tunnel = builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "myapp", key)
+var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
     .WithReference(web.GetEndpoint("http"))
     .WithRequestLogging();
 ```
@@ -63,7 +61,17 @@ Use an HTTP local endpoint, or an HTTPS endpoint with a certificate trusted by t
 the tunnel is omitted and its agent does not start. C# AppHosts are supported; TypeScript bindings are not
 currently advertised. The complete package-only example is in `samples/AspireQuickstart`.
 
-Preview source and guide links currently require repository access; a separate public client repository
-will provide accessible source before stable promotion. See `docs/aspire.md` for the full guide.
+## Self-hosting and service-address overrides
+
+For your own relay or a service-address migration, supply the address explicitly:
+
+```csharp
+var tunnel = builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "myapp", key)
+    .WithReference(web.GetEndpoint("http"));
+```
+
+Both the service address and tunnel name also accept parameters. The hosted default is defined once in
+`GroundhogService.DefaultRelayAddress`; an explicit address takes precedence. See
+[the Aspire guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/aspire.md) for more options.
 
 MIT licensed.

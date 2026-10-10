@@ -1,15 +1,15 @@
 # Groundhog.Cli
 
 The `groundhog` command of Groundhog, a self-hosted HTTPS tunnel for local development: give a dev server on your
-machine a public HTTPS address through your own Groundhog relay.
+machine a public HTTPS address through the hosted Groundhog service or your own relay.
 
 ```
-dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.2
-groundhog host myapp --port 5173 --relay https://tunnel.example.com
+dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.3
+groundhog host myapp --port 5173
 ```
 
 ```
-groundhog host <name> (--port <port> | --target <url>) --relay <url> [options]
+groundhog host <name> (--port <port> | --target <url>) [options]
 ```
 
 The key comes from `--key` or the `GROUNDHOG_KEY` environment variable and is never printed. The command prints
@@ -26,12 +26,12 @@ arguments, 3 key rejected or unknown tunnel.
 Requires .NET 10 or later. See `docs/agent.md` in the source repository for the full guide.
 
 The ASP.NET Core runtime is required (included with the SDK). Set `GROUNDHOG_KEY` through your shell's secure
-environment configuration; avoid a literal key in command history. An existing relay and tunnel credential
-are required. Before connecting, check `GET /_groundhog/v1/health` on the relay's own address: its JSON must
-contain `"status":"ok"` and include protocol `1`.
+environment configuration; avoid a literal key in command history. Create a tunnel in the Groundhog website
+and use its name and connection key. The hosted service address is automatic. Use `--relay <url>` only
+to override it for self-hosting or a service-address migration.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
-`dotnet tool install Groundhog.Cli --version 0.2.0-preview.2` and `dotnet tool run groundhog -- --help`.
-Preview source and guide links may require repository access until the public client repository is established.
+`dotnet tool install Groundhog.Cli --version 0.2.0-preview.3` and `dotnet tool run groundhog -- --help`.
+Source and the full guide are available in the public Groundhog client repository.
 
 MIT licensed.

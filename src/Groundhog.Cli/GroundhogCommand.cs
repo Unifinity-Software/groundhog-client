@@ -27,10 +27,10 @@ internal static class ExitCodes
 internal static class GroundhogCommand
 {
     public const string Usage = """
-        groundhog: give a local app a public HTTPS address through your own Groundhog relay.
+        groundhog: give a local app a public HTTPS address through Groundhog.
 
         Usage:
-          groundhog host <name> (--port <port> | --target <url>) --relay <url> [options]
+          groundhog host <name> (--port <port> | --target <url>) [options]
           groundhog --version
           groundhog --help
 
@@ -40,7 +40,7 @@ internal static class GroundhogCommand
           --target <url>   An HTTP or HTTPS local target, for example https://localhost:7132.
           --local-ca <file> Trust a PEM or DER CA/self-signed certificate for loopback HTTPS only.
           --insecure-local Skip local certificate validation for loopback HTTPS only (unsafe).
-          --relay <url>    Your relay's address, for example https://tunnel.example.com.
+          --relay <url>    Optional service address override for self-hosting or service migrations.
           --key <key>      The tunnel's connection key. Prefer the GROUNDHOG_KEY environment variable,
                            which keeps the key out of your shell history and process list.
           --pool <n>       Connections to keep open to the relay, 1 to 8 (default 2).

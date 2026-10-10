@@ -6,6 +6,18 @@ public class GroundhogCommandTests
 {
     private static readonly string _key = ConnectionKey.Generate();
 
+    [Fact]
+    public void Uses_hosted_service_unless_relay_is_overridden()
+    {
+        var (hosted, error, _) = HostArguments.Parse(["myapp", "--port", "5173"], Environment(_key));
+        Assert.Null(error);
+        Assert.Equal(new Uri(Groundhog.Agent.GroundhogService.DefaultRelayAddress), hosted!.Relay);
+        var (custom, customError, _) = HostArguments.Parse(
+            ["myapp", "--port", "5173", "--relay", "https://tunnel.example.com"], Environment(_key));
+        Assert.Null(customError);
+        Assert.Equal(new Uri("https://tunnel.example.com"), custom!.Relay);
+    }
+
     [Theory]
     [InlineData("https://localhost:7132")]
     [InlineData("http://127.0.0.1:5173")]
@@ -51,7 +63,6 @@ public class GroundhogCommandTests
     [Theory]
     [InlineData("host", "myapp", "--relay", "https://tunnel.example.com")] // no port
     [InlineData("host", "myapp", "--port", "70000", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "myapp", "--port", "5173")] // no relay
     [InlineData("host", "MyApp", "--port", "5173", "--relay", "https://tunnel.example.com")] // invalid name
     [InlineData("host", "myapp", "--port", "5173", "--relay", "https://tunnel.example.com", "--pool", "9")]
     [InlineData("host", "myapp", "--port", "5173", "--relay", "https://tunnel.example.com", "--kye", "KEY")]
