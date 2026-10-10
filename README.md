@@ -31,6 +31,11 @@ var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
 web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
 ```
 
+The tunnel resource exposes `tunnel.Resource.PublicAddress` (for example `https://myapp.tunnel.unifinity.com`) and
+`PublicHost` for other resources' settings; nothing waits for it unless you add `WaitFor(tunnel)`. The dashboard shows
+it as Connecting, Running (with the public URL), Reconnecting or Failed, with a **Reconnect** command after it stops.
+No CLI or tool needs installing: the agent runs inside the AppHost.
+
 Set the key through the AppHost's secret parameter prompt or user-secrets editor. Turn on **Save to user secrets**
 in the prompt if you want Aspire to remember it on this computer; user secrets are outside the repository and are not encrypted.
 See the [package-only quickstart](samples/AspireQuickstart/README.md) and [Aspire guide](docs/aspire.md).

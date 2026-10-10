@@ -59,6 +59,16 @@ builder.Build().Run();
 - `AddGroundhogTunnel(name, tunnelName, key)` connects to the hosted Groundhog service. `name` is the resource's
   name in the dashboard; `tunnelName` is the name created on the website, without a URL or domain.
   The tunnel name can also be a parameter. Enable **Save to user secrets** when entering the key to remember it.
+  Give the parameter a value when the AppHost is built (as below) so the tunnel name is never left waiting for input;
+  a resource that uses the public address waits for the tunnel's settings.
+
+  ```csharp
+  // User secrets: Parameters:tunnel-name = myapp, Parameters:tunnel-key = <connection key>
+  var tunnelName = builder.AddParameter("tunnel-name", builder.Configuration["Parameters:tunnel-name"] ?? "myapp");
+  var tunnelKey = builder.AddParameter("tunnel-key", secret: true);
+  var tunnel = builder.AddGroundhogTunnel("tunnel", tunnelName, tunnelKey)
+      .WithReference(web.GetEndpoint("http"));
+  ```
 - For self-hosting or a service-address migration, use `AddGroundhogTunnel(name, relayAddress, tunnelName, key)`.
   The explicit address overrides the default. Both address and tunnel name can be parameters.
 
@@ -97,8 +107,21 @@ var frontend = builder.AddViteApp("frontend", "../frontend")
 
 ```ts
 // vite.config.ts
-server: { allowedHosts: process.env.VITE_ALLOWED_HOST ? [process.env.VITE_ALLOWED_HOST] : [] }
+const tunnelHost = process.env.VITE_ALLOWED_HOST
+export default defineConfig({
+  server: {
+    allowedHosts: tunnelHost ? [tunnelHost] : [],
+    // Live reload (HMR) through the tunnel: wss on 443. A set clientPort also stops Vite's client from retrying a
+    // failed socket at ws://localhost:<port>, which on the public page makes Chrome ask the visitor for access to
+    // "apps and services on this device" (Local Network Access).
+    hmr: tunnelHost ? { protocol: 'wss', host: tunnelHost, clientPort: 443 } : undefined,
+  },
+})
 ```
+
+With `hmr` set, a page opened on `http://localhost:<port>` also live-reloads through the tunnel, so leave the
+variable unset (no tunnel) when you work offline. The tunnel forwards WebSockets, including subprotocols such as
+Vite's `vite-hmr`, and so SignalR and other WebSocket traffic work through it unchanged.
 
 ### Where the value comes from
 
@@ -134,6 +157,10 @@ example because the relay rejected the key).
 | Reconnecting | The connection dropped (sleep, network change, relay restart). The agent retries by itself: 1, 2, 4, 8, 16, then every 30 seconds. |
 | Failed to start | The tunnel stopped without ever connecting: a bad setting, a rejected key, an unknown tunnel. The reason is in its console log. |
 | Exited | The tunnel was connected but stopped for good, for example because the key was regenerated or another agent took the tunnel over. |
+
+Only one agent can hold a tunnel name. Starting a second AppHost with the same name, for example from another
+checkout or with `aspire start --isolated` (which copies the AppHost's user secrets, key included), takes the tunnel
+over, and the first tunnel shows **Exited**. Give a second copy its own tunnel, or run it with the tunnel left out.
 
 After a tunnel fails to start or exits, use its **Reconnect** command in the Aspire dashboard to start a new agent
 without restarting the AppHost. It reads the current relay, tunnel name, credential and target endpoint again.
