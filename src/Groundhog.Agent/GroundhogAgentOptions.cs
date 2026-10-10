@@ -6,6 +6,8 @@ namespace Groundhog.Agent;
 /// <summary>Settings for a <see cref="GroundhogAgent"/>.</summary>
 public sealed class GroundhogAgentOptions
 {
+    /// <summary>The hosting package and its version. Defaults to the agent library when omitted.</summary>
+    public GroundhogClientInfo? Client { get; set; }
     /// <summary>
     /// The relay's own address, for example <c>https://tunnel.example.com</c>: the tunnel domain in normal mode, or
     /// the relay's address in single-tunnel mode. <c>https</c> and <c>wss</c> connect with TLS; <c>http</c> and
@@ -55,6 +57,7 @@ public sealed class GroundhogAgentOptions
     /// <exception cref="ArgumentException">A setting is missing or invalid.</exception>
     public void Validate()
     {
+        Client?.Validate();
         if (RelayAddress is null || !RelayAddress.IsAbsoluteUri
             || RelayAddress.Scheme is not ("https" or "http" or "wss" or "ws"))
         {

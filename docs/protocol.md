@@ -31,6 +31,12 @@ local target (downgrading to HTTP/1.1 where the local server needs it).
     workload tokens) are added as relay handlers and agent credentials, not protocol changes.
   - `Sec-WebSocket-Protocol: groundhog.v1`
   - `X-Groundhog-Agent: <agent version>`
+  - Optional `X-Groundhog-Client-Package: <NuGet package ID>` and `X-Groundhog-Client-Version: <package version>`:
+    the hosting package's own version (Agent, Aspire integration or CLI), read from that package's assembly.
+    All pooled connections in one session report the same metadata. These informational headers do not affect
+    authentication or protocol compatibility. Relays ignore missing, malformed or unsupported metadata without
+    refusing the connection. Existing clients reporting only an agent version are identified only as the Agent
+    library; their Aspire/CLI package version must never be inferred from it.
   - `X-Groundhog-Session: <GUID>`: one value per agent run; all of a run's connections share it.
 - On success the relay answers `101 Switching Protocols` with `Sec-WebSocket-Protocol: groundhog.v1` and
   `X-Groundhog-Public-Address: <the tunnel's public address>`, for example

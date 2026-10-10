@@ -47,6 +47,9 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
         {
             var tunnel = fixture.Relay.Tunnel("cli-smoke");
             var connection = await tunnel.Connections.Reader.ReadAsync(cancellation);
+            var attempt = await tunnel.Attempts.Reader.ReadAsync(cancellation);
+            Assert.Equal("Groundhog.Cli", attempt.ClientPackage);
+            Assert.False(string.IsNullOrEmpty(attempt.ClientVersion));
             using var request = new HttpRequestMessage(HttpMethod.Get, "http://cli-smoke.tunnel.example.com/echo?code=sample")
             {
                 Version = HttpVersion.Version20,

@@ -71,6 +71,11 @@ internal sealed class RelayConnector
         settings.AddSubProtocol(GroundhogProtocol.SubProtocol);
         settings.SetRequestHeader(AgentAuthorization.HeaderName, AgentAuthorization.Format(token.Scheme, token.Token));
         settings.SetRequestHeader(GroundhogHeaders.Agent, GroundhogAgent.Version);
+        if (_options.Client is { } client)
+        {
+            settings.SetRequestHeader(GroundhogHeaders.ClientPackage, client.PackageId);
+            settings.SetRequestHeader(GroundhogHeaders.ClientVersion, client.Version);
+        }
         settings.SetRequestHeader(GroundhogHeaders.Session, _sessionId.ToString("D"));
         settings.CollectHttpResponseDetails = true;
 

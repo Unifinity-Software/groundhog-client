@@ -106,6 +106,7 @@ internal static class GroundhogCommand
                 LocalCaFile = arguments.LocalCaFile,
                 InsecureLocal = arguments.InsecureLocal,
                 PoolSize = arguments.Pool ?? ConnectionPool.DefaultSize,
+                Client = GroundhogClientInfo.FromAssembly("Groundhog.Cli", typeof(GroundhogCommand).Assembly),
             });
         }
         catch (ArgumentException ex)
