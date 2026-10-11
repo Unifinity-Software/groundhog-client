@@ -6,11 +6,28 @@ Fix failures and repeat affected checks after corrections; CI verifies work alre
 Pack and verify package consumers when changing public APIs, dependency metadata, or release configuration.
 
 Write original code for this project. Never bring code from unrelated private products.
-Use `example.com` and placeholders in documentation and tests. Never commit secrets or private deployment values.
-The owner-approved public service address is an intentional exception: define it once in
-`GroundhogService.DefaultRelayAddress`. Keep an explicit service override available for self-hosting and migrations.
-Use a GitHub `noreply` commit email. Tests should guard real behavior, share expensive fixtures,
-and use fake time rather than waiting on real time.
+Use placeholders, and `example.com` only for arbitrary third-party hosts and people. Never commit secrets or private
+deployment values.
+Groundhog is a hosted service only: do not advertise self-hosting. Its owner-approved public address is defined once in
+code in `GroundhogService.DefaultRelayAddress`. Docs, samples and tests use the hosted addresses,
+`https://groundhog.unifinity.com` and tunnel addresses such as `https://myapp.groundhog.unifinity.com`; never use
+`tunnel.example.com` or another made-up service host.
+Commit with a GitHub `noreply` email, or `noreply@unifinity.com` for automated contributors such as coding agents.
+Tests should guard real behavior, share expensive fixtures, and use fake time rather than waiting on real time.
+
+## Development overrides
+
+Customer docs never mention a service-address override. For development and testing against a local or fake relay
+(for example the relay repository's local dev loop), these remain available and are hidden from IntelliSense or help:
+
+- `GroundhogAgentOptions.RelayAddress` (defaults to `GroundhogService.DefaultRelayAddress`).
+- The `AddGroundhogTunnel` overloads that take a `relayAddress` string or parameter, including the custom-credential
+  overloads.
+- The CLI's `--relay <url>` option on `host`, `profile save`, `doctor`, `login` and the remote commands. Profiles saved
+  with it keep the address; a saved tunnel key is never sent to a different address.
+
+Hosting and `doctor` accept plain `http://` addresses for loopback testing; account and management commands require
+HTTPS. Tests use the fake relay in `tests/Groundhog.Agent.Tests`.
 
 ## Protocol changes
 

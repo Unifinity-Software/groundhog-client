@@ -52,11 +52,11 @@ public sealed class TerminalNavigationTests
         RequestRecord[] recent = [new(started.AddMinutes(24), "GET", "/api/products", 200, 42, false, null),
             new(started.AddMinutes(24).AddSeconds(1), "POST", "/api/orders", 201, 118, false, null),
             new(started.AddMinutes(24).AddSeconds(3), "GET", "/api/search", 502, 3, false, "local-unreachable")];
-        var snapshot = new SessionSnapshot("myapp", "http://localhost:5173/", "https://myapp.tunnel.example.com/",
+        var snapshot = new SessionSnapshot("myapp", "http://localhost:5173/", "https://myapp.groundhog.unifinity.com/",
             "Connected", started, 1284, 3, 0, 142, recent, null, []);
         recorder.Write(TerminalViews.Session(snapshot, now: started.AddMinutes(24).AddSeconds(18)));
         recorder.Write(new Text("1 Overview · 2 Requests · 3 Statistics · Esc/Q Stop and return"));
-        Assert.Contains("myapp.tunnel.example.com", console.Output, StringComparison.Ordinal);
+        Assert.Contains("myapp.groundhog.unifinity.com", console.Output, StringComparison.Ordinal);
         Assert.Contains("/api/products", console.Output, StringComparison.Ordinal);
         if (Environment.GetEnvironmentVariable("GROUNDHOG_SCREENSHOT_DIR") is { } directory)
         {

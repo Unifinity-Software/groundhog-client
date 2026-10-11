@@ -27,9 +27,9 @@ public sealed class HttpsTargetTests(HttpsTargetFixture fixture) : IClassFixture
         await using var agent = fixture.StartAgent(name, fixture.Targets[0], insecure: insecure);
         var connection = await fixture.Relay.Tunnel(name).Connections.Reader.ReadAsync(ct);
         using var content = new StringContent("request-body");
-        using var response = await connection.Client.PostAsync($"http://{name}.tunnel.example.com/echo?code=abc", content, ct);
+        using var response = await connection.Client.PostAsync($"http://{name}.groundhog.unifinity.com/echo?code=abc", content, ct);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal($"https|{name}.tunnel.example.com|/echo?code=abc|request-body", await response.Content.ReadAsStringAsync(ct));
+        Assert.Equal($"https|{name}.groundhog.unifinity.com|/echo?code=abc|request-body", await response.Content.ReadAsStringAsync(ct));
         Assert.Equal("localhost", fixture.LastSni);
     }
 
@@ -45,7 +45,7 @@ public sealed class HttpsTargetTests(HttpsTargetFixture fixture) : IClassFixture
         var name = $"reject-{endpoint}-{(trustCa ? "ca" : "os")}-{(wrongCa ? "wrong" : "right")}";
         await using var agent = fixture.StartAgent(name, fixture.Targets[endpoint], trustCa: trustCa, wrongCa: wrongCa);
         var connection = await fixture.Relay.Tunnel(name).Connections.Reader.ReadAsync(ct);
-        using var response = await connection.Client.GetAsync($"http://{name}.tunnel.example.com/echo", ct);
+        using var response = await connection.Client.GetAsync($"http://{name}.groundhog.unifinity.com/echo", ct);
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
         var record = await agent.NextRequestAsync();
         if (endpoint != 3)
@@ -64,7 +64,7 @@ public sealed class HttpsTargetTests(HttpsTargetFixture fixture) : IClassFixture
         using var visitor = new ClientWebSocket();
         visitor.Options.HttpVersion = HttpVersion.Version20;
         visitor.Options.HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact;
-        await visitor.ConnectAsync(new Uri("ws://https-ws.tunnel.example.com/ws"), connection.Client, ct);
+        await visitor.ConnectAsync(new Uri("ws://https-ws.groundhog.unifinity.com/ws"), connection.Client, ct);
         await visitor.SendAsync("hello"u8.ToArray(), WebSocketMessageType.Text, true, ct);
         var buffer = new byte[64];
         var received = await visitor.ReceiveAsync(buffer, ct);
@@ -79,7 +79,7 @@ public sealed class HttpsTargetTests(HttpsTargetFixture fixture) : IClassFixture
         var ct = TestContext.Current.CancellationToken;
         await using var agent = fixture.StartAgent("https-stream", fixture.Targets[0]);
         var connection = await fixture.Relay.Tunnel("https-stream").Connections.Reader.ReadAsync(ct);
-        using var response = await connection.Client.GetAsync("http://https-stream.tunnel.example.com/stream", HttpCompletionOption.ResponseHeadersRead, ct);
+        using var response = await connection.Client.GetAsync("http://https-stream.groundhog.unifinity.com/stream", HttpCompletionOption.ResponseHeadersRead, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
         try
         {
@@ -110,7 +110,7 @@ public sealed class HttpsTargetTests(HttpsTargetFixture fixture) : IClassFixture
             try
             {
                 var connection = await fixture.Relay.Tunnel("https-self").Connections.Reader.ReadAsync(ct);
-                using var response = await connection.Client.GetAsync("http://https-self.tunnel.example.com/echo", ct);
+                using var response = await connection.Client.GetAsync("http://https-self.groundhog.unifinity.com/echo", ct);
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             }
             finally

@@ -13,7 +13,7 @@ public sealed class RemoteCommandTests
         try
         {
             var store = new CredentialStore(directory);
-            store.Save(new("https://tunnel.example.com", "sample-credential", DateTimeOffset.UtcNow.AddHours(1), "example", new()));
+            store.Save(new("https://groundhog.unifinity.com", "sample-credential", DateTimeOffset.UtcNow.AddHours(1), "example", new()));
             using var handler = new ContractHandler();
             ManagementClient Factory(string relay, string? token) => new(relay, token, handler);
             var output = new StringWriter();
@@ -41,7 +41,7 @@ public sealed class RemoteCommandTests
         try
         {
             var store = new CredentialStore(directory);
-            store.Save(new("https://tunnel.example.com", "sample-credential", DateTimeOffset.UtcNow.AddHours(1), "example", new()));
+            store.Save(new("https://groundhog.unifinity.com", "sample-credential", DateTimeOffset.UtcNow.AddHours(1), "example", new()));
             using var handler = new ContractHandler();
             ManagementClient Factory(string relay, string? token) => new(relay, token, handler);
             var output = new StringWriter();
@@ -55,6 +55,31 @@ public sealed class RemoteCommandTests
         finally { Directory.Delete(directory, true); }
     }
 
+    [Fact]
+    public async Task Remote_commands_accept_the_hidden_relay_override_only_for_the_signed_in_service()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "groundhog-remote-relay-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new CredentialStore(directory);
+            store.Save(new(Groundhog.Agent.GroundhogService.DefaultRelayAddress, "sample-credential",
+                DateTimeOffset.UtcNow.AddHours(1), "example", new()));
+            using var handler = new ContractHandler();
+            ManagementClient Factory(string relay, string? token) => new(relay, token, handler);
+            var output = new StringWriter();
+            Assert.Equal(0, await RemoteCommands.RunAsync(
+                ["list", "--relay", Groundhog.Agent.GroundhogService.DefaultRelayAddress, "--output", "json"], output,
+                new StringWriter(), TestContext.Current.CancellationToken, store, Factory));
+            Assert.Equal("myapp", Assert.Single(JsonSerializer.Deserialize<TunnelInfo[]>(output.ToString())!).Name);
+
+            var other = await Assert.ThrowsAsync<ManagementException>(() => RemoteCommands.RunAsync(
+                ["list", "--relay", "https://localhost:8443"], new StringWriter(), new StringWriter(),
+                TestContext.Current.CancellationToken, store, Factory));
+            Assert.Contains("another relay", other.Message, StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     private sealed class ContractHandler : HttpMessageHandler
     {
         internal string LastPath { get; private set; } = "";
@@ -64,7 +89,7 @@ public sealed class RemoteCommandTests
             object Tunnel(string name) => new
             {
                 name,
-                url = $"https://{name}.tunnel.example.com",
+                url = $"https://{name}.groundhog.unifinity.com",
                 state = "Connected",
                 since = DateTimeOffset.UtcNow,
                 requestsLastMinute = 1,

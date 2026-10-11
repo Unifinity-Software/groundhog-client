@@ -13,8 +13,8 @@ namespace Groundhog.Agent;
 /// <see cref="GroundhogTokenRequestContext.PreviousTokenRejected"/> set before it gives up.
 /// </para>
 /// <para>
-/// Implement this class to add a sign-in method. The relay needs a matching handler for the scheme; the protocol
-/// itself doesn't change. <see cref="TunnelKeyCredential"/> is the built-in implementation.
+/// Implement this class to add a sign-in method. The service must accept the scheme; the protocol itself doesn't
+/// change. <see cref="TunnelKeyCredential"/> is the built-in implementation.
 /// </para>
 /// <para>Implementations must be safe to call from several connections at once.</para>
 /// </remarks>

@@ -104,10 +104,9 @@ internal static class InteractiveCli
     {
         var name = await AnsiConsole.PromptAsync(new TextPrompt<string>("Tunnel name (already created on the service):"), cancellation);
         var target = await AnsiConsole.PromptAsync(new TextPrompt<string>("Local target:").DefaultValue("http://localhost:5173"), cancellation);
-        var relay = await AnsiConsole.PromptAsync(new TextPrompt<string>("Relay override (empty for hosted service):").AllowEmpty(), cancellation);
         try
         {
-            store.Save(new(name, target, string.IsNullOrWhiteSpace(relay) ? null : relay));
+            store.Save(new(name, target));
             AnsiConsole.WriteLine("Profile saved. Supply its key through GROUNDHOG_KEY before hosting.");
         }
         catch (ArgumentException ex) { AnsiConsole.Write(new Text(ex.Message)); }

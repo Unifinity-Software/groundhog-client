@@ -13,9 +13,32 @@ public class GroundhogCommandTests
         Assert.Null(error);
         Assert.Equal(new Uri(Groundhog.Agent.GroundhogService.DefaultRelayAddress), hosted!.Relay);
         var (custom, customError, _) = HostArguments.Parse(
-            ["myapp", "--port", "5173", "--relay", "https://tunnel.example.com"], Environment(_key));
+            ["myapp", "--port", "5173", "--relay", "http://localhost:8080"], Environment(_key));
         Assert.Null(customError);
-        Assert.Equal(new Uri("https://tunnel.example.com"), custom!.Relay);
+        Assert.Equal(new Uri("http://localhost:8080"), custom!.Relay);
+    }
+
+    [Theory]
+    [InlineData("--help")]
+    [InlineData("help")]
+    [InlineData("host", "--help")]
+    [InlineData("host", "myapp", "--port", "5173", "--relay", "http://localhost:8080", "--help")]
+    [InlineData("login", "--help")]
+    [InlineData("doctor", "--help")]
+    [InlineData("profile", "save", "myapp", "--help")]
+    [InlineData("list", "--help")]
+    [InlineData("start", "--help")]
+    public async Task Help_does_not_list_the_relay_override(params string[] args)
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await GroundhogCommand.RunAsync(args, Environment(_key), output, error, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ExitCodes.Stopped, exitCode);
+        Assert.Contains("groundhog host <name>", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("--relay", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
     }
 
     [Theory]
@@ -24,7 +47,7 @@ public class GroundhogCommandTests
     public void Parses_explicit_targets_and_local_certificate_options(string target)
     {
         var (arguments, error, _) = HostArguments.Parse(
-            ["myapp", $"--target={target}", "--relay", "https://tunnel.example.com", "--local-ca", "local-ca.pem"], Environment(_key));
+            ["myapp", $"--target={target}", "--relay", "https://groundhog.unifinity.com", "--local-ca", "local-ca.pem"], Environment(_key));
         Assert.Null(error);
         Assert.Equal(new Uri(target), arguments!.LocalTarget);
         Assert.Equal("local-ca.pem", arguments.LocalCaFile);
@@ -37,7 +60,7 @@ public class GroundhogCommandTests
         stop.Cancel();
         var error = new StringWriter();
         var exitCode = await GroundhogCommand.RunAsync(
-            ["host", "myapp", "--target", "https://localhost:7132", "--relay", "https://tunnel.example.com", "--insecure-local"],
+            ["host", "myapp", "--target", "https://localhost:7132", "--relay", "https://groundhog.unifinity.com", "--insecure-local"],
             Environment(_key), new StringWriter(), error, stop.Token);
         Assert.Equal(ExitCodes.Stopped, exitCode);
         Assert.Contains("WARNING:", error.ToString(), StringComparison.Ordinal);
@@ -47,12 +70,12 @@ public class GroundhogCommandTests
     [Fact]
     public void Reads_the_key_from_GROUNDHOG_KEY_unless_given_as_an_option()
     {
-        string[] args = ["myapp", "--port", "5173", "--relay", "https://tunnel.example.com", "--pool=3", "-v"];
+        string[] args = ["myapp", "--port", "5173", "--relay", "https://groundhog.unifinity.com", "--pool=3", "-v"];
 
         var (fromEnvironment, error, _) = HostArguments.Parse(args, Environment(_key));
         Assert.Null(error);
         Assert.Equal(
-            new HostArguments("myapp", 5173, new Uri("https://tunnel.example.com"), _key, 3, Verbose: true),
+            new HostArguments("myapp", 5173, new Uri("https://groundhog.unifinity.com"), _key, 3, Verbose: true),
             fromEnvironment);
 
         var optionKey = ConnectionKey.Generate();
@@ -61,21 +84,21 @@ public class GroundhogCommandTests
     }
 
     [Theory]
-    [InlineData("host", "myapp", "--relay", "https://tunnel.example.com")] // no port
-    [InlineData("host", "myapp", "--port", "70000", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "MyApp", "--port", "5173", "--relay", "https://tunnel.example.com")] // invalid name
-    [InlineData("host", "myapp", "--port", "5173", "--relay", "https://tunnel.example.com", "--pool", "9")]
-    [InlineData("host", "myapp", "--port", "5173", "--relay", "https://tunnel.example.com", "--kye", "KEY")]
-    [InlineData("host", "myapp", "--port", "5173", "--relay", "https://tunnel.example.com", "--key", "not-a-key-KEY")]
-    [InlineData("host", "myapp", "--port", "5173", "--target", "https://localhost:7132", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "myapp", "--target", "ftp://localhost", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "myapp", "--target", "https://KEY@localhost", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "myapp", "--target", "https://localhost/path?KEY", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "myapp", "--target", "https://example.com", "--insecure-local", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "myapp", "--port", "5173", "--insecure-local", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "myapp", "--target", "https://localhost", "--local-ca", "KEY-missing.pem", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "myapp", "--target", "https://localhost", "--local-ca", "KEY-missing.pem", "--insecure-local", "--relay", "https://tunnel.example.com")]
-    [InlineData("host", "myapp", "--target", "https://localhost", "--insecure-local=true", "--relay", "https://tunnel.example.com")]
+    [InlineData("host", "myapp", "--relay", "https://groundhog.unifinity.com")] // no port
+    [InlineData("host", "myapp", "--port", "70000", "--relay", "https://groundhog.unifinity.com")]
+    [InlineData("host", "MyApp", "--port", "5173", "--relay", "https://groundhog.unifinity.com")] // invalid name
+    [InlineData("host", "myapp", "--port", "5173", "--relay", "https://groundhog.unifinity.com", "--pool", "9")]
+    [InlineData("host", "myapp", "--port", "5173", "--relay", "https://groundhog.unifinity.com", "--kye", "KEY")]
+    [InlineData("host", "myapp", "--port", "5173", "--relay", "https://groundhog.unifinity.com", "--key", "not-a-key-KEY")]
+    [InlineData("host", "myapp", "--port", "5173", "--target", "https://localhost:7132", "--relay", "https://groundhog.unifinity.com")]
+    [InlineData("host", "myapp", "--target", "ftp://localhost", "--relay", "https://groundhog.unifinity.com")]
+    [InlineData("host", "myapp", "--target", "https://KEY@localhost", "--relay", "https://groundhog.unifinity.com")]
+    [InlineData("host", "myapp", "--target", "https://localhost/path?KEY", "--relay", "https://groundhog.unifinity.com")]
+    [InlineData("host", "myapp", "--target", "https://example.com", "--insecure-local", "--relay", "https://groundhog.unifinity.com")]
+    [InlineData("host", "myapp", "--port", "5173", "--insecure-local", "--relay", "https://groundhog.unifinity.com")]
+    [InlineData("host", "myapp", "--target", "https://localhost", "--local-ca", "KEY-missing.pem", "--relay", "https://groundhog.unifinity.com")]
+    [InlineData("host", "myapp", "--target", "https://localhost", "--local-ca", "KEY-missing.pem", "--insecure-local", "--relay", "https://groundhog.unifinity.com")]
+    [InlineData("host", "myapp", "--target", "https://localhost", "--insecure-local=true", "--relay", "https://groundhog.unifinity.com")]
     public async Task Bad_arguments_exit_2_without_repeating_the_key(params string[] args)
     {
         // "KEY" stands for the secret: a mistyped option or a malformed key must never be echoed back.

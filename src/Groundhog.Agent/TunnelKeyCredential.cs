@@ -4,8 +4,8 @@ namespace Groundhog.Agent;
 
 /// <summary>
 /// A tunnel's connection key, presented with the <see cref="AgentAuthorization.KeyScheme"/> scheme
-/// (<c>Authorization: GroundhogKey &lt;key&gt;</c>). The key is created in the relay's dashboard (or, in
-/// single-tunnel mode, by whoever configures the relay) and is scoped to exactly one tunnel.
+/// (<c>Authorization: GroundhogKey &lt;key&gt;</c>). The key is shown once when the tunnel is created in the
+/// Groundhog website, and is scoped to exactly one tunnel.
 /// </summary>
 public sealed class TunnelKeyCredential : GroundhogCredential
 {

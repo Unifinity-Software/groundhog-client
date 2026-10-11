@@ -4,7 +4,7 @@ Groundhog provides keyboard menus, live tunnel monitoring and commands for scrip
 Requires .NET 10 and the ASP.NET Core runtime (both are included with the SDK).
 
 ```sh
-dotnet tool install --global Groundhog.Cli --version 0.3.0-preview.3
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.1
 groundhog
 ```
 
@@ -16,13 +16,13 @@ and key-management actions; destructive operations still require confirmation.
 
 ![Groundhog home menu rendered by the CLI](images/cli-home.png)
 
-The screenshots use the actual Spectre renderer and synthetic `example.com` data. See
+The screenshots use the actual Spectre renderer and synthetic sample data. See
 [screenshot generation](#refresh-the-screenshots) to reproduce them.
 
 ## Sign in and find tunnels
 
-Remote commands require a relay with the CLI authorization API described in [protocol.md](protocol.md#cli-management-authentication).
-Older relays still support `host` with a connection key, profiles and local monitoring; they cannot support CLI account login.
+Remote commands sign in through the service's CLI authorization API described in [protocol.md](protocol.md#cli-management-authentication).
+`host` with a connection key, profiles and local monitoring work without account login.
 
 ```sh
 groundhog login
@@ -35,7 +35,7 @@ groundhog describe myapp
 Login displays an approval code and opens the service's sign-in page when interactive. Sign in through the browser,
 check that its code matches your terminal, and approve CLI access. In a headless shell, open the printed URL on
 another device. The code expires after ten minutes; the resulting CLI session expires after eight hours.
-`login --relay https://tunnel.example.com` selects a self-hosted service. Signing in replaces the saved session.
+Signing in replaces the saved session.
 
 `list` includes connected and disconnected remote tunnels in the selected workspace. `ls` is an alias.
 `describe` shows a tunnel's remote state, public URL, traffic totals and permitted actions; `show` is an alias.
@@ -60,8 +60,8 @@ groundhog host myapp --target https://localhost:7132
 ```
 
 Supply an existing tunnel's key through `GROUNDHOG_KEY`. Login does not retrieve existing one-time connection keys.
-Keys created or rotated through this CLI are saved securely and are used when the selected workspace and relay match.
-An explicit `--key` or `GROUNDHOG_KEY` takes precedence. A saved key is never sent to another relay override.
+Keys created or rotated through this CLI are saved securely and are used when the selected workspace matches.
+An explicit `--key` or `GROUNDHOG_KEY` takes precedence. A saved key is never sent to a different service address.
 
 ![Live hosting overview with requests and session statistics](images/cli-session.png)
 
@@ -69,13 +69,13 @@ Interactive hosting shows a live overview. Press **1** for overview, **2** for r
 and **Esc** or **Q** to stop hosting and return. Ctrl+C stops the command. Noninteractive hosting retains the original
 connection/disconnection output; `--verbose` adds request lines. Use `--no-interactive` to select that behavior in a terminal.
 
-The host's existing options remain supported: `--pool`, `--relay`, `--target`, `--port`, `--local-ca`,
-`--insecure-local`, `--key`, and `--verbose`. See [the Agent guide](agent.md) for forwarding and certificate behavior.
+The host's options are `--port`, `--target`, `--local-ca`, `--insecure-local`, `--key`, `--pool` and `--verbose`.
+See [the Agent guide](agent.md) for forwarding and certificate behavior.
 
 ## Save settings and run in the background
 
-`init` guides you through saving a profile for an existing tunnel. Profiles contain a name, target and optional relay
-override, and contain no keys. Use commands for noninteractive setup:
+`init` guides you through saving a profile for an existing tunnel. Profiles contain a name and a local target,
+and contain no keys. Use commands for noninteractive setup:
 
 ```sh
 groundhog profile save myapp --target http://localhost:5173
@@ -91,7 +91,7 @@ groundhog profile delete myapp
 `host <profile>` runs in the foreground. `start` and `restart` require a saved profile and return after the agent connects.
 The background process is owned by your OS user and runs until stopped, replaced, or terminated; it is not a boot-time
 service. A failed or timed-out start stops its newly launched process; run `host` in the foreground to see its error.
-Profiles currently save only target and relay; use foreground `host` for custom CA, pool or insecure-local options.
+Profiles currently save only the target; use foreground `host` for custom CA, pool or insecure-local options.
 
 Profiles and credentials are stored under the OS local application-data directory in `Groundhog`.
 Set `GROUNDHOG_HOME` to use a separate configuration directory (also useful for isolated automation).
@@ -133,13 +133,13 @@ groundhog requests myapp --remote --method POST --path /api/ --output json
 Remote stats show the relay's stored usage window with status-class counts. Gaps indicate unavailable data;
 the current minute may not yet be persisted. Remote requests query the persisted request log and return metadata only.
 Status filtering runs on the service; other filters apply to its newest 200 matching records. Remote queries are snapshots,
-and their availability and retention depend on the relay configuration. They work even when no local agent is running.
+and their availability and retention depend on the service configuration. They work even when no local agent is running.
 
 ## Diagnose and automate
 
 ```sh
 groundhog doctor --target http://localhost:5173
-groundhog doctor --relay https://tunnel.example.com --output json
+groundhog doctor --output json
 groundhog wait myapp --condition connected --timeout 30
 groundhog wait myapp --condition ready --timeout 30
 ```

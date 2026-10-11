@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Groundhog.Agent</PackageId>
-    <Description>The Groundhog agent as a library: keeps a tunnel connected to a Groundhog relay and forwards its requests to a local app.</Description>
+    <Description>The Groundhog agent as a library: keeps a tunnel connected to the Groundhog service and forwards its requests to a local app.</Description>
   </PropertyGroup>
 
   <ItemGroup>

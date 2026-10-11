@@ -102,7 +102,7 @@ internal sealed record HostArguments(string Name, int Port, Uri Relay, string Ke
 
         if (name is null)
         {
-            return (null, "Give the tunnel's name, for example: groundhog host myapp --port 5173 --relay https://tunnel.example.com", false);
+            return (null, "Give the tunnel's name, for example: groundhog host myapp --port 5173", false);
         }
 
         if (port is null && target is null)
@@ -138,7 +138,7 @@ internal sealed record HostArguments(string Name, int Port, Uri Relay, string Ke
 
         if (!Uri.TryCreate(relay, UriKind.Absolute, out var relayUri))
         {
-            return (null, "--relay must be an absolute address, for example https://tunnel.example.com.", false);
+            return (null, "--relay must be an absolute address, such as an https:// origin.", false);
         }
 
         int? poolSize = null;

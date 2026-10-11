@@ -23,7 +23,7 @@ local target (downgrading to HTTP/1.1 where the local server needs it).
 ### Connecting
 
 - The agent connects to `wss://<relay address>/_groundhog/v1/connect?tunnel=<name>`, where the relay address is
-  the tunnel domain in normal mode, or the relay's own address in single-tunnel mode.
+  the tunnel domain, for example `groundhog.unifinity.com`.
 - Request headers:
   - `Authorization: <scheme> <token>`: a generic credential, so new authentication methods never change the
     protocol. Version 1 relays must support scheme `GroundhogKey`, whose token is the tunnel's connection key
@@ -40,8 +40,8 @@ local target (downgrading to HTTP/1.1 where the local server needs it).
   - `X-Groundhog-Session: <GUID>`: one value per agent run; all of a run's connections share it.
 - On success the relay answers `101 Switching Protocols` with `Sec-WebSocket-Protocol: groundhog.v1` and
   `X-Groundhog-Public-Address: <the tunnel's public address>`, for example
-  `https://myapp.tunnel.example.com` (or the relay's own address in single-tunnel mode), so the agent can show
-  it. An agent that doesn't get this header assumes single-tunnel mode and shows the relay's own address.
+  `https://myapp.groundhog.unifinity.com`, so the agent can show it. An agent that doesn't get this header shows
+  the relay's own address.
 - Before upgrading, the relay can refuse with an HTTP status:
   - `401` credential missing, invalid, or of an unsupported scheme (`WWW-Authenticate` lists the accepted
     schemes)

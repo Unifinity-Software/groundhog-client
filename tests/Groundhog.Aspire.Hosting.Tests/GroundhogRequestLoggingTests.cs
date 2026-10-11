@@ -28,7 +28,7 @@ public sealed partial class GroundhogTunnelTests
         await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
         var connection = await fixture.Relay.Tunnel(name).Connections.Reader.ReadAsync(Cancellation);
         using var request = new HttpRequestMessage(HttpMethod.Post,
-            new Uri($"http://{name}.tunnel.example.com/echo?token=query-secret"))
+            new Uri($"http://{name}.groundhog.unifinity.com/echo?token=query-secret"))
         {
             Version = new Version(2, 0),
             VersionPolicy = HttpVersionPolicy.RequestVersionExact,
@@ -68,7 +68,7 @@ public sealed partial class GroundhogTunnelTests
         await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
         var connection = await fixture.Relay.Tunnel("logged-controls").Connections.Reader.ReadAsync(Cancellation);
         using var response = await connection.Client.GetAsync(
-            "http://logged-controls.tunnel.example.com/hostile%1B%0Apath", Cancellation);
+            "http://logged-controls.groundhog.unifinity.com/hostile%1B%0Apath", Cancellation);
         await response.Content.ReadAsStringAsync(Cancellation);
         var line = await host.ReadLogUntilAsync(tunnel.Resource,
             line => line.Contains("GET /hostile", StringComparison.Ordinal));
@@ -94,7 +94,7 @@ public sealed partial class GroundhogTunnelTests
         using var visitor = new ClientWebSocket();
         visitor.Options.HttpVersion = new Version(2, 0);
         visitor.Options.HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact;
-        await visitor.ConnectAsync(new Uri("ws://logged-ws.tunnel.example.com/ws?token=socket-secret"),
+        await visitor.ConnectAsync(new Uri("ws://logged-ws.groundhog.unifinity.com/ws?token=socket-secret"),
             connection.Client, Cancellation);
         await visitor.SendAsync("payload"u8.ToArray(), WebSocketMessageType.Text, true, Cancellation);
         var buffer = new byte[32];

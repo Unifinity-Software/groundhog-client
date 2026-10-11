@@ -6,11 +6,11 @@
     <text x="28" y="38" font-size="13" fill="#526178">BROWSER · WALKTHROUGH ILLUSTRATION · EXAMPLE ADDRESS</text>
     <rect x="28" y="58" width="864" height="170" rx="10" fill="white" stroke="#cbd4e1"/>
     <rect x="44" y="73" width="832" height="35" rx="6" fill="#edf2f8"/>
-    <text x="57" y="96" font-size="16" font-family="monospace">https://aspire-quickstart.tunnel.example.com</text>
+    <text x="57" y="96" font-size="16" font-family="monospace">https://aspire-quickstart.groundhog.unifinity.com</text>
     <g font-family="monospace" font-size="16">
       <text x="48" y="141">{</text>
       <text x="64" y="164">"message": "Hello through Groundhog",</text>
-      <text x="64" y="187">"publicOrigin": "https://aspire-quickstart.tunnel.example.com",</text>
+      <text x="64" y="187">"publicOrigin": "https://aspire-quickstart.groundhog.unifinity.com",</text>
       <text x="48" y="212">… }</text>
     </g>
     <text x="28" y="266" font-size="20" font-weight="bold" fill="#18613c">This response at your public URL means the tunnel works.</text>

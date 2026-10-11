@@ -1,7 +1,7 @@
 # The Groundhog agent
 
-The agent runs on your machine. It keeps an outbound connection open to your Groundhog relay, and when someone
-requests your tunnel's public address (for example `https://myapp.tunnel.example.com`), it passes the request to
+The agent runs on your machine. It keeps an outbound connection open to the Groundhog service, and when someone
+requests your tunnel's public address (for example `https://myapp.groundhog.unifinity.com`), it passes the request to
 the app on your machine (for example `http://localhost:5173`) and sends the response back. Nothing on your machine
 accepts incoming connections, so there's no firewall or router to configure.
 
@@ -12,10 +12,9 @@ It comes in three forms:
 - **`Groundhog.Aspire.Hosting`**, which runs the agent as a resource in a .NET Aspire AppHost: see
   [aspire.md](aspire.md).
 
-Before running a client, create or join a workspace on your service and create a tunnel. See the
-[client handbook](README.md) for the setup path. For each tunnel, you need its name and its
-connection key. The key is shown once when the tunnel is created; in single-tunnel mode it's whatever key the
-relay's operator configured.
+Before running a client, create or join a workspace on the [Groundhog website](https://groundhog.unifinity.com)
+and create a tunnel. See the [client handbook](README.md) for the setup path. For each tunnel, you need its name
+and its connection key. The key is shown once when the tunnel is created.
 
 ## Install the command
 
@@ -24,7 +23,7 @@ You need the .NET 10 SDK or runtime (including the ASP.NET Core runtime, which t
 Install the preview from nuget.org:
 
 ```text
-dotnet tool install --global Groundhog.Cli --version 0.3.0-preview.3
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.1
 groundhog --version
 ```
 
@@ -32,20 +31,20 @@ For a local tool scoped to your repository:
 
 ```text
 dotnet new tool-manifest
-dotnet tool install Groundhog.Cli --version 0.3.0-preview.3
+dotnet tool install Groundhog.Cli --version 0.4.0-preview.1
 dotnet tool run groundhog -- --help
 ```
 
 Upgrade with `dotnet tool update --global Groundhog.Cli --version <version>`; remove with
 `dotnet tool uninstall --global Groundhog.Cli`. The tool includes the agent and protocol libraries.
 
-The CLI connects to the hosted Groundhog service by default; create a tunnel on the website and use its name and key. For self-hosting, optionally check `GET /_groundhog/v1/health` on your relay's address before connecting. It must return
-`"status":"ok"` with protocol `1`. A healthy relay advertising only other protocol versions is incompatible.
+The CLI connects to the hosted Groundhog service automatically; create a tunnel on the website and use its name
+and key. `groundhog doctor` checks that the service is reachable and supports protocol `1`.
 
 ## Use the command
 
 See the [illustrated CLI guide](cli.md) for keyboard menus, remote tunnel discovery, profiles, background agents,
-traffic queries and diagnostics. The key-based foreground host reference below also applies to older relays.
+traffic queries and diagnostics. The reference below covers key-based foreground hosting.
 
 ```
 groundhog host <name> (--port <port> | --target <url>) [options]
@@ -58,7 +57,6 @@ groundhog host <name> (--port <port> | --target <url>) [options]
 | `--target <url>` | An HTTP or HTTPS origin instead of `--port`, for example `https://localhost:7132`. No credentials, path, query or fragment. |
 | `--local-ca <file>` | Trust a PEM or DER CA certificate or self-signed server certificate for loopback HTTPS only. |
 | `--insecure-local` | Skip certificate validation for loopback HTTPS only; prints a warning. |
-| `--relay <url>` | Optional address override for self-hosting or a service migration, for example `https://tunnel.example.com`. |
 | `--key <key>` | The tunnel's connection key. Prefer the `GROUNDHOG_KEY` environment variable (below). |
 | `--pool <n>` | How many connections to keep open to the relay, 1 to 8. Default 2. |
 | `-v`, `--verbose` | Print one line per request. |
@@ -81,9 +79,9 @@ groundhog host myapp --port 5173
 It prints one line when it connects, and one each time the connection drops and comes back:
 
 ```
-Connected: https://myapp.tunnel.example.com → http://localhost:5173
+Connected: https://myapp.groundhog.unifinity.com → http://localhost:5173
 Disconnected: Lost the connection to the relay. Reconnecting in 1 s.
-Connected: https://myapp.tunnel.example.com → http://localhost:5173
+Connected: https://myapp.groundhog.unifinity.com → http://localhost:5173
 ```
 
 With `--verbose` it also prints each request when it finishes: method, path (never the query string, which can
@@ -103,7 +101,7 @@ For a stopped client or failed public response, follow [troubleshooting](trouble
 For an app that listens on HTTPS, pass its origin:
 
 ```
-groundhog host myapp --target https://localhost:7132 --relay https://tunnel.example.com
+groundhog host myapp --target https://localhost:7132
 ```
 
 Normal platform certificate validation applies. For ASP.NET Core, trust your development certificate with
@@ -113,7 +111,7 @@ tunnel configuration when the certificate is trusted.
 If your app uses a private CA or an untrusted self-signed certificate, supply the public certificate:
 
 ```
-groundhog host myapp --target https://localhost:7132 --local-ca local-ca.pem --relay https://tunnel.example.com
+groundhog host myapp --target https://localhost:7132 --local-ca local-ca.pem
 ```
 
 This explicitly trusts that certificate for this local hop, without installing it in the operating system's
@@ -153,7 +151,7 @@ It stops instead of retrying when retrying can't help:
 
 Requests arrive exactly as the visitor sent them, apart from the hop-by-hop headers any proxy removes:
 
-- **`Host` is the public name**, for example `myapp.tunnel.example.com`, not `localhost`. Webhook senders that sign
+- **`Host` is the public name**, for example `myapp.groundhog.unifinity.com`, not `localhost`. Webhook senders that sign
   requests with the public address (Twilio, for example) depend on this. Some dev servers refuse unknown host
   names until you allow them: in Vite, add the name to `server.allowedHosts`.
 - `X-Forwarded-Proto: https`, `X-Forwarded-Host` and `X-Forwarded-For` (the visitor's address) are added by the
@@ -169,11 +167,11 @@ and the response carries `X-Groundhog-Error: local-unreachable`.
 Add the published `Groundhog.Agent` package from nuget.org:
 
 ```text
-dotnet add package Groundhog.Agent --version 0.3.0-preview.3
+dotnet add package Groundhog.Agent --version 0.4.0-preview.1
 ```
 
-`Groundhog.Protocol` is restored as a dependency. Unlike the CLI and Aspire defaults, the library requires
-an explicit `RelayAddress`; use your service's base address, not the public tunnel URL.
+`Groundhog.Protocol` is restored as a dependency. Like the CLI and Aspire, the library connects to the hosted
+Groundhog service automatically; give it the tunnel name, a credential and the local target.
 
 The library needs the ASP.NET Core shared framework (it serves the tunnel's HTTP/2 with Kestrel and forwards with
 YARP), so it suits apps and tools running on .NET 10 or later.
@@ -183,7 +181,6 @@ using Groundhog.Agent;
 
 var agent = new GroundhogAgent(new GroundhogAgentOptions
 {
-    RelayAddress = new Uri("https://tunnel.example.com"),
     TunnelName = "myapp",
     Credential = new TunnelKeyCredential(Environment.GetEnvironmentVariable("GROUNDHOG_KEY")!),
     LocalTarget = new Uri("http://localhost:5173"),
@@ -222,11 +219,11 @@ GroundhogAgentStopReason reason = await agent.RunAsync(stop.Token);
 - For HTTPS, set `LocalTarget` to the HTTPS origin. Optional `LocalCaFile` and `InsecureLocal` expose the same
   loopback-only controls as the CLI; insecure mode also emits a warning through `LoggerFactory`.
 
-### Your own credential
+### Custom credentials
 
 The agent asks its credential for a token before every connection attempt and sends it as
 `Authorization: <scheme> <token>`. `TunnelKeyCredential` (scheme `GroundhogKey`) is built in. To use another
-sign-in method, derive from `GroundhogCredential`; the relay needs a handler for the same scheme.
+sign-in method, derive from `GroundhogCredential`; the service must accept that scheme.
 
 ```csharp
 public sealed class MyTokenCredential(IMyTokenSource source) : GroundhogCredential

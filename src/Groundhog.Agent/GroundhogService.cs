@@ -4,8 +4,8 @@ namespace Groundhog.Agent;
 public static class GroundhogService
 {
     /// <summary>
-    /// The hosted service address for this client version. Explicit relay addresses remain supported
-    /// for self-hosted services and migrations to a different service address.
+    /// The hosted service address for this client version. Every client uses it by default; an explicit relay address
+    /// is a development and testing override only.
     /// </summary>
     public const string DefaultRelayAddress = "https://groundhog.unifinity.com";
 }

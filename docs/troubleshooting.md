@@ -9,14 +9,14 @@ package reference; include sanitized error text when asking for help.
 | Symptom | Check | Recovery |
 | --- | --- | --- |
 | CLI exits 2 | Arguments, key format, local target | Use `groundhog host --help`; provide one of `--port` and `--target` |
-| CLI exits 3 / credential rejected | Correct relay, exact name, key for that tunnel | Update `GROUNDHOG_KEY` or Aspire secret and restart |
+| CLI exits 3 / credential rejected | Exact name, key for that tunnel | Update `GROUNDHOG_KEY` or Aspire secret and restart |
 | Unknown tunnel after rename/delete | Name on website | Update the name; recreate only if the tunnel was intentionally deleted |
 | Reconnecting after sleep/network change | Network and relay reachability | Let temporary retries run; starts at 1 s and backs off to 30 s with jitter |
 | Earlier client stops when another starts | Same tunnel hosted twice | Use distinct names or stop the duplicate client |
 | Connected but public request fails | Local app listener, Host allowance, certificate | Fix local origin, allowed public host or trust configuration |
 | Relay reports `local-unreachable` | App started and correct port | Open the local URL directly, then retry public URL |
 | Relay reports `timeout` | App returns response headers promptly | Investigate app delays; relay's default header wait is 100 seconds |
-| Incompatible protocol | Relay health advertises protocol 1 | Install compatible client/relay versions; repeated retries cannot fix it |
+| Incompatible protocol | Relay health advertises protocol 1 | Update to a compatible client version; repeated retries cannot fix it |
 
 A client automatically retries temporary failures. Permanent credential, unknown-tunnel and protocol failures stop
 it. CLI Ctrl+C and replacement by a newer agent exit 0; protocol incompatibility exits 1; credential and tunnel
@@ -29,10 +29,12 @@ reads the current name, relay, credential and endpoint. It is disabled while the
 retrying; it cannot start a second overlapping agent. Other resources' environment variables already resolved from
 `PublicAddress` or `PublicHost` retain their values. Restart an affected resource if those values changed.
 
-For a rotated key, update `Parameters:groundhog-key` through Manage User Secrets or your secret configuration.
-For a parameterized renamed tunnel, update `Parameters:groundhog-name` too. A sample asking for three parameters
-is older source; installing a newer package does not rewrite `Program.cs`. Download the current sample into a fresh
-folder and follow its two-parameter walkthrough.
+For a rotated key, update the key parameter through Manage User Secrets or your secret configuration:
+`Parameters:groundhog-<tunnel name>-key` for `WithGroundhogTunnel`, or the parameter you passed to
+`AddGroundhogTunnel`. After renaming a tunnel, change the name in `Program.cs` (or its name parameter); with
+`WithGroundhogTunnel` the key parameter's name changes with it, so enter the key again. A quickstart sample that asks
+for `groundhog-name` or `groundhog-relay` is older source; installing a newer package does not rewrite `Program.cs`.
+Download the current sample into a fresh folder and follow its walkthrough.
 
 ## HTTPS and public hosts
 
@@ -48,14 +50,14 @@ to the public host with `wss` and port 443; the local dev server still listens o
 
 ## Package restore and upgrades
 
-These guides use `0.3.0-preview.3`, published for CLI, Agent, Protocol and Aspire. For a stale feed response, run:
+These guides use `0.4.0-preview.1`, published for CLI, Agent, Protocol and Aspire. For a stale feed response, run:
 
 ```text
 dotnet restore --source https://api.nuget.org/v3/index.json --no-http-cache
 ```
 
 Run in the relevant project/sample directory and verify the selected version in its package reference or central
-versions file. For the tool, use `dotnet tool update --global Groundhog.Cli --version 0.3.0-preview.3`. Restart the
+versions file. For the tool, use `dotnet tool update --global Groundhog.Cli --version 0.4.0-preview.1`. Restart the
 client after updating and verify the public response again. Dashboard last-seen metadata is not proof of a current
 running version, and cached update hints may lag the feed.
 
