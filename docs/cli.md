@@ -16,7 +16,7 @@ and key-management actions; destructive operations still require confirmation.
 
 ![Groundhog home menu rendered by the CLI](images/cli-home.png)
 
-The screenshots use the actual Spectre renderer and synthetic `example.com` data. See
+The screenshots use the actual Spectre renderer and synthetic sample data. See
 [screenshot generation](#refresh-the-screenshots) to reproduce them.
 
 ## Sign in and find tunnels
@@ -60,7 +60,7 @@ groundhog host myapp --target https://localhost:7132
 ```
 
 Supply an existing tunnel's key through `GROUNDHOG_KEY`. Login does not retrieve existing one-time connection keys.
-Keys created or rotated through this CLI are saved securely and are used when the selected workspace and relay match.
+Keys created or rotated through this CLI are saved securely and are used when the selected workspace matches.
 An explicit `--key` or `GROUNDHOG_KEY` takes precedence. A saved key is never sent to a different service address.
 
 ![Live hosting overview with requests and session statistics](images/cli-session.png)
@@ -69,13 +69,13 @@ Interactive hosting shows a live overview. Press **1** for overview, **2** for r
 and **Esc** or **Q** to stop hosting and return. Ctrl+C stops the command. Noninteractive hosting retains the original
 connection/disconnection output; `--verbose` adds request lines. Use `--no-interactive` to select that behavior in a terminal.
 
-The host's existing options remain supported: `--pool`, `--relay`, `--target`, `--port`, `--local-ca`,
-`--insecure-local`, `--key`, and `--verbose`. See [the Agent guide](agent.md) for forwarding and certificate behavior.
+The host's options are `--port`, `--target`, `--local-ca`, `--insecure-local`, `--key`, `--pool` and `--verbose`.
+See [the Agent guide](agent.md) for forwarding and certificate behavior.
 
 ## Save settings and run in the background
 
-`init` guides you through saving a profile for an existing tunnel. Profiles contain a name, target and optional
-service-address override, and contain no keys. Use commands for noninteractive setup:
+`init` guides you through saving a profile for an existing tunnel. Profiles contain a name and a local target,
+and contain no keys. Use commands for noninteractive setup:
 
 ```sh
 groundhog profile save myapp --target http://localhost:5173
@@ -91,7 +91,7 @@ groundhog profile delete myapp
 `host <profile>` runs in the foreground. `start` and `restart` require a saved profile and return after the agent connects.
 The background process is owned by your OS user and runs until stopped, replaced, or terminated; it is not a boot-time
 service. A failed or timed-out start stops its newly launched process; run `host` in the foreground to see its error.
-Profiles currently save only target and service address; use foreground `host` for custom CA, pool or insecure-local options.
+Profiles currently save only the target; use foreground `host` for custom CA, pool or insecure-local options.
 
 Profiles and credentials are stored under the OS local application-data directory in `Groundhog`.
 Set `GROUNDHOG_HOME` to use a separate configuration directory (also useful for isolated automation).

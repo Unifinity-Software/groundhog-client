@@ -8,7 +8,7 @@ Keep `host` compatible and keep credentials out of saved profiles, output and sc
 ## Delivery
 
 1. Add Spectre.Console rendering and an interactive home screen. Redirected input/output uses help and plain output.
-2. Add saved local profiles, guided setup and selection. Profiles contain targets and relay overrides, never keys.
+2. Add saved local profiles, guided setup and selection. Profiles contain targets, never keys.
 3. Add bounded request history and session statistics, with filtering, structured output and live hosting views.
 4. Add local agent discovery/control so another invocation can inspect status, traffic and diagnostics.
 5. Integrate account authentication and remote tunnel list/describe/management against the actual service contract.

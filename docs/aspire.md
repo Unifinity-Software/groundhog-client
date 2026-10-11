@@ -35,51 +35,73 @@ with a permanent failure; the integration does not add a startup dependency on t
 
 ## Add a tunnel
 
-Store `Parameters:groundhog-key` in the AppHost's **Manage User Secrets** editor, or use the Aspire secret
-parameter prompt. Keep the key out of `appsettings.json`, source control and shell history.
-
-Then, in the AppHost:
+In the AppHost, add a tunnel to the resource you want to share:
 
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
 
-var key = builder.AddParameter("groundhog-key", secret: true);
+builder.AddProject<Projects.MyApp_Web>("web").WithGroundhogTunnel("myapp");
 
+builder.Build().Run();
+```
+
+`WithGroundhogTunnel(tunnelName)` connects to the hosted Groundhog service. `tunnelName` is the name created on the
+website, without a URL or domain. It adds:
+
+- a tunnel resource named `<resource name>-tunnel` (`web-tunnel` above), shown in the dashboard;
+- a secret parameter named `groundhog-<tunnel name>-key` (`groundhog-myapp-key` above) for the connection key.
+
+Enter the key when the Aspire dashboard asks for the unresolved parameter, and enable **Save to user secrets** to
+remember it on this computer. Or store `Parameters:groundhog-myapp-key` in the AppHost's **Manage User Secrets**
+editor. Keep the key out of `appsettings.json`, source control and shell history. If you declare a secret parameter
+with that name yourself (for example to add a description), it's reused.
+
+The tunnel forwards to the resource's `https` endpoint, or to its `http` endpoint if it has no `https` one. Pass
+`endpointName` to choose another, for example `WithGroundhogTunnel("myapp", endpointName: "http")`. Building the
+AppHost fails with a message naming the resource if it has no such endpoint. An HTTPS endpoint needs a certificate
+this machine trusts (`dotnet dev-certs https --trust` for ASP.NET Core development certificates). TLS uses the
+endpoint hostname while your app receives the public `Host`. The tunnel starts once the endpoint has its port.
+
+Use `configure` to work with the tunnel, for example to give your app its public address or to turn on request
+logging:
+
+```csharp
+var web = builder.AddProject<Projects.MyApp_Web>("web");
+
+web.WithGroundhogTunnel("myapp", configure: tunnel =>
+{
+    tunnel.WithRequestLogging();
+    web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress)
+       .WithEnvironment("Webhooks__BaseUrl", ReferenceExpression.Create($"{tunnel.Resource.PublicAddress}/webhooks"));
+});
+```
+
+### Explicit form
+
+`AddGroundhogTunnel` adds the same tunnel when you want to choose the resource name or the key parameter yourself,
+or take the tunnel name from a parameter:
+
+```csharp
+var key = builder.AddParameter("groundhog-key", secret: true);
 var web = builder.AddProject<Projects.MyApp_Web>("web");
 
 var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
     .WithReference(web.GetEndpoint("http"));
 
-web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress)
-   .WithEnvironment("Webhooks__BaseUrl", ReferenceExpression.Create($"{tunnel.Resource.PublicAddress}/webhooks"));
-
-builder.Build().Run();
+web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
 ```
 
-- `AddGroundhogTunnel(name, tunnelName, key)` connects to the hosted Groundhog service. `name` is the resource's
-  name in the dashboard; `tunnelName` is the name created on the website, without a URL or domain.
-  The tunnel name can also be a parameter. Enable **Save to user secrets** when entering the key to remember it.
-- To override the service address, for example for testing or a service-address migration, use
-  `AddGroundhogTunnel(name, relayAddress, tunnelName, key)`. The explicit address takes precedence over the default.
-  Both address and tunnel name can be parameters.
-
-The hosted default is shared with the CLI through `GroundhogService.DefaultRelayAddress`. A future default
-hostname change is delivered in a client update; existing installations continue to use their version's
-address unless they supply an explicit override.
+- `AddGroundhogTunnel(name, tunnelName, key)`: `name` is the resource's name in the dashboard; `tunnelName` is the
+  name created on the website. The tunnel name can also be a parameter.
 - `key` must be a secret parameter (`secret: true`); anything else is refused when the AppHost is built.
-- `.WithReference(endpoint)` sets where requests go. HTTP and HTTPS endpoints work; an HTTPS endpoint needs a
-  certificate this machine trusts (`dotnet dev-certs https --trust` for ASP.NET Core development certificates).
-  TLS uses the endpoint hostname while your app receives the public `Host`. The tunnel starts once the endpoint has its
-  port.
+- `.WithReference(endpoint)` sets where requests go. HTTP and HTTPS endpoints work, as above.
 
-To sign in some other way than a connection key, pass any `GroundhogCredential` instead of the key parameter (see
-"Custom credentials" in [agent.md](agent.md)):
-
-```csharp
-builder.AddGroundhogTunnel("tunnel", GroundhogService.DefaultRelayAddress, "myapp", new MyTokenCredential(tokens));
-```
+The hosted service address is defined once in `GroundhogService.DefaultRelayAddress` and shared with the CLI. A future
+address change is delivered in a client update.
 
 ## Use the public address
+
+`tunnel` is the tunnel builder passed to `configure` (or returned by `AddGroundhogTunnel`).
 
 | Value | Example | Use it for |
 | --- | --- | --- |
@@ -92,8 +114,9 @@ Pass either to `WithEnvironment`, or use it inside `ReferenceExpression.Create($
 For a Vite dev server, which refuses host names it doesn't know:
 
 ```csharp
-var frontend = builder.AddViteApp("frontend", "../frontend")
-    .WithEnvironment("VITE_ALLOWED_HOST", tunnel.Resource.PublicHost);
+var frontend = builder.AddViteApp("frontend", "../frontend");
+frontend.WithGroundhogTunnel("myapp", configure: tunnel =>
+    frontend.WithEnvironment("VITE_ALLOWED_HOST", tunnel.Resource.PublicHost));
 ```
 
 ```ts
@@ -116,7 +139,7 @@ you're offline, the tunnel shows the problem in the dashboard and everything els
 If a resource really can't start without the tunnel, say so explicitly:
 
 ```csharp
-webhookWorker.WaitFor(tunnel);
+web.WithGroundhogTunnel("myapp", configure: tunnel => webhookWorker.WaitFor(tunnel));
 ```
 
 `WaitFor` waits until the tunnel is connected, and fails the waiting resource if the tunnel stops for good (for
@@ -163,10 +186,13 @@ starts. A deployed app has its own public address: give it that through its own 
 `PublicAddress`, for example by adding the tunnel only when running locally:
 
 ```csharp
+var web = builder.AddProject<Projects.MyApp_Web>("web");
+
 if (builder.ExecutionContext.IsRunMode)
 {
-    var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
-        .WithReference(web.GetEndpoint("http"));
-    web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
+    web.WithGroundhogTunnel("myapp", configure: tunnel =>
+        web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress));
 }
 ```
+
+The key parameter that `WithGroundhogTunnel` adds is also left out of the manifest.

@@ -21,17 +21,17 @@ tunnel and save its one-time connection key privately. [Create your free workspa
 and [Create a tunnel](https://groundhog.unifinity.com/docs/create-tunnel) describe those steps.
 The client needs the **tunnel name**, not the workspace slug or full public URL.
 
-CLI and Aspire connect to the hosted service automatically. The embedded Agent requires an explicit `RelayAddress`;
-use `GroundhogService.DefaultRelayAddress`. The service owns dashboard and workspace behavior. The CLI can manage
-tunnels through the service's workspace API; workspace creation remains on the website.
+CLI, Aspire and the embedded Agent connect to the hosted service automatically. The service owns dashboard and
+workspace behavior. The CLI can manage tunnels through the service's workspace API; workspace creation remains on
+the website.
 
 ## Select the client
 
 | Client | Best fit | How it runs | Configuration |
 | --- | --- | --- | --- |
-| `Groundhog.Aspire.Hosting` | Applications already orchestrated by Aspire | Agent inside AppHost; no separate CLI process | Secret key parameter and one endpoint reference |
+| `Groundhog.Aspire.Hosting` | Applications already orchestrated by Aspire | Agent inside AppHost; no separate CLI process | `WithGroundhogTunnel("<name>")` and a secret key parameter |
 | `Groundhog.Cli` | Any local HTTP/HTTPS application | `groundhog host` in a terminal | Name, `--port` or `--target`, `GROUNDHOG_KEY` |
-| `Groundhog.Agent` | Custom tools and applications | `GroundhogAgent.RunAsync` in your process | Service address, name, credential, local target |
+| `Groundhog.Agent` | Custom tools and applications | `GroundhogAgent.RunAsync` in your process | Name, credential, local target |
 | `Groundhog.Protocol` | Interoperability and transport building blocks | Library; does not host a tunnel by itself | Protocol constants and primitives |
 
 ![The client opens an outbound encrypted connection and forwards incoming request streams to a local app](images/client-connection.svg)

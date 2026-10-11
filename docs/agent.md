@@ -57,7 +57,6 @@ groundhog host <name> (--port <port> | --target <url>) [options]
 | `--target <url>` | An HTTP or HTTPS origin instead of `--port`, for example `https://localhost:7132`. No credentials, path, query or fragment. |
 | `--local-ca <file>` | Trust a PEM or DER CA certificate or self-signed server certificate for loopback HTTPS only. |
 | `--insecure-local` | Skip certificate validation for loopback HTTPS only; prints a warning. |
-| `--relay <url>` | Optional service-address override, for example for testing or a service-address migration. Normally omitted. |
 | `--key <key>` | The tunnel's connection key. Prefer the `GROUNDHOG_KEY` environment variable (below). |
 | `--pool <n>` | How many connections to keep open to the relay, 1 to 8. Default 2. |
 | `-v`, `--verbose` | Print one line per request. |
@@ -171,8 +170,8 @@ Add the published `Groundhog.Agent` package from nuget.org:
 dotnet add package Groundhog.Agent --version 0.4.0-preview.1
 ```
 
-`Groundhog.Protocol` is restored as a dependency. Unlike the CLI and Aspire, the library requires an explicit
-`RelayAddress`; use `GroundhogService.DefaultRelayAddress` (the hosted service), not the public tunnel URL.
+`Groundhog.Protocol` is restored as a dependency. Like the CLI and Aspire, the library connects to the hosted
+Groundhog service automatically; give it the tunnel name, a credential and the local target.
 
 The library needs the ASP.NET Core shared framework (it serves the tunnel's HTTP/2 with Kestrel and forwards with
 YARP), so it suits apps and tools running on .NET 10 or later.
@@ -182,7 +181,6 @@ using Groundhog.Agent;
 
 var agent = new GroundhogAgent(new GroundhogAgentOptions
 {
-    RelayAddress = new Uri(GroundhogService.DefaultRelayAddress),
     TunnelName = "myapp",
     Credential = new TunnelKeyCredential(Environment.GetEnvironmentVariable("GROUNDHOG_KEY")!),
     LocalTarget = new Uri("http://localhost:5173"),

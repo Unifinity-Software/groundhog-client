@@ -25,14 +25,21 @@ dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.1
 ```
 
 ```csharp
-var key = builder.AddParameter("groundhog-key", secret: true);
-var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
-    .WithReference(web.GetEndpoint("http"));
-web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
+builder.AddProject<Projects.MyApp_Web>("web").WithGroundhogTunnel("myapp");
 ```
 
-Set the key through the AppHost's secret parameter prompt or user-secrets editor. Turn on **Save to user secrets**
-in the prompt if you want Aspire to remember it on this computer; user secrets are outside the repository and are not encrypted.
+`myapp` is the tunnel name you created. This adds a `web-tunnel` resource and a secret parameter,
+`groundhog-myapp-key`. Enter the connection key when the Aspire dashboard asks for it, or set
+`Parameters:groundhog-myapp-key` in the AppHost's user secrets. Turn on **Save to user secrets** in the prompt if you
+want Aspire to remember it on this computer; user secrets are outside the repository and are not encrypted.
+To pass the public address to your app:
+
+```csharp
+var web = builder.AddProject<Projects.MyApp_Web>("web");
+web.WithGroundhogTunnel("myapp", configure: tunnel =>
+    web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress));
+```
+
 See the [package-only quickstart](samples/AspireQuickstart/README.md) and [Aspire guide](docs/aspire.md).
 Install using `dotnet add package`: current Aspire CLI integration search filters package prefixes and
 does not discover this package.

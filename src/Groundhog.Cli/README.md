@@ -34,8 +34,7 @@ Requires .NET 10 or later. See `docs/agent.md` in the source repository for the 
 
 The ASP.NET Core runtime is required (included with the SDK). Set `GROUNDHOG_KEY` through your shell's secure
 environment configuration; avoid a literal key in command history. Create a tunnel in the Groundhog website
-and use its name and connection key. The hosted service address is automatic. `--relay <url>` is an
-optional override, for example for testing or a service-address migration.
+and use its name and connection key. The hosted service address is automatic.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
 `dotnet tool install Groundhog.Cli --version 0.4.0-preview.1` and `dotnet tool run groundhog -- --help`.

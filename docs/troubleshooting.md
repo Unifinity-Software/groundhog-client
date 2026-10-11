@@ -29,10 +29,12 @@ reads the current name, relay, credential and endpoint. It is disabled while the
 retrying; it cannot start a second overlapping agent. Other resources' environment variables already resolved from
 `PublicAddress` or `PublicHost` retain their values. Restart an affected resource if those values changed.
 
-For a rotated key, update `Parameters:groundhog-key` through Manage User Secrets or your secret configuration.
-For a parameterized renamed tunnel, update `Parameters:groundhog-name` too. A sample asking for three parameters
-is older source; installing a newer package does not rewrite `Program.cs`. Download the current sample into a fresh
-folder and follow its two-parameter walkthrough.
+For a rotated key, update the key parameter through Manage User Secrets or your secret configuration:
+`Parameters:groundhog-<tunnel name>-key` for `WithGroundhogTunnel`, or the parameter you passed to
+`AddGroundhogTunnel`. After renaming a tunnel, change the name in `Program.cs` (or its name parameter); with
+`WithGroundhogTunnel` the key parameter's name changes with it, so enter the key again. A quickstart sample that asks
+for `groundhog-name` or `groundhog-relay` is older source; installing a newer package does not rewrite `Program.cs`.
+Download the current sample into a fresh folder and follow its walkthrough.
 
 ## HTTPS and public hosts
 
