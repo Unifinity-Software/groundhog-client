@@ -25,6 +25,8 @@ appsettings.*.local.json
 *.local.bicepparam
 *.env
 .env*
+credentials.dat
+.groundhog/
 
 # Browser-automation scratch (Playwright MCP / CLI write console logs and page snapshots here)
 .playwright-mcp/

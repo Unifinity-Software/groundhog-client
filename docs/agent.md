@@ -24,7 +24,7 @@ You need the .NET 10 SDK or runtime (including the ASP.NET Core runtime, which t
 Install the preview from nuget.org:
 
 ```text
-dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.4
+dotnet tool install --global Groundhog.Cli --version 0.3.0-preview.1
 groundhog --version
 ```
 
@@ -32,7 +32,7 @@ For a local tool scoped to your repository:
 
 ```text
 dotnet new tool-manifest
-dotnet tool install Groundhog.Cli --version 0.2.0-preview.4
+dotnet tool install Groundhog.Cli --version 0.3.0-preview.1
 dotnet tool run groundhog -- --help
 ```
 
@@ -43,6 +43,9 @@ The CLI connects to the hosted Groundhog service by default; create a tunnel on 
 `"status":"ok"` with protocol `1`. A healthy relay advertising only other protocol versions is incompatible.
 
 ## Use the command
+
+See the [illustrated CLI guide](cli.md) for keyboard menus, remote tunnel discovery, profiles, background agents,
+traffic queries and diagnostics. The key-based foreground host reference below also applies to older relays.
 
 ```
 groundhog host <name> (--port <port> | --target <url>) [options]
@@ -166,7 +169,7 @@ and the response carries `X-Groundhog-Error: local-unreachable`.
 Add the published `Groundhog.Agent` package from nuget.org:
 
 ```text
-dotnet add package Groundhog.Agent --version 0.2.0-preview.4
+dotnet add package Groundhog.Agent --version 0.3.0-preview.1
 ```
 
 `Groundhog.Protocol` is restored as a dependency. Unlike the CLI and Aspire defaults, the library requires

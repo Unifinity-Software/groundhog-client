@@ -119,3 +119,47 @@ WebSocket close codes the relay uses:
 `GET /_groundhog/v1/health` on the relay's own address returns `200 OK` with
 `{"status":"ok","version":"<relay version>","protocol":[1]}`. The `/_groundhog/` path prefix is reserved on
 the relay's own address and never forwarded.
+
+## CLI management authentication
+
+This additive HTTPS API does not change hosting protocol version 1. Older relays can host tunnels without
+supporting CLI login. Management endpoints exist only on the relay's own host, never on visitor tunnel hosts.
+
+1. `POST /api/cli/device` (anonymous, empty JSON object) returns `deviceCode` (32 random bytes in canonical base64url),
+   `userCode` (12 uppercase hex characters), `verificationUri`, `expiresIn: 600` and `interval: 5`.
+   The CLI opens the same-origin verification URL and displays the code. Neither code grants API access.
+2. `GET /cli-login?code=<userCode>` requires browser sign-in and shows an explicit approval page with the code.
+   `POST /cli-login` requires the signed-in browser's antiforgery token and a form field `code`.
+   Users approve only a code matching a CLI login they initiated. Approval binds the request to their identity.
+3. `POST /api/cli/token` with `{"deviceCode":"<secret>"}` returns `state: pending|approved|expired`.
+   An approved response additionally carries `accessToken` and `expiresIn: 28800`; an atomic storage transaction
+   consumes the grant once. The CLI polls no faster than `interval` and stops at the device expiry.
+4. Send `Authorization: GroundhogCli <accessToken>` to `/api/me` and workspace APIs under `/api/w/<slug>`.
+   This scheme authorizes management requests, not the tunnel hosting WebSocket. Workspace membership, suspension
+   and action permissions are checked on every request. CLI credentials cannot authorize `/api/platform`.
+   A valid explicit CLI credential uses no browser cookies and does not require browser antiforgery tokens.
+   Invalid or expired credentials return 401; inaccessible workspaces return 404 without exposing their existence.
+5. `POST /api/cli/logout` with that credential revokes it and returns 204. Expiry is absolute at eight hours;
+   no refresh token is issued. Login replaces the CLI's saved local session.
+
+Credentials and polling secrets are never placed in URLs. Storage holds only their SHA-256 hashes, expiry,
+and the approved identity claims. Authorization records are global authentication infrastructure; all tunnel,
+request and usage data remains workspace-partitioned. Expired authentication records are cleaned daily in
+bounded passes. Device/token calls share the relay's link-lookup IP rate limiter and may return 429 with Retry-After.
+
+The CLI uses these existing workspace endpoints (JSON is camelCase):
+
+| Operation | Endpoint |
+| --- | --- |
+| Account and accessible workspaces | `GET /api/me` |
+| Tunnel inventory / create | `GET /api/w/<slug>/tunnels`, `POST` with `{"name":"<name>"}` |
+| Tunnel details / rename / delete | `GET`, `PATCH` with `{"name":"<new-name>"}`, `DELETE /api/w/<slug>/tunnels/<name>` |
+| Rotate / revoke keys | `POST /api/w/<slug>/tunnels/<name>/rotate-key`, `/revoke-key` |
+| Stored usage window | `GET /api/w/<slug>/tunnels/<name>/usage` |
+| Persisted request metadata | `GET /api/w/<slug>/requests?tunnel=<name>&status=<class-or-code>&limit=200` |
+
+Request search returns `{ "entries": [...], "truncated": true|false }`; entries contain completion time,
+method, path, status code and duration plus relay metadata. The CLI does not retrieve request detail bodies/headers.
+Create and rotate return `{ "tunnel": {...}, "connectionKey": "<one-time-key>" }`. The CLI stores this key securely
+and never prints it in normal output. Other management errors use HTTP status codes and problem details;
+the CLI does not echo arbitrary response bodies.

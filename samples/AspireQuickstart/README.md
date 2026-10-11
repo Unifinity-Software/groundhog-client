@@ -2,7 +2,7 @@
 
 Run a small web app on your computer and open it through a public HTTPS address. Groundhog runs inside the Aspire AppHost: you do not need to install the Groundhog CLI or host a backend.
 
-This walkthrough targets **0.2.0-preview.4**. If that version has not appeared on NuGet yet, use the
+This walkthrough targets **0.3.0-preview.1**. If that version has not appeared on NuGet yet, use the
 [published preview.3 walkthrough](https://github.com/Unifinity-Software/groundhog-client/tree/agent-v0.2.0-preview.3/samples/AspireQuickstart) until publication completes.
 
 ## 1. Check your tools
@@ -35,11 +35,11 @@ Clone this repository, or download its ZIP from GitHub's **Code** menu and extra
 ```text
 git clone https://github.com/Unifinity-Software/groundhog-client.git
 cd groundhog-client
-git switch --detach agent-v0.2.0-preview.4
+git switch --detach agent-v0.3.0-preview.1
 cd samples/AspireQuickstart
 ```
 
-For a ZIP, download the **[preview.4 ZIP](https://github.com/Unifinity-Software/groundhog-client/archive/refs/tags/agent-v0.2.0-preview.4.zip)** rather than the default branch, extract it, and open a terminal in its `samples/AspireQuickstart` folder. You should see the `AppHost` and `Web` folders. This sample installs the integration from NuGet; its only project reference is the example web app.
+For a ZIP, download the **[preview.4 ZIP](https://github.com/Unifinity-Software/groundhog-client/archive/refs/tags/agent-v0.3.0-preview.1.zip)** rather than the default branch, extract it, and open a terminal in its `samples/AspireQuickstart` folder. You should see the `AppHost` and `Web` folders. This sample installs the integration from NuGet; its only project reference is the example web app.
 
 ## 4. Start Aspire and enter your two values
 
@@ -108,7 +108,7 @@ To run the published sample alongside an existing Git checkout, first stop the r
 
 ```text
 git fetch origin --tags
-git worktree add ../groundhog-quickstart-preview4 agent-v0.2.0-preview.4
+git worktree add ../groundhog-quickstart-preview4 agent-v0.3.0-preview.1
 cd ../groundhog-quickstart-preview4/samples/AspireQuickstart
 aspire start --apphost AppHost/AppHost.csproj
 ```
