@@ -49,6 +49,11 @@ Use the same [workspace](https://tunnel.unifinity.com/docs/workspace) and
 [tunnel setup](https://tunnel.unifinity.com/docs/create-tunnel) before starting the CLI. Aspire and the CLI connect to the hosted
 service automatically; explicit relay addresses remain available for self-hosting.
 
+## Documentation
+
+Start with the [client handbook](docs/README.md) for client selection and an end-to-end verification checklist.
+Use [troubleshooting](docs/troubleshooting.md) for key changes, HTTPS, reconnecting and public-host errors.
+
 ## Development
 
 ```text

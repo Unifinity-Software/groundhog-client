@@ -12,7 +12,8 @@ It comes in three forms:
 - **`Groundhog.Aspire.Hosting`**, which runs the agent as a resource in a .NET Aspire AppHost: see
   [aspire.md](aspire.md).
 
-You need a relay to connect to (see the functional specification) and, for each tunnel, its name and its
+Before running a client, create or join a workspace on your service and create a tunnel. See the
+[client handbook](README.md) for the setup path. For each tunnel, you need its name and its
 connection key. The key is shown once when the tunnel is created; in single-tunnel mode it's whatever key the
 relay's operator configured.
 
@@ -59,16 +60,18 @@ groundhog host <name> (--port <port> | --target <url>) [options]
 | `--pool <n>` | How many connections to keep open to the relay, 1 to 8. Default 2. |
 | `-v`, `--verbose` | Print one line per request. |
 
-Pass the key through the `GROUNDHOG_KEY` environment variable, so it stays out of your shell history and the
-process list. `--key` wins if you give both. The command never prints the key.
+Pass the key through `GROUNDHOG_KEY` using a hidden prompt, so its literal value stays out of your
+shell history and command-line arguments. The environment still contains the key until cleared. `--key` wins if you give both. The command never prints the key.
 
 ```bash
-export GROUNDHOG_KEY='<your key>'
+read -r -s -p 'Groundhog connection key: ' GROUNDHOG_KEY
+printf '\n'
+export GROUNDHOG_KEY
 groundhog host myapp --port 5173
 ```
 
 ```powershell
-$env:GROUNDHOG_KEY = '<your key>'
+$env:GROUNDHOG_KEY = Read-Host "Groundhog connection key" -MaskInput
 groundhog host myapp --port 5173
 ```
 
@@ -88,7 +91,9 @@ GET /api/health 200 4 ms
 WS /hub 101 93125 ms
 ```
 
-Press Ctrl+C to stop. Requests still in flight get a few seconds to finish.
+Press Ctrl+C to stop. Requests still in flight get a few seconds to finish. Clear the environment afterwards:
+`Remove-Item Env:GROUNDHOG_KEY` in PowerShell or `unset GROUNDHOG_KEY` in Bash.
+For a stopped client or failed public response, follow [troubleshooting](troubleshooting.md).
 
 ### HTTPS local apps
 
@@ -158,13 +163,14 @@ and the response carries `X-Groundhog-Error: local-unreachable`.
 
 ## Use the library
 
-Add the `Groundhog.Agent` package. Until it's on nuget.org, download `Groundhog.Agent.<version>.nupkg` and
-`Groundhog.Protocol.<version>.nupkg` from the release into a folder and add that folder as a package source:
+Add the published `Groundhog.Agent` package from nuget.org:
 
+```text
+dotnet add package Groundhog.Agent --version 0.2.0-preview.4
 ```
-dotnet nuget add source ~/groundhog-packages --name groundhog-local
-dotnet add package Groundhog.Agent --version 0.1.0
-```
+
+`Groundhog.Protocol` is restored as a dependency. Unlike the CLI and Aspire defaults, the library requires
+an explicit `RelayAddress`; use your service's base address, not the public tunnel URL.
 
 The library needs the ASP.NET Core shared framework (it serves the tunnel's HTTP/2 with Kestrel and forwards with
 YARP), so it suits apps and tools running on .NET 10 or later.
