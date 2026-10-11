@@ -1,8 +1,8 @@
 # Groundhog.Aspire.Hosting
 
-A .NET Aspire integration for Groundhog, a self-hosted HTTPS tunnel for local development. It runs a tunnel agent
-inside your AppHost, gives one of your app's endpoints a public HTTPS address through your Groundhog relay, and lets
-other resources use that address.
+A .NET Aspire integration for Groundhog, the hosted HTTPS tunnel service for local development. It runs a tunnel
+agent inside your AppHost, gives one of your app's endpoints a public HTTPS address through the Groundhog service,
+and lets other resources use that address.
 
 ## Install and connect
 
@@ -30,16 +30,16 @@ var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
 web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
 ```
 
-- The relay address and tunnel name can be strings or parameters. The key must be a secret parameter; it's handed
+- The tunnel name can be a string or a parameter. The key must be a secret parameter; it's handed
   to the agent in memory and never shown on a command line, in the dashboard or in a log. Another overload takes
   any `GroundhogCredential`.
 - The dashboard shows the tunnel as connecting, running (with its public address), reconnecting, or failed with
   the reason.
 - A stopped tunnel has a **Reconnect** command in the dashboard. It resolves the current settings again and starts
   a new agent without restarting the AppHost. Active tunnels cannot be restarted with this command.
-- `PublicAddress` (for example `https://myapp.tunnel.example.com`) and `PublicHost` (`myapp.tunnel.example.com`)
+- `PublicAddress` (for example `https://myapp.groundhog.unifinity.com`) and `PublicHost` (`myapp.groundhog.unifinity.com`)
   can be passed to `WithEnvironment` or used in a `ReferenceExpression`.
-- Nothing waits for the tunnel unless it opts in with `WaitFor`, so an unreachable relay never stops your app from
+- Nothing waits for the tunnel unless it opts in with `WaitFor`, so an unreachable service never stops your app from
   starting locally.
 
 ## Request logging
@@ -61,17 +61,10 @@ Use an HTTP local endpoint, or an HTTPS endpoint with a certificate trusted by t
 the tunnel is omitted and its agent does not start. C# AppHosts are supported; TypeScript bindings are not
 currently advertised. The complete package-only example is in `samples/AspireQuickstart`.
 
-## Self-hosting and service-address overrides
+## Service address
 
-For your own relay or a service-address migration, supply the address explicitly:
-
-```csharp
-var tunnel = builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "myapp", key)
-    .WithReference(web.GetEndpoint("http"));
-```
-
-Both the service address and tunnel name also accept parameters. The hosted default is defined once in
-`GroundhogService.DefaultRelayAddress`; an explicit address takes precedence. See
-[the Aspire guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/aspire.md) for more options.
+The hosted service address is defined once in `GroundhogService.DefaultRelayAddress`. Overloads that take an
+explicit address remain available as an override, for example for testing or a service-address migration; an
+explicit address takes precedence. See [the Aspire guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/aspire.md) for more options.
 
 MIT licensed.

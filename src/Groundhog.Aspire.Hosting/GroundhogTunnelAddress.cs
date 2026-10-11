@@ -8,8 +8,8 @@ namespace Groundhog.Aspire.Hosting;
 /// </summary>
 /// <remarks>
 /// Referencing the value doesn't make a resource wait for the tunnel to start. It waits at most a few seconds for
-/// the tunnel's first connection attempt, then falls back to the address the tunnel would have in the relay's normal
-/// mode, so an unreachable relay never stops the app from starting.
+/// the tunnel's first connection attempt, then falls back to the address the tunnel normally has, so an unreachable
+/// service never stops the app from starting.
 /// </remarks>
 public sealed class GroundhogTunnelAddress : IValueProvider, IManifestExpressionProvider, IValueWithReferences
 {
@@ -41,8 +41,8 @@ public sealed class GroundhogTunnelAddress : IValueProvider, IManifestExpression
     IEnumerable<object> IValueWithReferences.References => [Resource];
 
     /// <summary>
-    /// Gets the address: the one the relay announced if the agent connects, otherwise the address the tunnel would
-    /// have in the relay's normal mode. Waits only for the tunnel's settings (for example a parameter that hasn't
+    /// Gets the address: the one the relay announced if the agent connects, otherwise the address the tunnel
+    /// normally has. Waits only for the tunnel's settings (for example a parameter that hasn't
     /// been given a value yet) and, for at most a few seconds, for the first connection attempt.
     /// </summary>
     /// <param name="cancellationToken">Cancels the wait.</param>
@@ -77,7 +77,7 @@ public sealed class GroundhogTunnelAddress : IValueProvider, IManifestExpression
     }
 
     /// <summary>
-    /// The address a tunnel has in the relay's normal mode: <c>&lt;tunnel name&gt;.&lt;relay host&gt;</c>, with the
+    /// The address a tunnel normally has: <c>&lt;tunnel name&gt;.&lt;relay host&gt;</c>, with the
     /// relay's scheme (<c>wss</c> read as <c>https</c>) and port.
     /// </summary>
     internal static Uri? PredictAddress(string? relayAddress, string? tunnelName)

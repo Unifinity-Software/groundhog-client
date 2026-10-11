@@ -1,6 +1,6 @@
 # Groundhog client handbook
 
-Connect one local application to a Groundhog relay using Aspire, a command-line tool, or an embedded Agent.
+Connect one local application to the hosted Groundhog service using Aspire, a command-line tool, or an embedded Agent.
 The clients share protocol version 1 and the same connection and forwarding behavior.
 
 | Task | Guide |
@@ -11,19 +11,19 @@ The clients share protocol version 1 and the same connection and forwarding beha
 | Keyboard menus, tunnel management and traffic queries | [CLI guide](cli.md) |
 | Diagnose failures or update credentials | [Troubleshooting](troubleshooting.md) |
 | Understand ownership and public source | [Source provenance](source-provenance.md) |
-| Implement an interoperable relay | [Protocol contract](protocol.md) |
+| Understand the wire protocol | [Protocol contract](protocol.md) |
 | Build, test or publish packages | [Contributing](../CONTRIBUTING.md), [release procedure](client-release.md) |
 
 ## Before installing
 
-Open your service's website, sign in, and create or join a workspace. Create a tunnel and save its one-time
-connection key privately. The website's `/docs/workspace` and `/docs/create-tunnel` describe those steps for that
-deployment. The client needs the **tunnel name**, not the workspace slug or full public URL.
+Open [the Groundhog website](https://groundhog.unifinity.com), sign in, and create or join a workspace. Create a
+tunnel and save its one-time connection key privately. [Create your free workspace](https://groundhog.unifinity.com/docs/workspace)
+and [Create a tunnel](https://groundhog.unifinity.com/docs/create-tunnel) describe those steps.
+The client needs the **tunnel name**, not the workspace slug or full public URL.
 
-CLI and Aspire use the hosted service by default. For a self-hosted relay, supply its base address explicitly;
-the tunnel and credential must exist on that relay. The embedded Agent requires an explicit relay URI.
-The relay repository owns dashboard and workspace behavior. The CLI can manage tunnels through an upgraded relay's
-workspace API; workspace creation remains on the website.
+CLI and Aspire connect to the hosted service automatically. The embedded Agent requires an explicit `RelayAddress`;
+use `GroundhogService.DefaultRelayAddress`. The service owns dashboard and workspace behavior. The CLI can manage
+tunnels through the service's workspace API; workspace creation remains on the website.
 
 ## Select the client
 
@@ -31,7 +31,7 @@ workspace API; workspace creation remains on the website.
 | --- | --- | --- | --- |
 | `Groundhog.Aspire.Hosting` | Applications already orchestrated by Aspire | Agent inside AppHost; no separate CLI process | Secret key parameter and one endpoint reference |
 | `Groundhog.Cli` | Any local HTTP/HTTPS application | `groundhog host` in a terminal | Name, `--port` or `--target`, `GROUNDHOG_KEY` |
-| `Groundhog.Agent` | Custom tools and applications | `GroundhogAgent.RunAsync` in your process | Explicit relay, name, credential, local target |
+| `Groundhog.Agent` | Custom tools and applications | `GroundhogAgent.RunAsync` in your process | Service address, name, credential, local target |
 | `Groundhog.Protocol` | Interoperability and transport building blocks | Library; does not host a tunnel by itself | Protocol constants and primitives |
 
 ![The client opens an outbound encrypted connection and forwards incoming request streams to a local app](images/client-connection.svg)
@@ -50,13 +50,13 @@ public Host preserved. Local HTTPS is available when configured; public HTTPS do
 
 Keep both the app and client running. Connected describes the relay connection, not the health of your app.
 The tunnel does not deploy your app or authenticate its visitors. Apply app authentication and webhook signature
-validation as usual. For request capture and usage, use your service's `/docs/inspect-traffic` guide.
+validation as usual. For request capture and usage, use the website's [Inspect traffic](https://groundhog.unifinity.com/docs/inspect-traffic) guide.
 
 ## Protect configuration
 
 Use a hidden prompt for `GROUNDHOG_KEY` or an Aspire secret parameter. User secrets are outside the repository,
 but are not encrypted. Never include actual keys in examples, screenshots, logs or issue reports. Treat invitation
-links as private too. Examples in this handbook use `example.com` and placeholders.
+links as private too. Examples in this handbook use placeholders.
 
 After rotating a key in the dashboard, update the secret and restart the stopped client. After renaming, also update
 the name, callbacks and allowed hosts. Use a separate name for each simultaneously running machine or AppHost.

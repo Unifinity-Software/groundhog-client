@@ -77,8 +77,8 @@ The browser should show JSON containing:
 ```json
 {
   "message": "Hello through Groundhog",
-  "publicOrigin": "https://aspire-quickstart.tunnel.example.com",
-  "host": "aspire-quickstart.tunnel.example.com"
+  "publicOrigin": "https://aspire-quickstart.groundhog.unifinity.com",
+  "host": "aspire-quickstart.groundhog.unifinity.com"
 }
 ```
 
@@ -129,6 +129,6 @@ To correct saved values, stop the sample, open **Manage User Secrets** on `AppHo
 
 See the [Aspire integration guide](../../docs/aspire.md). You choose which local endpoint to expose with `.WithReference(...)`; no fixed local port is necessary. This sample uses HTTP on loopback and HTTPS publicly. Local HTTPS endpoints need a certificate trusted by your computer.
 
-For self-hosted Groundhog or a service-address migration, use the explicit-address overload shown in that guide. The client does not create accounts or tunnels. Publish mode omits the development tunnel.
+The client does not create accounts or tunnels. Publish mode omits the development tunnel.
 
 The pictures above are illustrations with placeholder data, not screenshots of a live account.

@@ -69,7 +69,7 @@ internal static class GroundhogCommand
           --target <url>   An HTTP or HTTPS local target, for example https://localhost:7132.
           --local-ca <file> Trust a PEM or DER CA/self-signed certificate for loopback HTTPS only.
           --insecure-local Skip local certificate validation for loopback HTTPS only (unsafe).
-          --relay <url>    Optional service address override for self-hosting or service migrations.
+          --relay <url>    Optional service address override, for testing or service-address migrations.
           --key <key>      The tunnel's connection key. Prefer the GROUNDHOG_KEY environment variable,
                            which keeps the key out of your shell history and process list.
           --pool <n>       Connections to keep open to the relay, 1 to 8 (default 2).

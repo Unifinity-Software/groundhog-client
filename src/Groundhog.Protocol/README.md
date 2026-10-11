@@ -1,6 +1,6 @@
 # Groundhog.Protocol
 
-Shared constants and types for the relay ⇄ agent protocol of Groundhog, a self-hosted HTTPS tunnel for local
+Shared constants and types for the relay ⇄ agent protocol of Groundhog, the hosted HTTPS tunnel service for local
 development.
 The relay and the agent both reference this package, so they agree on every value.
 

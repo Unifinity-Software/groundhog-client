@@ -6,7 +6,7 @@ namespace Groundhog.Aspire.Hosting;
 
 /// <summary>
 /// A Groundhog tunnel in a .NET Aspire AppHost: an agent, running inside the AppHost process, that gives one of the
-/// app's endpoints a public HTTPS address through a Groundhog relay.
+/// app's endpoints a public HTTPS address through the Groundhog service.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -42,7 +42,7 @@ public sealed class GroundhogTunnelResource : Resource
     }
 
     /// <summary>
-    /// The tunnel's public address as an origin, for example <c>https://myapp.tunnel.example.com</c> (no trailing
+    /// The tunnel's public address as an origin, for example <c>https://myapp.groundhog.unifinity.com</c> (no trailing
     /// slash). Use it for public-origin settings and webhook base addresses.
     /// </summary>
     /// <remarks>
@@ -52,15 +52,15 @@ public sealed class GroundhogTunnelResource : Resource
     /// </para>
     /// <para>
     /// The value is the address the relay announces when the agent connects. If the first connection attempt
-    /// fails, or hasn't finished within a few seconds, it's the address the tunnel would have in the relay's
-    /// normal mode, <c>https://&lt;tunnel name&gt;.&lt;relay host&gt;</c>, so resources that use it still start.
+    /// fails, or hasn't finished within a few seconds, it's the address the tunnel normally has,
+    /// <c>https://&lt;tunnel name&gt;.&lt;service host&gt;</c>, so resources that use it still start.
     /// </para>
     /// </remarks>
     public GroundhogTunnelAddress PublicAddress { get; }
 
     /// <summary>
-    /// The host name of <see cref="PublicAddress"/>, for example <c>myapp.tunnel.example.com</c>: what a dev server's
-    /// allowed-hosts setting needs.
+    /// The host name of <see cref="PublicAddress"/>, for example <c>myapp.groundhog.unifinity.com</c>: what a dev
+    /// server's allowed-hosts setting needs.
     /// </summary>
     public GroundhogTunnelAddress PublicHost { get; }
 

@@ -9,9 +9,9 @@ public sealed class GroundhogAgentOptions
     /// <summary>The hosting package and its version. Defaults to the agent library when omitted.</summary>
     public GroundhogClientInfo? Client { get; set; }
     /// <summary>
-    /// The relay's own address, for example <c>https://tunnel.example.com</c>: the tunnel domain in normal mode, or
-    /// the relay's address in single-tunnel mode. <c>https</c> and <c>wss</c> connect with TLS; <c>http</c> and
-    /// <c>ws</c> are for a relay on your own machine. Any path is ignored.
+    /// The Groundhog service's address, normally <see cref="GroundhogService.DefaultRelayAddress"/>. Set another
+    /// address only as an explicit override, for example for testing or a service-address migration. <c>https</c>
+    /// and <c>wss</c> connect with TLS; <c>http</c> and <c>ws</c> are for local testing. Any path is ignored.
     /// </summary>
     public Uri? RelayAddress { get; set; }
 
@@ -62,7 +62,7 @@ public sealed class GroundhogAgentOptions
             || RelayAddress.Scheme is not ("https" or "http" or "wss" or "ws"))
         {
             throw new ArgumentException(
-                "The relay address must be an absolute https:// (or http:// for a local relay) address.",
+                "The relay address must be an absolute https:// address (http:// is accepted for local testing).",
                 nameof(RelayAddress));
         }
 

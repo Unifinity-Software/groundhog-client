@@ -177,8 +177,7 @@ internal sealed class RelayConnector
             ? address
             : null;
 
-    // A relay that doesn't announce the address is taken to be in single-tunnel mode, where the tunnel is
-    // reached at the relay's own address.
+    // When the relay doesn't announce the public address, the relay's own address is shown instead.
     private Uri DefaultPublicAddress()
     {
         var relay = _options.RelayAddress!;

@@ -1,7 +1,7 @@
 # Groundhog in a .NET Aspire AppHost
 
 `Groundhog.Aspire.Hosting` adds a tunnel to a .NET Aspire AppHost. The tunnel gives one of your app's endpoints a
-public HTTPS address through your Groundhog relay, and other resources can use that address in their settings (a
+public HTTPS address through the hosted Groundhog service, and other resources can use that address in their settings (a
 public-origin setting, a webhook base address, a dev server's allowed hosts).
 
 The agent runs inside the AppHost process through the `Groundhog.Agent` library, so there's no tool to install and no
@@ -28,8 +28,8 @@ It needs Aspire 13.6.1 or later and .NET 10. The complete runnable package consu
 public repository existed; releases from this repository include public source links. The NuGet README
 contains the essential setup.
 
-For self-hosting, you can check `GET /_groundhog/v1/health` on the relay's own address. A compatible response includes
-`"status":"ok"` and protocol `1`; another protocol version requires a compatible relay or client.
+You can optionally check `GET https://groundhog.unifinity.com/_groundhog/v1/health`. A compatible response includes
+`"status":"ok"` and protocol `1`; another protocol version requires a client update.
 The sample includes `check-relay.ps1` for this optional preflight. The agent still handles a refused protocol
 with a permanent failure; the integration does not add a startup dependency on the health endpoint.
 
@@ -59,12 +59,13 @@ builder.Build().Run();
 - `AddGroundhogTunnel(name, tunnelName, key)` connects to the hosted Groundhog service. `name` is the resource's
   name in the dashboard; `tunnelName` is the name created on the website, without a URL or domain.
   The tunnel name can also be a parameter. Enable **Save to user secrets** when entering the key to remember it.
-- For self-hosting or a service-address migration, use `AddGroundhogTunnel(name, relayAddress, tunnelName, key)`.
-  The explicit address overrides the default. Both address and tunnel name can be parameters.
+- To override the service address, for example for testing or a service-address migration, use
+  `AddGroundhogTunnel(name, relayAddress, tunnelName, key)`. The explicit address takes precedence over the default.
+  Both address and tunnel name can be parameters.
 
 The hosted default is shared with the CLI through `GroundhogService.DefaultRelayAddress`. A future default
 hostname change is delivered in a client update; existing installations continue to use their version's
-address unless they supply an explicit override. Keep the old service address reachable during migrations.
+address unless they supply an explicit override.
 - `key` must be a secret parameter (`secret: true`); anything else is refused when the AppHost is built.
 - `.WithReference(endpoint)` sets where requests go. HTTP and HTTPS endpoints work; an HTTPS endpoint needs a
   certificate this machine trusts (`dotnet dev-certs https --trust` for ASP.NET Core development certificates).
@@ -72,18 +73,18 @@ address unless they supply an explicit override. Keep the old service address re
   port.
 
 To sign in some other way than a connection key, pass any `GroundhogCredential` instead of the key parameter (see
-"Your own credential" in [agent.md](agent.md)):
+"Custom credentials" in [agent.md](agent.md)):
 
 ```csharp
-builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "myapp", new MyTokenCredential(tokens));
+builder.AddGroundhogTunnel("tunnel", GroundhogService.DefaultRelayAddress, "myapp", new MyTokenCredential(tokens));
 ```
 
 ## Use the public address
 
 | Value | Example | Use it for |
 | --- | --- | --- |
-| `tunnel.Resource.PublicAddress` | `https://myapp.tunnel.example.com` | Public-origin settings, OAuth redirect bases, webhook URLs |
-| `tunnel.Resource.PublicHost` | `myapp.tunnel.example.com` | A dev server's allowed hosts |
+| `tunnel.Resource.PublicAddress` | `https://myapp.groundhog.unifinity.com` | Public-origin settings, OAuth redirect bases, webhook URLs |
+| `tunnel.Resource.PublicHost` | `myapp.groundhog.unifinity.com` | A dev server's allowed hosts |
 
 Pass either to `WithEnvironment`, or use it inside `ReferenceExpression.Create($"...")` to build a longer address.
 `PublicAddress` is an origin: no path and no trailing slash.
@@ -104,11 +105,8 @@ server: { allowedHosts: process.env.VITE_ALLOWED_HOST ? [process.env.VITE_ALLOWE
 
 The address is the one the relay announces when the agent connects. A resource that uses it waits for the tunnel's
 first connection attempt, for at most 5 seconds. If that attempt fails or takes longer, the resource gets the address
-the tunnel would have in the relay's normal mode, `https://<tunnel name>.<relay host>`, and starts anyway.
-
-In single-tunnel mode the public address is the relay's own address, so that fallback is wrong when the relay can't
-be reached. Nothing works through the tunnel then anyway; restart the resource once the tunnel is running if it
-needs the right value.
+the tunnel normally has, `https://<tunnel name>.<service host>` (for example `https://myapp.groundhog.unifinity.com`),
+and starts anyway.
 
 ## It never holds up your app
 
@@ -141,7 +139,7 @@ The command is disabled while the tunnel is active, including automatic reconnec
 start overlapping agents. Environment variables already resolved for other resources retain their existing values.
 
 The tunnel's console log has one line per connection change, for example
-`Connected: https://myapp.tunnel.example.com/ → http://localhost:5173/`, and the reason whenever it disconnects or
+`Connected: https://myapp.groundhog.unifinity.com/ → http://localhost:5173/`, and the reason whenever it disconnects or
 stops. Its details show the relay, the tunnel name and where requests go; the key is never shown.
 
 ### Request logging

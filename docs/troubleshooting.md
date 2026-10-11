@@ -9,14 +9,14 @@ package reference; include sanitized error text when asking for help.
 | Symptom | Check | Recovery |
 | --- | --- | --- |
 | CLI exits 2 | Arguments, key format, local target | Use `groundhog host --help`; provide one of `--port` and `--target` |
-| CLI exits 3 / credential rejected | Correct relay, exact name, key for that tunnel | Update `GROUNDHOG_KEY` or Aspire secret and restart |
+| CLI exits 3 / credential rejected | Exact name, key for that tunnel | Update `GROUNDHOG_KEY` or Aspire secret and restart |
 | Unknown tunnel after rename/delete | Name on website | Update the name; recreate only if the tunnel was intentionally deleted |
 | Reconnecting after sleep/network change | Network and relay reachability | Let temporary retries run; starts at 1 s and backs off to 30 s with jitter |
 | Earlier client stops when another starts | Same tunnel hosted twice | Use distinct names or stop the duplicate client |
 | Connected but public request fails | Local app listener, Host allowance, certificate | Fix local origin, allowed public host or trust configuration |
 | Relay reports `local-unreachable` | App started and correct port | Open the local URL directly, then retry public URL |
 | Relay reports `timeout` | App returns response headers promptly | Investigate app delays; relay's default header wait is 100 seconds |
-| Incompatible protocol | Relay health advertises protocol 1 | Install compatible client/relay versions; repeated retries cannot fix it |
+| Incompatible protocol | Relay health advertises protocol 1 | Update to a compatible client version; repeated retries cannot fix it |
 
 A client automatically retries temporary failures. Permanent credential, unknown-tunnel and protocol failures stop
 it. CLI Ctrl+C and replacement by a newer agent exit 0; protocol incompatibility exits 1; credential and tunnel

@@ -19,8 +19,8 @@ public static class GroundhogHeaders
 
     /// <summary>
     /// Sent by the relay on its <c>101 Switching Protocols</c> answer: the tunnel's public address, for example
-    /// <c>https://myapp.tunnel.example.com</c>, so the agent can show it. An agent connected to a relay that doesn't
-    /// send it assumes single-tunnel mode, where the public address is the relay's own.
+    /// <c>https://myapp.groundhog.unifinity.com</c>, so the agent can show it. An agent connected to a relay that
+    /// doesn't send it shows the relay's own address.
     /// </summary>
     public const string PublicAddress = "X-Groundhog-Public-Address";
 

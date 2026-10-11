@@ -1,7 +1,7 @@
 # Groundhog.Agent
 
-The agent of Groundhog, a self-hosted HTTPS tunnel for local development, as a library you can embed. It keeps an
-outbound connection to a Groundhog relay and forwards each public request to an app on your machine, keeping the
+The agent of Groundhog, the hosted HTTPS tunnel service for local development, as a library you can embed. It keeps
+an outbound connection to the Groundhog service and forwards each public request to an app on your machine, keeping the
 `Host` header, streaming bodies and passing WebSockets through. Dropped connections are reopened by themselves.
 
 ```csharp
@@ -9,7 +9,7 @@ using Groundhog.Agent;
 
 var agent = new GroundhogAgent(new GroundhogAgentOptions
 {
-    RelayAddress = new Uri("https://tunnel.example.com"),
+    RelayAddress = new Uri(GroundhogService.DefaultRelayAddress),
     TunnelName = "myapp",
     Credential = new TunnelKeyCredential(Environment.GetEnvironmentVariable("GROUNDHOG_KEY")!),
     LocalTarget = new Uri("http://localhost:5173"),

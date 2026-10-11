@@ -2,12 +2,12 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/brand/svg/lockups/lockup-tagline-dark.svg">
-  <img src="assets/brand/svg/lockups/lockup-tagline-light.svg" alt="Groundhog: self-hosted HTTPS tunnels" width="400">
+  <img src="assets/brand/svg/lockups/lockup-tagline-light.svg" alt="Groundhog: HTTPS tunnels for local development" width="400">
 </picture>
 
-Groundhog gives local applications a public HTTPS address through the hosted Groundhog service or a self-hosted relay.
+Groundhog gives local applications a public HTTPS address through the hosted Groundhog service at
+[groundhog.unifinity.com](https://groundhog.unifinity.com).
 This repository owns the MIT-licensed developer clients: the Aspire integration, CLI, Agent and Protocol.
-It does not deploy or host the relay.
 
 ## Aspire
 
@@ -46,10 +46,10 @@ groundhog host myapp --port 5173
 
 Run `groundhog` for keyboard menus, or use `login`, `list`, and `describe` to discover remote tunnels.
 Live hosting, local status, request queries, statistics and background agents are documented in the [CLI guide](docs/cli.md).
-Remote management requires an upgraded relay with the CLI authorization API. Supply an existing tunnel's connection key through `GROUNDHOG_KEY`.
+Remote management signs in to the service through its CLI authorization API. Supply an existing tunnel's connection key through `GROUNDHOG_KEY`.
 Use the same [workspace](https://groundhog.unifinity.com/docs/workspace) and
 [tunnel setup](https://groundhog.unifinity.com/docs/create-tunnel) before starting the CLI. Aspire and the CLI connect to the hosted
-service automatically; explicit relay addresses remain available for self-hosting.
+service automatically.
 
 ## Documentation
 

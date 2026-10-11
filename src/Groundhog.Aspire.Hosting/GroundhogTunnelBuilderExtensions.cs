@@ -44,12 +44,15 @@ public static class GroundhogTunnelBuilderExtensions
     }
 
     /// <summary>
-    /// Adds a tunnel that gives an endpoint a public HTTPS address through a Groundhog relay, authenticating with
-    /// the tunnel's connection key.
+    /// Adds a tunnel through an explicit Groundhog service address, authenticating with the tunnel's connection key.
+    /// Use it only to override <see cref="GroundhogService.DefaultRelayAddress"/>, for example for testing or a
+    /// service-address migration.
     /// </summary>
     /// <param name="builder">The AppHost builder.</param>
     /// <param name="name">The resource's name in the AppHost, for example <c>tunnel</c>.</param>
-    /// <param name="relayAddress">The relay's address, for example <c>https://tunnel.example.com</c>.</param>
+    /// <param name="relayAddress">
+    /// The service address, normally <see cref="GroundhogService.DefaultRelayAddress"/>.
+    /// </param>
     /// <param name="tunnelName">The tunnel to host, for example <c>myapp</c>.</param>
     /// <param name="key">
     /// The tunnel's connection key, as a secret parameter (for example <c>builder.AddParameter("groundhog-key",
@@ -58,8 +61,8 @@ public static class GroundhogTunnelBuilderExtensions
     /// <returns>The tunnel. Point it at an endpoint with <see cref="WithReference"/>.</returns>
     /// <exception cref="ArgumentException"><paramref name="key"/> isn't a secret parameter.</exception>
     /// <remarks>
-    /// The relay address and tunnel name are checked when the tunnel starts; a bad value shows the tunnel as failed in
-    /// the dashboard rather than stopping the AppHost.
+    /// The service address and tunnel name are checked when the tunnel starts; a bad value shows the tunnel as failed
+    /// in the dashboard rather than stopping the AppHost.
     /// </remarks>
     public static IResourceBuilder<GroundhogTunnelResource> AddGroundhogTunnel(
         this IDistributedApplicationBuilder builder,
@@ -76,12 +79,13 @@ public static class GroundhogTunnelBuilderExtensions
     }
 
     /// <summary>
-    /// Adds a tunnel whose relay address and tunnel name come from parameters, authenticating with the tunnel's
-    /// connection key.
+    /// Adds a tunnel whose service address and tunnel name come from parameters, authenticating with the tunnel's
+    /// connection key. Use it only to override <see cref="GroundhogService.DefaultRelayAddress"/>, for example for
+    /// testing or a service-address migration.
     /// </summary>
     /// <param name="builder">The AppHost builder.</param>
     /// <param name="name">The resource's name in the AppHost, for example <c>tunnel</c>.</param>
-    /// <param name="relayAddress">A parameter holding the relay's address, for example <c>https://tunnel.example.com</c>.</param>
+    /// <param name="relayAddress">A parameter holding the service address.</param>
     /// <param name="tunnelName">A parameter holding the tunnel to host, for example <c>myapp</c>.</param>
     /// <param name="key">The tunnel's connection key, as a secret parameter.</param>
     /// <returns>The tunnel. Point it at an endpoint with <see cref="WithReference"/>.</returns>
@@ -108,7 +112,9 @@ public static class GroundhogTunnelBuilderExtensions
     /// </summary>
     /// <param name="builder">The AppHost builder.</param>
     /// <param name="name">The resource's name in the AppHost, for example <c>tunnel</c>.</param>
-    /// <param name="relayAddress">The relay's address, for example <c>https://tunnel.example.com</c>.</param>
+    /// <param name="relayAddress">
+    /// The service address, normally <see cref="GroundhogService.DefaultRelayAddress"/>.
+    /// </param>
     /// <param name="tunnelName">The tunnel to host, for example <c>myapp</c>.</param>
     /// <param name="credential">What the agent presents to the relay. It's asked for a token before every connection.</param>
     /// <returns>The tunnel. Point it at an endpoint with <see cref="WithReference"/>.</returns>
@@ -126,12 +132,12 @@ public static class GroundhogTunnelBuilderExtensions
     }
 
     /// <summary>
-    /// Adds a tunnel whose relay address and tunnel name come from parameters, authenticating with any
+    /// Adds a tunnel whose service address and tunnel name come from parameters, authenticating with any
     /// <see cref="GroundhogCredential"/>.
     /// </summary>
     /// <param name="builder">The AppHost builder.</param>
     /// <param name="name">The resource's name in the AppHost, for example <c>tunnel</c>.</param>
-    /// <param name="relayAddress">A parameter holding the relay's address.</param>
+    /// <param name="relayAddress">A parameter holding the service address.</param>
     /// <param name="tunnelName">A parameter holding the tunnel to host.</param>
     /// <param name="credential">What the agent presents to the relay. It's asked for a token before every connection.</param>
     /// <returns>The tunnel. Point it at an endpoint with <see cref="WithReference"/>.</returns>

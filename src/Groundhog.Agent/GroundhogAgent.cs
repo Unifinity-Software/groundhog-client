@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Groundhog.Agent;
 
 /// <summary>
-/// Keeps a tunnel connected to a Groundhog relay and forwards each request that arrives through it to a local app.
+/// Keeps a tunnel connected to the Groundhog service and forwards each request that arrives through it to a local app.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,7 +31,7 @@ namespace Groundhog.Agent;
 /// <code>
 /// var agent = new GroundhogAgent(new GroundhogAgentOptions
 /// {
-///     RelayAddress = new Uri("https://tunnel.example.com"),
+///     RelayAddress = new Uri(GroundhogService.DefaultRelayAddress),
 ///     TunnelName = "myapp",
 ///     Credential = new TunnelKeyCredential(Environment.GetEnvironmentVariable("GROUNDHOG_KEY")!),
 ///     LocalTarget = new Uri("http://localhost:5173"),
