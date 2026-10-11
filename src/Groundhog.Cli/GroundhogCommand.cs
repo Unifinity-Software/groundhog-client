@@ -1,7 +1,6 @@
 using System.Globalization;
 using Groundhog.Agent;
 using Groundhog.Protocol;
-using Spectre.Console;
 
 namespace Groundhog.Cli;
 
