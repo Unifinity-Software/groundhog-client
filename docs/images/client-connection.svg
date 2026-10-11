@@ -9,9 +9,9 @@
 <rect x="466" y="106" width="406" height="196" rx="8" fill="none" stroke="#73869a" stroke-dasharray="5 4"/>
 <text x="482" y="130" font-size="14">Your computer — no inbound internet port</text>
 <rect x="482" y="154" width="166" height="112" rx="6" fill="#fff" stroke="#73869a"/>
-<text x="499" y="186" font-size="20" font-weight="700">Agent</text><text x="499" y="216" font-size="15">CLI / Aspire / library</text><text x="499" y="242" font-size="15">Preserves public Host</text>
+<text x="499" y="186" font-size="20" font-weight="700">Agent</text><text x="499" y="216" font-size="15">CLI / Aspire / library</text><text x="499" y="242" font-size="15">Public Host retained</text>
 <rect x="706" y="154" width="150" height="112" rx="6" fill="#fff" stroke="#73869a"/>
-<text x="720" y="186" font-size="20" font-weight="700">Local app</text><text x="720" y="216" font-size="15">HTTP or HTTPS</text><text x="720" y="242" font-size="15">Your app handles auth</text>
+<text x="720" y="186" font-size="20" font-weight="700">Local app</text><text x="720" y="216" font-size="15">HTTP or HTTPS</text><text x="720" y="242" font-size="15">App authentication</text>
 <path d="M482 166L222 166" stroke="#00707c" stroke-width="2" marker-end="url(#arrow)"/><text x="240" y="151" font-size="14">1. Agent opens outbound TLS connection</text>
 <path d="M220 239L480 239" stroke="#00707c" stroke-width="2" marker-end="url(#arrow)"/><text x="243" y="264" font-size="14">2. Relay sends HTTP/2 request streams</text>
 <path d="M648 207L704 207" stroke="#00707c" stroke-width="2" marker-end="url(#arrow)"/>
