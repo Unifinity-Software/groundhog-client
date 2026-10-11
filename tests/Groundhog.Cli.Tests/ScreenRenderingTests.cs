@@ -1,6 +1,5 @@
 using Groundhog.Cli.Interactive;
 using Groundhog.Cli.Views;
-using Spectre.Console;
 using Spectre.Console.Rendering;
 
 namespace Groundhog.Cli.Tests;
