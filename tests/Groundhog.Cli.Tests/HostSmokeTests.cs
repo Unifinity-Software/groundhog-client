@@ -50,20 +50,20 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
             var attempt = await tunnel.Attempts.Reader.ReadAsync(cancellation);
             Assert.Equal("Groundhog.Cli", attempt.ClientPackage);
             Assert.False(string.IsNullOrEmpty(attempt.ClientVersion));
-            using var request = new HttpRequestMessage(HttpMethod.Get, "http://cli-smoke.tunnel.example.com/echo?code=sample")
+            using var request = new HttpRequestMessage(HttpMethod.Get, "http://cli-smoke.groundhog.unifinity.com/echo?code=sample")
             {
                 Version = HttpVersion.Version20,
                 VersionPolicy = HttpVersionPolicy.RequestVersionExact,
             };
-            request.Headers.Add("X-Forwarded-Host", "cli-smoke.tunnel.example.com");
+            request.Headers.Add("X-Forwarded-Host", "cli-smoke.groundhog.unifinity.com");
             using var response = await connection.Client.SendAsync(request, cancellation);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.Equal("cli-smoke.tunnel.example.com|/echo?code=sample|cli-smoke.tunnel.example.com",
+            Assert.Equal("cli-smoke.groundhog.unifinity.com|/echo?code=sample|cli-smoke.groundhog.unifinity.com",
                 await response.Content.ReadAsStringAsync(cancellation));
 
             await connection.CloseAsync(GroundhogCloseCodes.SessionReplaced, cancellation);
             Assert.Equal(ExitCodes.Stopped, await running.WaitAsync(cancellation));
-            Assert.Contains("https://cli-smoke.tunnel.example.com", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("https://cli-smoke.groundhog.unifinity.com", output.ToString(), StringComparison.Ordinal);
             Assert.DoesNotContain(fixture.Key, output.ToString() + error, StringComparison.Ordinal);
         }
         finally

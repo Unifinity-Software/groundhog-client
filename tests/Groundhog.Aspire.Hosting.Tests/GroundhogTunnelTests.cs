@@ -80,13 +80,13 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         var results = await Task.WhenAll(host.ReconnectAsync(tunnel.Resource), host.ReconnectAsync(tunnel.Resource));
         Assert.Single(results, result => result.Success);
         var running = await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
-        Assert.Equal("https://restart-refused.tunnel.example.com/", Assert.Single(running.Snapshot.Urls).Url);
+        Assert.Equal("https://restart-refused.groundhog.unifinity.com/", Assert.Single(running.Snapshot.Urls).Url);
         Assert.Null(running.Snapshot.StopTimeStamp);
         Assert.Equal(updatedTarget.ToString(), running.Snapshot.Properties.Single(p => p.Name == GroundhogTunnelRunner.TargetProperty).Value);
         Assert.False((await host.ReconnectAsync(tunnel.Resource)).Success);
         var connection = await fixture.Relay.Tunnel("restart-refused").Connections.Reader.ReadAsync(Cancellation);
-        Assert.StartsWith("restart-refused.tunnel.example.com|/echo|", await connection.Client.GetStringAsync(
-            new Uri("http://restart-refused.tunnel.example.com/echo"), Cancellation), StringComparison.Ordinal);
+        Assert.StartsWith("restart-refused.groundhog.unifinity.com|/echo|", await connection.Client.GetStringAsync(
+            new Uri("http://restart-refused.groundhog.unifinity.com/echo"), Cancellation), StringComparison.Ordinal);
         await host.StopAsync();
         Assert.False((await host.ReconnectAsync(tunnel.Resource)).Success);
         Assert.Equal(KnownResourceStates.Finished, (await host.WaitForFinalStateAsync("tunnel")).Snapshot.State?.Text);
@@ -99,7 +99,7 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         var plainKey = builder.AddParameter("plain-key", "not-a-secret");
 
         var error = Assert.Throws<ArgumentException>(
-            () => builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "myapp", plainKey));
+            () => builder.AddGroundhogTunnel("tunnel", "myapp", plainKey));
         Assert.Equal("key", error.ParamName);
     }
 
@@ -121,7 +121,7 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         await host.InitializeAsync(tunnel.Resource);
 
         var running = await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
-        Assert.Equal("https://aspire-up.tunnel.example.com/", Assert.Single(running.Snapshot.Urls).Url);
+        Assert.Equal("https://aspire-up.groundhog.unifinity.com/", Assert.Single(running.Snapshot.Urls).Url);
         var attempt = await fixture.Relay.Tunnel("aspire-up").Attempts.Reader.ReadAsync(Cancellation);
         Assert.Equal("Groundhog.Aspire.Hosting", attempt.ClientPackage);
         Assert.Equal(Groundhog.Agent.GroundhogClientInfo.FromAssembly("Groundhog.Aspire.Hosting",
@@ -129,15 +129,15 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         Assert.DoesNotContain(running.Snapshot.Properties, p => p.Value?.ToString()?.Contains(fixture.Key) == true);
 
         var environment = await ResolveEnvironmentAsync(api.Resource);
-        Assert.Equal("https://aspire-up.tunnel.example.com", environment["PUBLIC_ORIGIN"]);
-        Assert.Equal("aspire-up.tunnel.example.com", environment["ALLOWED_HOST"]);
-        Assert.Equal("https://aspire-up.tunnel.example.com/webhooks", environment["WEBHOOK_URL"]);
+        Assert.Equal("https://aspire-up.groundhog.unifinity.com", environment["PUBLIC_ORIGIN"]);
+        Assert.Equal("aspire-up.groundhog.unifinity.com", environment["ALLOWED_HOST"]);
+        Assert.Equal("https://aspire-up.groundhog.unifinity.com/webhooks", environment["WEBHOOK_URL"]);
 
         // A request through the relay reaches the referenced endpoint, with the public Host kept.
         var connection = await fixture.Relay.Tunnel("aspire-up").Connections.Reader.ReadAsync(Cancellation);
         var echo = await connection.Client.GetStringAsync(
-            new Uri("http://aspire-up.tunnel.example.com/echo"), Cancellation);
-        Assert.StartsWith("aspire-up.tunnel.example.com|/echo|", echo, StringComparison.Ordinal);
+            new Uri("http://aspire-up.groundhog.unifinity.com/echo"), Cancellation);
+        Assert.StartsWith("aspire-up.groundhog.unifinity.com|/echo|", echo, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -195,7 +195,7 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         var time = new FakeTimeProvider();
         var builder = CreateBuilder();
         var key = builder.AddParameter("groundhog-key", fixture.Key, secret: true);
-        var tunnel = builder.AddGroundhogTunnel("tunnel", "https://tunnel.example.com", "slowpoke", key);
+        var tunnel = builder.AddGroundhogTunnel("tunnel", "slowpoke", key);
         tunnel.Resource.TimeProvider = time;
 
         // Never started, like a tunnel whose first connection attempt hangs.
@@ -203,7 +203,7 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         Assert.False(address.IsCompleted);
 
         time.Advance(GroundhogTunnelResource.AddressWaitLimit);
-        Assert.Equal("https://slowpoke.tunnel.example.com", await address.WaitAsync(s_timeout, Cancellation));
+        Assert.Equal("https://slowpoke.groundhog.unifinity.com", await address.WaitAsync(s_timeout, Cancellation));
     }
 
     private static IDistributedApplicationBuilder CreateBuilder() =>

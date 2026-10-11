@@ -15,9 +15,9 @@ using Microsoft.Extensions.Logging;
 namespace Groundhog.Agent.Tests;
 
 /// <summary>
-/// An in-process stand-in for the relay: accepts agent WebSockets on the protocol's connect endpoint and, like the
-/// real relay, acts as the HTTP/2 client over each one. Behaviour is scripted per tunnel name, so one relay serves
-/// every test in a class.
+/// An in-process stand-in for the relay: answers the health endpoint, accepts agent WebSockets on the protocol's
+/// connect endpoint and, like the real relay, acts as the HTTP/2 client over each one. Behaviour is scripted per
+/// tunnel name, so one relay serves every test in a class.
 /// </summary>
 public sealed class FakeRelay : IAsyncDisposable
 {
@@ -68,6 +68,13 @@ public sealed class FakeRelay : IAsyncDisposable
 
     private async Task HandleConnectAsync(HttpContext context)
     {
+        if (context.Request.Path == GroundhogProtocol.HealthPath)
+        {
+            await context.Response.WriteAsJsonAsync(
+                new HealthResponse(HealthResponse.OkStatus, "fake", [GroundhogProtocol.Version]));
+            return;
+        }
+
         if (context.Request.Path != GroundhogProtocol.ConnectPath)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -95,7 +102,7 @@ public sealed class FakeRelay : IAsyncDisposable
             return;
         }
 
-        context.Response.Headers[GroundhogHeaders.PublicAddress] = $"https://{tunnel.Name}.tunnel.example.com";
+        context.Response.Headers[GroundhogHeaders.PublicAddress] = $"https://{tunnel.Name}.groundhog.unifinity.com";
         var webSocket = await context.WebSockets.AcceptWebSocketAsync(GroundhogProtocol.SubProtocol);
         await using var connection = new AgentConnection(webSocket);
         tunnel.AddConnection(connection);

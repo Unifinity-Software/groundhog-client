@@ -27,6 +27,10 @@ internal static class ExitCodes
 /// </summary>
 internal static class GroundhogCommand
 {
+    /// <summary>
+    /// The help text. <c>--relay</c>, accepted by host, profile save, doctor, login and the remote commands, is a
+    /// development and testing override of the hosted service address and deliberately isn't listed.
+    /// </summary>
     public const string Usage = """
         groundhog: give a local app a public HTTPS address through Groundhog.
 
@@ -36,7 +40,7 @@ internal static class GroundhogCommand
           groundhog --help
           groundhog dashboard
           groundhog init
-          groundhog profile list|save|delete [name] [--target <url>] [--relay <url>]
+          groundhog profile list|save|delete [name] [--target <url>]
           groundhog ps [--output json]
           groundhog status|stats <name> [--output json] [--watch]
           groundhog requests <name> [--output json] [--follow] [filters]
@@ -44,8 +48,8 @@ internal static class GroundhogCommand
           groundhog start|restart <saved-profile>
           groundhog logs <name> [--follow] [--output json]
           groundhog wait <name> [--condition connected|ready] [--timeout <seconds>]
-          groundhog doctor [--target <url>] [--relay <url>]
-          groundhog login [--relay <https-origin>]
+          groundhog doctor [--target <url>]
+          groundhog login
           groundhog logout|whoami
           groundhog workspace list|use <slug>
           groundhog list [--workspace <slug>] [--status <state>] [--output json]
@@ -69,7 +73,6 @@ internal static class GroundhogCommand
           --target <url>   An HTTP or HTTPS local target, for example https://localhost:7132.
           --local-ca <file> Trust a PEM or DER CA/self-signed certificate for loopback HTTPS only.
           --insecure-local Skip local certificate validation for loopback HTTPS only (unsafe).
-          --relay <url>    Optional service address override, for testing or service-address migrations.
           --key <key>      The tunnel's connection key. Prefer the GROUNDHOG_KEY environment variable,
                            which keeps the key out of your shell history and process list.
           --pool <n>       Connections to keep open to the relay, 1 to 8 (default 2).

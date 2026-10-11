@@ -34,20 +34,20 @@ public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFi
 
         var connected = await agent.NextStatusAsync();
         Assert.Equal(GroundhogAgentState.Connected, connected.State);
-        Assert.Equal(new Uri("https://host-check.tunnel.example.com"), connected.PublicAddress);
+        Assert.Equal(new Uri("https://host-check.groundhog.unifinity.com"), connected.PublicAddress);
 
         var relay = await tunnel.Connections.Reader.ReadAsync(ct);
-        using var request = new HttpRequestMessage(HttpMethod.Get, "http://host-check.tunnel.example.com/echo?code=abc")
+        using var request = new HttpRequestMessage(HttpMethod.Get, "http://host-check.groundhog.unifinity.com/echo?code=abc")
         {
             Version = HttpVersion.Version20,
             VersionPolicy = HttpVersionPolicy.RequestVersionExact,
         };
-        request.Headers.Add("X-Forwarded-Host", "host-check.tunnel.example.com");
+        request.Headers.Add("X-Forwarded-Host", "host-check.groundhog.unifinity.com");
         using var response = await relay.Client.SendAsync(request, ct);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(
-            "host-check.tunnel.example.com|/echo?code=abc|host-check.tunnel.example.com",
+            "host-check.groundhog.unifinity.com|/echo?code=abc|host-check.groundhog.unifinity.com",
             await response.Content.ReadAsStringAsync(ct));
 
         var record = await agent.NextRequestAsync();
@@ -64,7 +64,7 @@ public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFi
         var relay = await tunnel.Connections.Reader.ReadAsync(ct);
 
         using var response = await relay.Client.GetAsync(
-            "http://streaming.tunnel.example.com/stream", HttpCompletionOption.ResponseHeadersRead, ct);
+            "http://streaming.groundhog.unifinity.com/stream", HttpCompletionOption.ResponseHeadersRead, ct);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
 
         // The first half arrives while the local app is still holding the response open.
@@ -85,7 +85,7 @@ public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFi
         using var visitor = new ClientWebSocket();
         visitor.Options.HttpVersion = HttpVersion.Version20;
         visitor.Options.HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact;
-        await visitor.ConnectAsync(new Uri("ws://sockets.tunnel.example.com/ws"), relay.Client, ct);
+        await visitor.ConnectAsync(new Uri("ws://sockets.groundhog.unifinity.com/ws"), relay.Client, ct);
 
         await visitor.SendAsync("hello"u8.ToArray(), WebSocketMessageType.Text, endOfMessage: true, ct);
         var buffer = new byte[64];
@@ -105,7 +105,7 @@ public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFi
         await using var agent = fixture.StartAgent("nobody-home", localTarget: TunnelFixture.UnusedLocalAddress());
         var relay = await tunnel.Connections.Reader.ReadAsync(ct);
 
-        using var response = await relay.Client.GetAsync("http://nobody-home.tunnel.example.com/", ct);
+        using var response = await relay.Client.GetAsync("http://nobody-home.groundhog.unifinity.com/", ct);
 
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
         Assert.Equal(GroundhogErrors.LocalUnreachable, Assert.Single(response.Headers.GetValues(GroundhogHeaders.Error)));
@@ -156,7 +156,7 @@ public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFi
         await using var agent = fixture.StartAgent("relay-died", timeProvider: time);
         Assert.Equal(GroundhogAgentState.Connected, (await agent.NextStatusAsync()).State);
         var relay = await tunnel.Connections.Reader.ReadAsync(ct);
-        using (await relay.Client.GetAsync("http://relay-died.tunnel.example.com/echo", ct))
+        using (await relay.Client.GetAsync("http://relay-died.groundhog.unifinity.com/echo", ct))
         {
         }
 
@@ -167,6 +167,34 @@ public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFi
         Assert.Equal(GroundhogAgentState.Reconnecting, dropped.State);
         time.Advance(dropped.RetryDelay!.Value);
         Assert.Equal(GroundhogAgentState.Connected, (await agent.NextStatusAsync()).State);
+    }
+
+    [Fact]
+    public void Uses_the_hosted_service_unless_a_relay_address_is_set()
+    {
+        var options = new GroundhogAgentOptions
+        {
+            TunnelName = "myapp",
+            Credential = new TunnelKeyCredential(fixture.Key),
+            LocalTarget = new Uri("http://localhost:5173"),
+        };
+
+        Assert.Equal(new Uri(GroundhogService.DefaultRelayAddress), options.RelayAddress);
+        options.Validate();
+        _ = new GroundhogAgent(options); // Nothing connects until RunAsync.
+        Assert.Equal(
+            new Uri($"wss://groundhog.unifinity.com{GroundhogProtocol.ConnectPath}?{GroundhogProtocol.TunnelQueryParameter}=myapp"),
+            RelayConnector.BuildConnectUri(options.RelayAddress!, "myapp"));
+
+        // An explicit override is still checked like any other setting.
+        options.RelayAddress = fixture.Relay.Address;
+        options.Validate();
+        foreach (var invalid in new Uri?[] { null, new("ftp://groundhog.unifinity.com"), new("/relay", UriKind.Relative) })
+        {
+            options.RelayAddress = invalid;
+            var error = Assert.Throws<ArgumentException>(options.Validate);
+            Assert.Equal(nameof(GroundhogAgentOptions.RelayAddress), error.ParamName);
+        }
     }
 
     [Fact]

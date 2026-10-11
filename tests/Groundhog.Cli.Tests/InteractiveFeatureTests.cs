@@ -80,7 +80,7 @@ public sealed class InteractiveFeatureTests
         try
         {
             var store = new CredentialStore(directory);
-            var session = new LoginSession("https://tunnel.example.com", "sample-secret", DateTimeOffset.UtcNow.AddHours(1), "example", new());
+            var session = new LoginSession("https://groundhog.unifinity.com", "sample-secret", DateTimeOffset.UtcNow.AddHours(1), "example", new());
             store.Save(session);
             Assert.Equal(session.Token, store.Read()!.Token);
             Assert.DoesNotContain(session.Token, session.ToString(), StringComparison.Ordinal);
@@ -102,7 +102,7 @@ public sealed class InteractiveFeatureTests
     public async Task Management_uses_explicit_credentials_and_does_not_echo_server_secrets()
     {
         using var handler = new RecordingHandler();
-        using var client = new ManagementClient("https://tunnel.example.com", "sample-token", handler);
+        using var client = new ManagementClient("https://groundhog.unifinity.com", "sample-token", handler);
         var result = await client.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, TestContext.Current.CancellationToken);
         Assert.Equal("Example", result.DisplayName);
         Assert.Equal("GroundhogCli sample-token", handler.Authorization);
@@ -110,7 +110,7 @@ public sealed class InteractiveFeatureTests
         var exception = await Assert.ThrowsAsync<ManagementException>(() => client.SendAsync<object>(HttpMethod.Get,
             "/api/w/missing/tunnels", null, TestContext.Current.CancellationToken));
         Assert.DoesNotContain("server-secret", exception.Message, StringComparison.Ordinal);
-        Assert.Throws<ArgumentException>(() => new ManagementClient("http://example.com", "sample-token"));
+        Assert.Throws<ArgumentException>(() => new ManagementClient("http://groundhog.unifinity.com", "sample-token"));
         Assert.Equal("/api/w/example/tunnels/sample", ManagementClient.TunnelPath("example", "sample"));
     }
 
@@ -164,25 +164,8 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
             { Directory.Delete(directory, true); }
         }
 
-        async Task<(int ExitCode, string Output)> RunProcessAsync(string[] args)
-        {
-            var executable = Environment.GetEnvironmentVariable("GROUNDHOG_CLI_SMOKE_PATH");
-            var start = new ProcessStartInfo(executable ?? "dotnet")
-            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-            if (executable is null) { start.ArgumentList.Add(typeof(GroundhogCommand).Assembly.Location); }
-            foreach (var arg in args) { start.ArgumentList.Add(arg); }
-            start.Environment["GROUNDHOG_HOME"] = directory;
-            start.Environment["GROUNDHOG_KEY"] = fixture.Key;
-            using var process = Process.Start(start)!;
-            var stdout = process.StandardOutput.ReadToEndAsync(cancellation);
-            var stderr = process.StandardError.ReadToEndAsync(cancellation);
-            try
-            {
-                await process.WaitForExitAsync(cancellation);
-                return (process.ExitCode, await stdout + await stderr);
-            }
-            finally { if (!process.HasExited) { process.Kill(entireProcessTree: true); } }
-        }
+        Task<(int ExitCode, string Output)> RunProcessAsync(string[] args) =>
+            CliProcess.RunAsync(args, directory, fixture.Key, cancellation);
     }
     [Fact(Timeout = 30000)]
     public async Task Another_invocation_can_query_traffic_and_stop_the_host_without_seeing_keys_or_query_strings()
@@ -196,7 +179,7 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
         {
             var connection = await fixture.Relay.Tunnel("control-smoke").Connections.Reader.ReadAsync(cancellation);
             var registration = Assert.Single(LocalSessions.Registrations(), r => r.Name == "control-smoke");
-            using var request = new HttpRequestMessage(HttpMethod.Get, "http://control-smoke.tunnel.example.com/echo?token=secret-query")
+            using var request = new HttpRequestMessage(HttpMethod.Get, "http://control-smoke.groundhog.unifinity.com/echo?token=secret-query")
             { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact };
             using var response = await connection.Client.SendAsync(request, cancellation);
             await response.Content.ReadAsStringAsync(cancellation);
@@ -210,5 +193,34 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
             Assert.DoesNotContain(LocalSessions.Registrations(), r => r.Pipe == registration.Pipe);
         }
         finally { stop.Cancel(); await running.WaitAsync(cancellation); }
+    }
+}
+
+/// <summary>Runs the real CLI in a child process with its own configuration directory.</summary>
+internal static class CliProcess
+{
+    /// <summary>
+    /// Runs <c>groundhog</c> (the packed tool when <c>GROUNDHOG_CLI_SMOKE_PATH</c> is set) and returns its exit code
+    /// with stdout and stderr combined.
+    /// </summary>
+    internal static async Task<(int ExitCode, string Output)> RunAsync(
+        string[] args, string home, string? key, CancellationToken cancellation)
+    {
+        var executable = Environment.GetEnvironmentVariable("GROUNDHOG_CLI_SMOKE_PATH");
+        var start = new ProcessStartInfo(executable ?? "dotnet")
+        { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        if (executable is null) { start.ArgumentList.Add(typeof(GroundhogCommand).Assembly.Location); }
+        foreach (var arg in args) { start.ArgumentList.Add(arg); }
+        start.Environment["GROUNDHOG_HOME"] = home;
+        if (key is not null) { start.Environment["GROUNDHOG_KEY"] = key; }
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync(cancellation);
+        var stderr = process.StandardError.ReadToEndAsync(cancellation);
+        try
+        {
+            await process.WaitForExitAsync(cancellation);
+            return (process.ExitCode, await stdout + await stderr);
+        }
+        finally { if (!process.HasExited) { process.Kill(entireProcessTree: true); } }
     }
 }

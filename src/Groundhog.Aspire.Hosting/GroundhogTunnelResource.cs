@@ -10,9 +10,11 @@ namespace Groundhog.Aspire.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Add one with <see cref="GroundhogTunnelBuilderExtensions.AddGroundhogTunnel(IDistributedApplicationBuilder, string, string, string, IResourceBuilder{ParameterResource})"/>
-/// and point it at an endpoint with
-/// <see cref="GroundhogTunnelBuilderExtensions.WithReference(IResourceBuilder{GroundhogTunnelResource}, EndpointReference)"/>.
+/// Add one to a resource with
+/// <see cref="GroundhogTunnelBuilderExtensions.WithGroundhogTunnel{T}(IResourceBuilder{T}, string, string?, Action{IResourceBuilder{GroundhogTunnelResource}}?)"/>,
+/// or explicitly with
+/// <see cref="GroundhogTunnelBuilderExtensions.AddGroundhogTunnel(IDistributedApplicationBuilder, string, string, IResourceBuilder{ParameterResource})"/>
+/// and <see cref="GroundhogTunnelBuilderExtensions.WithReference(IResourceBuilder{GroundhogTunnelResource}, EndpointReference)"/>.
 /// The dashboard shows it as connecting, running (with the public address), reconnecting, or failed with the reason.
 /// </para>
 /// <para>

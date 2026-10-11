@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Groundhog.Protocol;
 using Microsoft.Extensions.Logging;
 
@@ -9,11 +10,15 @@ public sealed class GroundhogAgentOptions
     /// <summary>The hosting package and its version. Defaults to the agent library when omitted.</summary>
     public GroundhogClientInfo? Client { get; set; }
     /// <summary>
-    /// The Groundhog service's address, normally <see cref="GroundhogService.DefaultRelayAddress"/>. Set another
-    /// address only as an explicit override, for example for testing or a service-address migration. <c>https</c>
-    /// and <c>wss</c> connect with TLS; <c>http</c> and <c>ws</c> are for local testing. Any path is ignored.
+    /// The Groundhog service's address. Defaults to <see cref="GroundhogService.DefaultRelayAddress"/>; leave it unset.
     /// </summary>
-    public Uri? RelayAddress { get; set; }
+    /// <remarks>
+    /// A development and testing override only, for example to run against a local or fake relay. <c>https</c> and
+    /// <c>wss</c> connect with TLS; <c>http</c> and <c>ws</c> are for local testing. Any path is ignored. An explicitly
+    /// set value is validated like every other setting.
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public Uri? RelayAddress { get; set; } = new(GroundhogService.DefaultRelayAddress);
 
     /// <summary>The tunnel to host, for example <c>myapp</c>. Lowercase letters, digits and hyphens.</summary>
     public string? TunnelName { get; set; }

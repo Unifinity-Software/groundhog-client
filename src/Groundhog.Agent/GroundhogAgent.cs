@@ -31,7 +31,6 @@ namespace Groundhog.Agent;
 /// <code>
 /// var agent = new GroundhogAgent(new GroundhogAgentOptions
 /// {
-///     RelayAddress = new Uri(GroundhogService.DefaultRelayAddress),
 ///     TunnelName = "myapp",
 ///     Credential = new TunnelKeyCredential(Environment.GetEnvironmentVariable("GROUNDHOG_KEY")!),
 ///     LocalTarget = new Uri("http://localhost:5173"),
