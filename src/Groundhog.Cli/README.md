@@ -4,7 +4,7 @@ The `groundhog` command of Groundhog, the hosted HTTPS tunnel service for local 
 your machine a public HTTPS address through the Groundhog service.
 
 ```
-dotnet tool install --global Groundhog.Cli --version 0.3.0-preview.3
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.1
 groundhog host myapp --port 5173
 ```
 
@@ -38,7 +38,7 @@ and use its name and connection key. The hosted service address is automatic. `-
 optional override, for example for testing or a service-address migration.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
-`dotnet tool install Groundhog.Cli --version 0.3.0-preview.3` and `dotnet tool run groundhog -- --help`.
+`dotnet tool install Groundhog.Cli --version 0.4.0-preview.1` and `dotnet tool run groundhog -- --help`.
 Source and the full guide are available in the public Groundhog client repository.
 
 MIT licensed.
