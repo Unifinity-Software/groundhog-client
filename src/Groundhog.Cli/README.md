@@ -12,7 +12,9 @@ groundhog host myapp --port 5173
 groundhog host <name> (--port <port> | --target <url>) [options]
 ```
 
-Run `groundhog` for keyboard menus, or `groundhog dashboard` explicitly. Arrow keys and Enter navigate menus.
+Run `groundhog` (or `groundhog dashboard`) for a full-screen terminal app: account, tunnels and local agents as
+dashboards, tunnel actions, sign-in, diagnostics and a live hosting view. Arrow keys and Enter navigate, Esc goes back
+and Q quits; your terminal is restored on exit.
 Use `login`, `workspace list`, `list` and `describe <name>` to discover your remote tunnels.
 Local `ps`, `status`, `stats`, `requests`, `logs`, `stop`, `doctor` and `wait` work independently of account login.
 Use `init` or `profile save` to save a target, then `host <profile>` or `start <profile>` to run it.

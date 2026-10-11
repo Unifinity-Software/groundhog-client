@@ -1,6 +1,6 @@
 # Groundhog CLI
 
-Groundhog provides keyboard menus, live tunnel monitoring and commands for scripts.
+Groundhog provides a full-screen terminal app, live tunnel dashboards and commands for scripts.
 Requires .NET 10 and the ASP.NET Core runtime (both are included with the SDK).
 
 ```sh
@@ -8,15 +8,83 @@ dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.1
 groundhog
 ```
 
-In an interactive terminal, `groundhog` opens the home menu. `groundhog dashboard` opens it explicitly.
-Use the arrow keys and Enter. Select **Back** to return or **Quit** to exit; Ctrl+C cancels a prompt.
-The remote tunnel picker supports typing to search. Redirected input/output prints help instead of opening a menu.
-The workspace menu selects your default workspace. The tunnel menu offers creation and permitted rename, delete,
-and key-management actions; destructive operations still require confirmation.
+In an interactive terminal, `groundhog` (or `groundhog dashboard`) opens a full-screen app. It runs in the terminal's
+alternate screen, so every view is drawn in full and replaced rather than printed below the last one, and leaving the
+app restores your terminal and its scrollback exactly as they were. Terminals without an alternate screen are cleared
+instead. Redirected input or output, and `--no-interactive`, print help instead of opening the app; scripts are unaffected.
 
-![Groundhog home menu rendered by the CLI](images/cli-home.png)
+![The Groundhog boot screen](images/cli-boot.png)
 
-The screenshots use the actual Spectre renderer and synthetic sample data. See
+A short boot screen shows the version, your account and workspace and how many tunnels are connected. Any key skips it,
+and it never lasts longer than a second.
+
+### The menu
+
+![The main menu with a preview of the highlighted entry](images/cli-menu.png)
+
+Every screen has the same frame: a header bar with the version, where you are, your account and workspace; the body; a
+status line for the outcome of the last action; and a footer listing the keys that work on that screen. The menu lists
+the app's screens on the left. On terminals at least 100 columns wide, the right pane previews the highlighted entry
+(hovering **Tunnels** shows the tunnel table). Narrower terminals, down to 80×24, show the menu with a summary instead,
+and dashboards stack their panels and drop less important columns.
+
+![The menu at 80×24](images/cli-narrow.png)
+
+| Screen | Shows |
+| --- | --- |
+| Home | Account and workspace, tunnels with state, address, requests and data, agents on this machine, and requests per tunnel in the last hour |
+| Tunnels | The workspace's tunnels; Enter opens a tunnel, N creates one |
+| Tunnel detail | Public URL, state, traffic totals, a status-class breakdown, requests per minute and the service's recent request log, with actions |
+| Running agents | Agents hosting from this machine; Enter opens a live view of one, S stops it |
+| Saved profiles | Profiles and whether each is running; Enter hosts one here, B starts it in the background, A adds, D deletes |
+| Workspaces | Your workspaces as a tree with the highlighted workspace's tunnels; Enter makes it the default |
+| Diagnostics | The doctor checks as a live checklist: service health, sign-in, local agents and each saved profile's target |
+| Sign in | Browser-approved sign-in with the code shown large; sign out when already signed in |
+| Help | Every key, and the version |
+
+![The home dashboard](images/cli-home.png)
+
+### Keys
+
+| Key | Action |
+| --- | --- |
+| ↑ ↓ (or j k), Home, End, PgUp, PgDn | Move the highlight |
+| Enter | Open the highlighted item |
+| 1–9 | Open a menu entry directly |
+| Esc or Backspace | Back to the previous screen |
+| R | Refresh |
+| ? or F1 | Help |
+| Q | Quit (Ctrl+C also quits) |
+
+Data refreshes by itself while a dashboard is open: local agents every few seconds, the account and tunnels every 30
+seconds. Text entry (a tunnel name, a local target) and confirmations appear inside the frame; while you type, letters
+are text rather than shortcuts.
+
+### Tunnels and their actions
+
+![The tunnel list](images/cli-tunnels.png)
+
+![A tunnel's dashboard](images/cli-tunnel-detail.png)
+
+The tunnel dashboard lists the actions your role permits:
+
+| Key | Action |
+| --- | --- |
+| O | Open the public URL in your browser (the address is shown when no browser is available) |
+| C | Copy the public URL through your terminal's clipboard support (OSC 52); the address is shown either way |
+| H | Host the tunnel from this machine: enter the local target, then the live view opens |
+| N | Rename (asks for the new name) |
+| K | Rotate the connection key and save the new one on this machine |
+| X | Revoke every key |
+| D | Delete |
+
+Rotate, revoke and delete ask for confirmation inside the frame; Y confirms and N or Esc cancels. Each action runs the
+same code as its command (`open`, `rename`, `key rotate`, `key revoke`, `delete`), so permissions, saved keys and
+messages are identical.
+
+![Deleting a tunnel asks first](images/cli-confirm.png)
+
+The screenshots are the real renderer's output with synthetic sample data. See
 [screenshot generation](#refresh-the-screenshots) to reproduce them.
 
 ## Sign in and find tunnels
@@ -32,7 +100,10 @@ groundhog list
 groundhog describe myapp
 ```
 
-Login displays an approval code and opens the service's sign-in page when interactive. Sign in through the browser,
+Login displays an approval code and opens the service's sign-in page when interactive. In the app, **Sign in** shows
+the code in large type with the address and waits for approval; Esc cancels.
+
+![Signing in from the app](images/cli-sign-in.png) Sign in through the browser,
 check that its code matches your terminal, and approve CLI access. In a headless shell, open the printed URL on
 another device. The code expires after ten minutes; the resulting CLI session expires after eight hours.
 Signing in replaces the saved session.
@@ -63,11 +134,16 @@ Supply an existing tunnel's key through `GROUNDHOG_KEY`. Login does not retrieve
 Keys created or rotated through this CLI are saved securely and are used when the selected workspace matches.
 An explicit `--key` or `GROUNDHOG_KEY` takes precedence. A saved key is never sent to a different service address.
 
-![Live hosting overview with requests and session statistics](images/cli-session.png)
+![Live hosting dashboard with requests, status classes and connection events](images/cli-session.png)
 
-Interactive hosting shows a live overview. Press **1** for overview, **2** for recent requests, **3** for statistics,
-and **Esc** or **Q** to stop hosting and return. Ctrl+C stops the command. Noninteractive hosting retains the original
-connection/disconnection output; `--verbose` adds request lines. Use `--no-interactive` to select that behavior in a terminal.
+In a terminal, `host` replaces its line-by-line output with a live dashboard in the alternate screen: the public URL,
+local target, state, totals, HTTP p95 and reconnects; a status-class breakdown; the latest requests; and connection
+events. Press **1** for the overview, **2** for a full-height request list and **3** for statistics (session totals,
+p50/p95, status classes and requests per minute). **Esc**, **Backspace** or **Q** stops hosting. Started from the
+command line, the terminal is then restored and the command prints `Stopped.` and exits as before; started from the
+app (a tunnel's **H** or a saved profile), you return to the screen you came from. Ctrl+C stops the command.
+Noninteractive hosting retains the original connection/disconnection output; `--verbose` adds request lines. Use
+`--no-interactive` to select that behavior in a terminal.
 
 The host's options are `--port`, `--target`, `--local-ca`, `--insecure-local`, `--key`, `--pool` and `--verbose`.
 See [the Agent guide](agent.md) for forwarding and certificate behavior.
@@ -145,12 +221,16 @@ groundhog wait myapp --condition ready --timeout 30
 ```
 
 Doctor checks relay health/protocol compatibility and, when provided, the local target with a HEAD request.
+The app's **Diagnostics** screen runs the same checks, plus your sign-in, local agents and every saved profile's
+target, as an animated checklist.
+
+![Diagnostics as a checklist](images/cli-diagnostics.png)
 Any HTTP response proves target reachability; it does not prove application health. `wait --condition connected`
 requires a live relay connection; `ready` additionally requires a successful local HEAD response. Readiness is local
 and does not test public DNS or end-to-end visitor forwarding. Diagnostics preserve normal TLS validation.
 
-Use `--output json` for read commands, `--no-interactive` to disable menus, and `--no-color` (or `NO_COLOR`) to disable
-colors. Errors go to stderr. Exit codes: 0 success/clean stop, 1 operational failure, 2 invalid arguments/local configuration,
+Use `--output json` for read commands, `--no-interactive` to disable the app and live views, and `--no-color` (or
+`NO_COLOR`) to disable colors; the app keeps its markers (▶, ●, ○, ✓, ✗) without color. Errors go to stderr. Exit codes: 0 success/clean stop, 1 operational failure, 2 invalid arguments/local configuration,
 3 a rejected hosting key or unknown hosted tunnel. Every command supports `--help`.
 
 ## Manage tunnel definitions
@@ -180,5 +260,8 @@ node tools/cli-screenshots.cjs artifacts/screenshots docs/images
 ```
 
 The screenshot script requires the `playwright` Node package and its Chromium browser (install in a temporary tooling
-directory, then set `NODE_PATH` to that directory's `node_modules`). The captures are renderer screenshots using public
-sample data, not screenshots of a production account.
+directory, then set `NODE_PATH` to that directory's `node_modules`). It paints each exported frame cell by cell, like a
+terminal. The captures use public sample data, not a production account.
+
+The pixel-art groundhog on the boot and help screens is generated from the brand icon with
+`node tools/groundhog-pixels.cjs`, which rewrites `src/Groundhog.Cli/Views/GroundhogPixels.cs`.
