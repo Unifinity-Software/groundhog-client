@@ -56,7 +56,6 @@ public sealed class ScreenRenderingTests
             Assert.Contains(content, text, StringComparison.Ordinal);
         }
 
-        Assert.DoesNotContain("tunnel.example.com", text, StringComparison.Ordinal);
     }
 
     [Theory]

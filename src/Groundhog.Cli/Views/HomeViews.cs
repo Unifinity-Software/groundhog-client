@@ -233,7 +233,9 @@ internal static class HomeViews
                 new Layout("about", Theme.Section("About", side)).Ratio(2));
         }
 
-        return new Rows(Theme.Section("Keys", keys), Theme.Section("About", about));
+        // Narrow terminals keep the keys and one line about the version.
+        return new Rows(Theme.Section("Keys", keys),
+            new Markup($" [bold {Theme.SignalTag}]Groundhog CLI[/] {Theme.Dim(Theme.Safe(version) + " · https://groundhog.unifinity.com")}"));
     }
 }
 
