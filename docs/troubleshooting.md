@@ -48,14 +48,14 @@ to the public host with `wss` and port 443; the local dev server still listens o
 
 ## Package restore and upgrades
 
-These guides use `0.3.0-preview.1`, published for CLI, Agent, Protocol and Aspire. For a stale feed response, run:
+These guides use `0.3.0-preview.3`, published for CLI, Agent, Protocol and Aspire. For a stale feed response, run:
 
 ```text
 dotnet restore --source https://api.nuget.org/v3/index.json --no-http-cache
 ```
 
 Run in the relevant project/sample directory and verify the selected version in its package reference or central
-versions file. For the tool, use `dotnet tool update --global Groundhog.Cli --version 0.3.0-preview.1`. Restart the
+versions file. For the tool, use `dotnet tool update --global Groundhog.Cli --version 0.3.0-preview.3`. Restart the
 client after updating and verify the public response again. Dashboard last-seen metadata is not proof of a current
 running version, and cached update hints may lag the feed.
 
