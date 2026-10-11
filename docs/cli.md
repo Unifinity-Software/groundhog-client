@@ -4,7 +4,7 @@ Groundhog provides keyboard menus, live tunnel monitoring and commands for scrip
 Requires .NET 10 and the ASP.NET Core runtime (both are included with the SDK).
 
 ```sh
-dotnet tool install --global Groundhog.Cli --version 0.3.0-preview.1
+dotnet tool install --global Groundhog.Cli --version 0.3.0-preview.3
 groundhog
 ```
 
