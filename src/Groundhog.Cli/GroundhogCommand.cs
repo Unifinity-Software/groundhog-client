@@ -1,6 +1,7 @@
 using System.Globalization;
 using Groundhog.Agent;
 using Groundhog.Protocol;
+using Spectre.Console;
 
 namespace Groundhog.Cli;
 
@@ -33,6 +34,34 @@ internal static class GroundhogCommand
           groundhog host <name> (--port <port> | --target <url>) [options]
           groundhog --version
           groundhog --help
+          groundhog dashboard
+          groundhog init
+          groundhog profile list|save|delete [name] [--target <url>] [--relay <url>]
+          groundhog ps [--output json]
+          groundhog status|stats <name> [--output json] [--watch]
+          groundhog requests <name> [--output json] [--follow] [filters]
+          groundhog stop <name>
+          groundhog start|restart <saved-profile>
+          groundhog logs <name> [--follow] [--output json]
+          groundhog wait <name> [--condition connected|ready] [--timeout <seconds>]
+          groundhog doctor [--target <url>] [--relay <url>]
+          groundhog login [--relay <https-origin>]
+          groundhog logout|whoami
+          groundhog workspace list|use <slug>
+          groundhog list [--workspace <slug>] [--status <state>] [--output json]
+          groundhog describe <name> [--workspace <slug>] [--output json]
+          groundhog create <name> [--workspace <slug>]
+          groundhog rename <old-name> <new-name> [--workspace <slug>] [--yes]
+          groundhog delete <name> [--workspace <slug>] [--yes]
+          groundhog key rotate|revoke <name> [--workspace <slug>] [--yes]
+          groundhog open <name> [--workspace <slug>]
+          groundhog stats|requests <name> --remote [--workspace <slug>] [--output json]
+
+        Requests options: --status 5xx|<code>, --method <method>, --path <substring>,
+                          --since <number>s|m|h, --min-duration <milliseconds>, --limit <1..1000>
+        Profiles save connection settings only. Keys remain in GROUNDHOG_KEY.
+        Status and traffic commands describe local sessions; history retains the last 1,000 requests.
+        Global options: --no-interactive (disable menus), --no-color (disable colors; also NO_COLOR).
 
         Options for host:
           <name>           The tunnel's name, for example myapp.
@@ -57,6 +86,50 @@ internal static class GroundhogCommand
         TextWriter error,
         CancellationToken cancellationToken)
     {
+        try
+        {
+            if (args.Length > 0 && (RemoteCommands.Names.Contains(args[0], StringComparer.Ordinal)
+                || (args[0] is "stats" or "requests" && args.Contains("--remote", StringComparer.Ordinal))))
+            {
+                return await RemoteCommands.RunAsync(args, output, error, cancellationToken);
+            }
+            if (args is ["dashboard"])
+            {
+                return await InteractiveCli.RunAsync(cancellationToken);
+            }
+
+            if (args is ["init"])
+            {
+                if (!InteractiveCli.Available) { error.WriteLine("groundhog: init requires an interactive terminal. Use profile save instead."); return ExitCodes.BadArguments; }
+                await InteractiveCli.SetupAsync(new(ProfileStore.DefaultDirectory), cancellationToken);
+                return 0;
+            }
+            if (args.Length > 0 && args[0] is "start" or "restart" or "wait")
+            {
+                return await AgentLifecycle.RunAsync(args, output, error, cancellationToken);
+            }
+            if (args.Length > 0 && args[0] is "profile" or "ps" or "status" or "stats" or "requests" or "logs" or "stop" or "doctor")
+            {
+                return await UtilityCommands.RunAsync(args, output, error, cancellationToken);
+            }
+        }
+        catch (ManagementException ex)
+        {
+            error.WriteLine($"groundhog: {ex.Message}");
+            return ExitCodes.Failed;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            error.WriteLine("groundhog: the relay could not be reached. Check network, address and trusted TLS certificates.");
+            return ExitCodes.Failed;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or System.Text.Json.JsonException or UnauthorizedAccessException
+            or FormatException or OverflowException or System.Security.Cryptography.CryptographicException)
+        {
+            error.WriteLine("groundhog: invalid settings or inaccessible local state. Check --help and your profile file permissions.");
+            return ExitCodes.BadArguments;
+        }
         switch (args)
         {
             case [] or ["-h" or "--help" or "help"]:
@@ -80,6 +153,31 @@ internal static class GroundhogCommand
         TextWriter error,
         CancellationToken cancellationToken)
     {
+        if (args.Length == 1)
+        {
+            var profile = new ProfileStore(ProfileStore.DefaultDirectory).Read().SingleOrDefault(p => p.Name == args[0]);
+            if (profile is not null)
+            {
+                args = profile.Relay is null ? [profile.Name, "--target", profile.Target]
+                    : [profile.Name, "--target", profile.Target, "--relay", profile.Relay];
+            }
+        }
+        var credential = getEnvironmentVariable(HostArguments.KeyVariable);
+        if (string.IsNullOrWhiteSpace(credential) && args.Length > 0)
+        {
+            var saved = new CredentialStore(ProfileStore.DefaultDirectory).Read();
+            if (saved?.Workspace is { } workspace)
+            {
+                // Never send a stored key to a different relay chosen on the command line or in a profile.
+                var (candidate, _, _) = HostArguments.Parse(args, _ => ConnectionKey.Generate());
+                if (candidate is not null && candidate.Relay == new Uri(saved.Relay)
+                    && saved.TunnelKeys.TryGetValue(RemoteCommands.KeyId(workspace, args[0]), out var storedKey))
+                {
+                    var originalEnvironment = getEnvironmentVariable;
+                    getEnvironmentVariable = variable => variable == HostArguments.KeyVariable ? storedKey : originalEnvironment(variable);
+                }
+            }
+        }
         var (arguments, problem, help) = HostArguments.Parse(args, getEnvironmentVariable);
         if (help)
         {
@@ -122,11 +220,66 @@ internal static class GroundhogCommand
             error.WriteLine("WARNING: --insecure-local disables TLS certificate validation for the local target.");
         }
 
+        using var hostStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var telemetry = new SessionTelemetry(arguments.Name, arguments.LocalTarget);
+        await using var sessions = new LocalSessions(telemetry, hostStop);
+        var interactive = ReferenceEquals(output, Console.Out) && InteractiveCli.Available;
         var reporter = new StatusReporter(output, error, arguments.LocalTarget, arguments.Verbose);
-        agent.StatusChanged += (_, status) => reporter.OnStatus(status);
-        agent.RequestCompleted += (_, request) => reporter.OnRequest(request);
+        agent.StatusChanged += (_, status) => { telemetry.OnStatus(status); if (!interactive) { reporter.OnStatus(status); } };
+        agent.RequestCompleted += (_, request) => { telemetry.OnRequest(request); if (!interactive) { reporter.OnRequest(request); } };
+        GroundhogAgentStopReason reason;
+        if (interactive)
+        {
+            var running = agent.RunAsync(hostStop.Token);
+            var view = "Overview";
+            await AnsiConsole.Live(TerminalViews.Session(telemetry.Snapshot())).AutoClear(true).StartAsync(async context =>
+            {
+                while (!running.IsCompleted)
+                {
+                    if (Console.KeyAvailable)
+                    {
+                        var key = Console.ReadKey(true).Key;
+                        if (key is ConsoleKey.Q or ConsoleKey.Escape)
+                        {
+                            hostStop.Cancel();
+                        }
 
-        var reason = await agent.RunAsync(cancellationToken);
+                        if (key == ConsoleKey.D1)
+                        {
+                            view = "Overview";
+                        }
+
+                        if (key == ConsoleKey.D2)
+                        {
+                            view = "Requests";
+                        }
+
+                        if (key == ConsoleKey.D3)
+                        {
+                            view = "Statistics";
+                        }
+                    }
+                    context.UpdateTarget(new Rows(TerminalViews.Session(telemetry.Snapshot(), view),
+                        new Text("1 Overview · 2 Requests · 3 Statistics · Esc/Q Stop and return")));
+                    await Task.WhenAny(running, Task.Delay(200, CancellationToken.None));
+                }
+            });
+            reason = await running;
+            var final = telemetry.Snapshot();
+            if (reason is GroundhogAgentStopReason.Cancelled or GroundhogAgentStopReason.SessionReplaced)
+            {
+                output.WriteLine("Stopped.");
+            }
+            else
+            {
+                error.WriteLine($"Stopped: {final.Reason}");
+            }
+        }
+        else
+        {
+            reason = await agent.RunAsync(hostStop.Token);
+        }
+
         return reason switch
         {
             GroundhogAgentStopReason.Cancelled or GroundhogAgentStopReason.SessionReplaced => ExitCodes.Stopped,

@@ -8,6 +8,7 @@ The clients share protocol version 1 and the same connection and forwarding beha
 | First working Aspire tunnel | [Runnable quickstart](../samples/AspireQuickstart/README.md) |
 | Integrate with your AppHost | [Aspire reference](aspire.md) |
 | Run the CLI or embed the Agent | [Agent and CLI reference](agent.md) |
+| Keyboard menus, tunnel management and traffic queries | [CLI guide](cli.md) |
 | Diagnose failures or update credentials | [Troubleshooting](troubleshooting.md) |
 | Understand ownership and public source | [Source provenance](source-provenance.md) |
 | Implement an interoperable relay | [Protocol contract](protocol.md) |
@@ -21,7 +22,8 @@ deployment. The client needs the **tunnel name**, not the workspace slug or full
 
 CLI and Aspire use the hosted service by default. For a self-hosted relay, supply its base address explicitly;
 the tunnel and credential must exist on that relay. The embedded Agent requires an explicit relay URI.
-The relay repository owns dashboard and workspace behavior; the clients do not provision workspaces or tunnels.
+The relay repository owns dashboard and workspace behavior. The CLI can manage tunnels through an upgraded relay's
+workspace API; workspace creation remains on the website.
 
 ## Select the client
 

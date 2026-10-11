@@ -4,7 +4,7 @@ The `groundhog` command of Groundhog, a self-hosted HTTPS tunnel for local devel
 machine a public HTTPS address through the hosted Groundhog service or your own relay.
 
 ```
-dotnet tool install --global Groundhog.Cli --version 0.2.0-preview.4
+dotnet tool install --global Groundhog.Cli --version 0.3.0-preview.1
 groundhog host myapp --port 5173
 ```
 
@@ -12,7 +12,14 @@ groundhog host myapp --port 5173
 groundhog host <name> (--port <port> | --target <url>) [options]
 ```
 
-The key comes from `--key` or the `GROUNDHOG_KEY` environment variable and is never printed. The command prints
+Run `groundhog` for keyboard menus, or `groundhog dashboard` explicitly. Arrow keys and Enter navigate menus.
+Use `login`, `workspace list`, `list` and `describe <name>` to discover remote tunnels on a relay supporting CLI authorization.
+Local `ps`, `status`, `stats`, `requests`, `logs`, `stop`, `doctor` and `wait` work independently of account login.
+Use `init` or `profile save` to save a target, then `host <profile>` or `start <profile>` to run it.
+Read commands support `--output json`; `--no-interactive` selects script behavior and `--no-color` disables colors.
+See the [illustrated CLI guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/cli.md).
+
+The key comes from `--key`, `GROUNDHOG_KEY`, or a matching CLI-saved key and is never printed. In noninteractive mode the command prints
 one line when connected (`Connected: https://myapp.tunnel.example.com → http://localhost:5173`), one per disconnect and
 reconnect, and one per request with `--verbose`. It reconnects by itself after sleep or network changes.
 
@@ -31,7 +38,7 @@ and use its name and connection key. The hosted service address is automatic. Us
 to override it for self-hosting or a service-address migration.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
-`dotnet tool install Groundhog.Cli --version 0.2.0-preview.4` and `dotnet tool run groundhog -- --help`.
+`dotnet tool install Groundhog.Cli --version 0.3.0-preview.1` and `dotnet tool run groundhog -- --help`.
 Source and the full guide are available in the public Groundhog client repository.
 
 MIT licensed.
