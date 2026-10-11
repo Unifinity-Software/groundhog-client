@@ -13,9 +13,9 @@ It does not deploy or host the relay.
 
 The setup below uses **0.3.0-preview.1**.
 
-Before running a client, [sign in to Groundhog](https://tunnel.unifinity.com) and create your free workspace.
-Follow [Create your free workspace](https://tunnel.unifinity.com/docs/workspace), then
-[Create a tunnel](https://tunnel.unifinity.com/docs/create-tunnel). Keep the tunnel's name and one-time connection
+Before running a client, [sign in to Groundhog](https://groundhog.unifinity.com) and create your free workspace.
+Follow [Create your free workspace](https://groundhog.unifinity.com/docs/workspace), then
+[Create a tunnel](https://groundhog.unifinity.com/docs/create-tunnel). Keep the tunnel's name and one-time connection
 key private while you configure your app. Your workspace address is a dashboard path, not your tunnel name.
 
 Requires .NET 10 and Aspire 13.6.1 or later. In your AppHost directory:
@@ -47,8 +47,8 @@ groundhog host myapp --port 5173
 Run `groundhog` for keyboard menus, or use `login`, `list`, and `describe` to discover remote tunnels.
 Live hosting, local status, request queries, statistics and background agents are documented in the [CLI guide](docs/cli.md).
 Remote management requires an upgraded relay with the CLI authorization API. Supply an existing tunnel's connection key through `GROUNDHOG_KEY`.
-Use the same [workspace](https://tunnel.unifinity.com/docs/workspace) and
-[tunnel setup](https://tunnel.unifinity.com/docs/create-tunnel) before starting the CLI. Aspire and the CLI connect to the hosted
+Use the same [workspace](https://groundhog.unifinity.com/docs/workspace) and
+[tunnel setup](https://groundhog.unifinity.com/docs/create-tunnel) before starting the CLI. Aspire and the CLI connect to the hosted
 service automatically; explicit relay addresses remain available for self-hosting.
 
 ## Documentation

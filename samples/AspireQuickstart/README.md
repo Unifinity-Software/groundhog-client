@@ -18,10 +18,10 @@ The first command should report `10.x`; use Aspire CLI 13.6 or later.
 
 ## 2. Create your free workspace and tunnel
 
-Open **[the Groundhog website](https://tunnel.unifinity.com)**. Before starting Aspire, you need a workspace and a tunnel:
+Open **[the Groundhog website](https://groundhog.unifinity.com)**. Before starting Aspire, you need a workspace and a tunnel:
 
-1. Follow **[Create your free workspace](https://tunnel.unifinity.com/docs/workspace)** to sign in, choose your workspace name and address, read the Terms of Use, and create the workspace. If you already belong to a workspace, open it instead.
-2. Follow **[Create a tunnel](https://tunnel.unifinity.com/docs/create-tunnel)** from your workspace's **Tunnels** page. For this sample, use `aspire-quickstart` or another available name. Leave **Local port** at its default: Aspire forwards to the web app's actual endpoint automatically; the website's field only fills in its standalone CLI command.
+1. Follow **[Create your free workspace](https://groundhog.unifinity.com/docs/workspace)** to sign in, choose your workspace name and address, read the Terms of Use, and create the workspace. If you already belong to a workspace, open it instead.
+2. Follow **[Create a tunnel](https://groundhog.unifinity.com/docs/create-tunnel)** from your workspace's **Tunnels** page. For this sample, use `aspire-quickstart` or another available name. Leave **Local port** at its default: Aspire forwards to the web app's actual endpoint automatically; the website's field only fills in its standalone CLI command.
 3. Keep the exact tunnel **name**, its one-time **connection key**, and its **public HTTPS address** ready for the steps below. If you lose the key, regenerate it on the tunnel's page; the new key replaces the old one.
 
 The hosted guides contain the website's step-by-step instructions and pictures. Your workspace address is a dashboard path, not the tunnel name or public hostname.

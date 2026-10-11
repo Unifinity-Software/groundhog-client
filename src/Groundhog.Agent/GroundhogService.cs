@@ -7,5 +7,5 @@ public static class GroundhogService
     /// The hosted service address for this client version. Explicit relay addresses remain supported
     /// for self-hosted services and migrations to a different service address.
     /// </summary>
-    public const string DefaultRelayAddress = "https://tunnel.unifinity.com";
+    public const string DefaultRelayAddress = "https://groundhog.unifinity.com";
 }
