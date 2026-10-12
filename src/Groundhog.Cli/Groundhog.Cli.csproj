@@ -12,6 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="NuGet.Versioning" />
     <PackageReference Include="Spectre.Console" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
     <ProjectReference Include="..\Groundhog.Agent\Groundhog.Agent.csproj" />

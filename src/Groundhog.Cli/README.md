@@ -21,6 +21,15 @@ Use `init` or `profile save` to save a target, then `host <profile>` or `start <
 Read commands support `--output json`; `--no-interactive` selects script behavior and `--no-color` disables colors.
 See the [illustrated CLI guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/cli.md).
 
+Use `groundhog update --check` to check for a newer CLI, `groundhog update` to confirm and install it,
+or `groundhog update --yes` for an explicitly requested noninteractive update. Interactive commands also offer
+updates at most once a day, with No as the default; accepting updates the tool installation you are running and
+asks you to rerun your command. Stable installs follow stable releases, and preview installs also include previews;
+`--prerelease` opts a stable install into previews. Updates use listed NuGet.org packages and preserve local settings.
+Startup checks stay quiet offline and never run for scripts, JSON, help, version or background hosts.
+Disable the periodic offer with `--no-update-check` or `GROUNDHOG_NO_UPDATE_CHECK=1`.
+The .NET SDK is required to install an update. Running tunnels keep their current client until restarted.
+
 The key comes from `--key`, `GROUNDHOG_KEY`, or a matching CLI-saved key and is never printed. In noninteractive mode the command prints
 one line when connected (`Connected: https://myapp.groundhog.unifinity.com → http://localhost:5173`), one per disconnect and
 reconnect, and one per request with `--verbose`. It reconnects by itself after sleep or network changes.

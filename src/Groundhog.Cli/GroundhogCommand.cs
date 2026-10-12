@@ -47,6 +47,7 @@ internal static class GroundhogCommand
           groundhog host <name> (--port <port> | --target <url>) [options]
           groundhog --version
           groundhog --help
+          groundhog update [--check | --yes] [--prerelease]
           groundhog dashboard
           groundhog init
           groundhog profile list|save|delete [name] [--target <url>]
@@ -74,7 +75,8 @@ internal static class GroundhogCommand
                           --since <number>s|m|h, --min-duration <milliseconds>, --limit <1..1000>
         Profiles save connection settings only. Keys remain in GROUNDHOG_KEY.
         Status and traffic commands describe local sessions; history retains the last 1,000 requests.
-        Global options: --no-interactive (disable menus), --no-color (disable colors; also NO_COLOR).
+        Global options: --no-interactive (disable menus), --no-color (disable colors; also NO_COLOR),
+                        --no-update-check (skip the periodic update offer; also GROUNDHOG_NO_UPDATE_CHECK=1).
 
         Options for host:
           <name>           The tunnel's name, for example myapp.
@@ -100,6 +102,12 @@ internal static class GroundhogCommand
     {
         try
         {
+            if (args is ["update", ..])
+            {
+                if (args.Any(arg => arg is "--help" or "-h")) { output.Write(Usage); return ExitCodes.Stopped; }
+                using var updates = UpdateCommands.CreateDefault(output, error);
+                return await updates.RunAsync(args, cancellationToken);
+            }
             if (args.Length > 0 && (RemoteCommands.Names.Contains(args[0], StringComparer.Ordinal)
                 || (args[0] is "stats" or "requests" && args.Contains("--remote", StringComparer.Ordinal))))
             {
@@ -148,7 +156,7 @@ internal static class GroundhogCommand
                 output.Write(Usage);
                 return args.Length == 0 ? ExitCodes.BadArguments : ExitCodes.Stopped;
             case ["--version"]:
-                output.WriteLine(GroundhogAgent.Version);
+                output.WriteLine(UpdateCommands.Version);
                 return ExitCodes.Stopped;
             case ["host", .. var rest]:
                 return await HostAsync(rest, getEnvironmentVariable, output, error, cancellationToken);
