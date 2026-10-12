@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Groundhog.Agent;
+using Groundhog.Cli.Interactive;
 using Spectre.Console;
 
 namespace Groundhog.Cli;
@@ -272,7 +273,12 @@ internal static class RemoteCommands
     }
     private static string Plain(string value) => new(value.Where(c => !char.IsControl(c)).ToArray());
 
-    private static async Task<int> LoginAsync(string relay, CredentialStore store, TextWriter output, CancellationToken cancellation)
+    /// <summary>
+    /// Runs the browser-approved device sign-in. The interactive app passes <paramref name="challenge"/> to draw the code
+    /// itself; the command prints it.
+    /// </summary>
+    internal static async Task<int> LoginAsync(string relay, CredentialStore store, TextWriter output, CancellationToken cancellation,
+        Action<SignInChallenge>? challenge = null)
     {
         using var client = new ManagementClient(relay);
         var authorization = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device", new { }, cancellation);
@@ -283,11 +289,20 @@ internal static class RemoteCommands
             throw new ManagementException("Relay returned an invalid sign-in challenge.");
         }
 
-        output.WriteLine($"Authorize this CLI in your browser. Confirm code: {Plain(authorization.UserCode)}");
-        output.WriteLine(verification.ToString());
+        if (challenge is null)
+        {
+            output.WriteLine($"Authorize this CLI in your browser. Confirm code: {Plain(authorization.UserCode)}");
+            output.WriteLine(verification.ToString());
+        }
+        else
+        {
+            challenge(new(Plain(authorization.UserCode), verification, DateTimeOffset.UtcNow.AddSeconds(authorization.ExpiresIn)));
+        }
+
         if (InteractiveCli.Available)
         {
-            Process.Start(new ProcessStartInfo(verification.ToString()) { UseShellExecute = true });
+            // A headless session with a terminal has no browser; the URL is shown either way.
+            Browser.TryOpen(verification);
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);

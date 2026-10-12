@@ -243,29 +243,13 @@ internal static class UtilityCommands
     {
         var relay = new Uri(options.Get("--relay") ?? GroundhogService.DefaultRelayAddress);
         ProfileStore.Validate(new("doctor-check", options.Get("--target") ?? "http://localhost:5173", relay.ToString()));
-        using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(5) };
-        var checks = new List<object>();
-        var failed = false;
-        try
-        {
-            var health = await client.GetFromJsonAsync<HealthResponse>(new Uri(relay, "/_groundhog/v1/health"), cancellation);
-            var compatible = health?.Protocol.Contains(1) == true;
-            checks.Add(new { Check = "Relay health and protocol", Passed = compatible, Detail = compatible ? "Relay supports protocol 1." : "Relay did not advertise protocol 1." });
-            failed |= !compatible;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
-        { cancellation.ThrowIfCancellationRequested(); failed = true; checks.Add(new { Check = "Relay", Passed = false, Detail = "Check network, relay address and trusted TLS certificates." }); }
+        using var client = DoctorClient();
+        var checks = new List<DoctorCheck> { await CheckRelayAsync(client, relay, cancellation) };
         if (options.Get("--target") is { } target)
         {
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Head, target);
-                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
-                checks.Add(new { Check = "Local target", Passed = true, Detail = $"HTTP {(int)response.StatusCode}; target is reachable." });
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-            { cancellation.ThrowIfCancellationRequested(); failed = true; checks.Add(new { Check = "Local target", Passed = false, Detail = "Start your app, verify its port, and trust its development certificate." }); }
+            checks.Add(await CheckTargetAsync(client, target, cancellation));
         }
+
         if (options.Get("--output") == "json")
         {
             output.WriteLine(JsonSerializer.Serialize(checks));
@@ -278,7 +262,42 @@ internal static class UtilityCommands
             }
         }
 
-        return failed ? 1 : 0;
+        return checks.All(c => c.Passed) ? 0 : 1;
+    }
+
+    internal static HttpClient DoctorClient() =>
+        new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(5) };
+
+    /// <summary>Checks that the relay is healthy and speaks protocol 1, with normal TLS validation.</summary>
+    internal static async Task<DoctorCheck> CheckRelayAsync(HttpClient client, Uri relay, CancellationToken cancellation)
+    {
+        try
+        {
+            var health = await client.GetFromJsonAsync<HealthResponse>(new Uri(relay, "/_groundhog/v1/health"), cancellation);
+            var compatible = health?.Protocol.Contains(1) == true;
+            return new("Relay health and protocol", compatible, compatible ? "Relay supports protocol 1." : "Relay did not advertise protocol 1.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            return new("Relay", false, "Check network, relay address and trusted TLS certificates.");
+        }
+    }
+
+    /// <summary>Checks that a local target answers a HEAD request; any HTTP response proves reachability.</summary>
+    internal static async Task<DoctorCheck> CheckTargetAsync(HttpClient client, string target, CancellationToken cancellation)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Head, target);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+            return new("Local target", true, $"HTTP {(int)response.StatusCode}; target is reachable.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            return new("Local target", false, "Start your app, verify its port, and trust its development certificate.");
+        }
     }
 
     internal static void Render(TextWriter output, Spectre.Console.Rendering.IRenderable renderable)
@@ -292,6 +311,9 @@ internal static class UtilityCommands
         console.Write(renderable);
     }
 }
+
+/// <summary>One <c>doctor</c> result; its JSON shape is part of the script-facing output.</summary>
+internal sealed record DoctorCheck(string Check, bool Passed, string Detail);
 
 internal sealed class Options
 {

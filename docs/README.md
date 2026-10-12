@@ -8,7 +8,7 @@ The clients share protocol version 1 and the same connection and forwarding beha
 | First working Aspire tunnel | [Runnable quickstart](../samples/AspireQuickstart/README.md) |
 | Integrate with your AppHost | [Aspire reference](aspire.md) |
 | Run the CLI or embed the Agent | [Agent and CLI reference](agent.md) |
-| Keyboard menus, tunnel management and traffic queries | [CLI guide](cli.md) |
+| A full-screen terminal app, tunnel management and traffic queries | [CLI guide](cli.md) |
 | Diagnose failures or update credentials | [Troubleshooting](troubleshooting.md) |
 | Understand ownership and public source | [Source provenance](source-provenance.md) |
 | Understand the wire protocol | [Protocol contract](protocol.md) |

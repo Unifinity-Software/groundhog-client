@@ -1,7 +1,6 @@
 using System.Globalization;
 using Groundhog.Agent;
 using Groundhog.Protocol;
-using Spectre.Console;
 
 namespace Groundhog.Cli;
 
@@ -20,6 +19,16 @@ internal static class ExitCodes
     /// <summary>The relay rejected the key, or the tunnel doesn't exist.</summary>
     public const int Rejected = 3;
 }
+
+/// <summary>Draws a foreground host's live view; it returns once <see cref="HostSession.Running"/> completes.</summary>
+internal delegate Task HostView(HostSession session);
+
+/// <summary>A running foreground host as its live view sees it.</summary>
+/// <param name="Name">The tunnel name.</param>
+/// <param name="Snapshot">Reads the session's current status, totals and retained requests.</param>
+/// <param name="Running">Completes with the agent's stop reason.</param>
+/// <param name="Stop">Asks the agent to stop.</param>
+internal sealed record HostSession(string Name, Func<SessionSnapshot> Snapshot, Task<GroundhogAgentStopReason> Running, Action Stop);
 
 /// <summary>
 /// The command line: parses arguments, runs a <see cref="GroundhogAgent"/> and prints what it reports. All tunnel
@@ -149,12 +158,17 @@ internal static class GroundhogCommand
         }
     }
 
-    private static async Task<int> HostAsync(
+    /// <summary>
+    /// Runs <c>groundhog host</c>. In a terminal, or when the interactive app passes <paramref name="view"/>, the live
+    /// view replaces the line-by-line output until the user stops hosting.
+    /// </summary>
+    internal static async Task<int> HostAsync(
         string[] args,
         Func<string, string?> getEnvironmentVariable,
         TextWriter output,
         TextWriter error,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        HostView? view = null)
     {
         if (args.Length == 1)
         {
@@ -226,7 +240,7 @@ internal static class GroundhogCommand
         using var hostStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var telemetry = new SessionTelemetry(arguments.Name, arguments.LocalTarget);
         await using var sessions = new LocalSessions(telemetry, hostStop);
-        var interactive = ReferenceEquals(output, Console.Out) && InteractiveCli.Available;
+        var interactive = view is not null || (ReferenceEquals(output, Console.Out) && InteractiveCli.Available);
         var reporter = new StatusReporter(output, error, arguments.LocalTarget, arguments.Verbose);
         agent.StatusChanged += (_, status) => { telemetry.OnStatus(status); if (!interactive) { reporter.OnStatus(status); } };
         agent.RequestCompleted += (_, request) => { telemetry.OnRequest(request); if (!interactive) { reporter.OnRequest(request); } };
@@ -234,39 +248,19 @@ internal static class GroundhogCommand
         if (interactive)
         {
             var running = agent.RunAsync(hostStop.Token);
-            var view = "Overview";
-            await AnsiConsole.Live(TerminalViews.Session(telemetry.Snapshot())).AutoClear(true).StartAsync(async context =>
+            var session = new HostSession(arguments.Name, telemetry.Snapshot, running, hostStop.Cancel);
+            try
             {
-                while (!running.IsCompleted)
-                {
-                    if (Console.KeyAvailable)
-                    {
-                        var key = Console.ReadKey(true).Key;
-                        if (key is ConsoleKey.Q or ConsoleKey.Escape)
-                        {
-                            hostStop.Cancel();
-                        }
+                // The view returns once the agent has stopped: Esc/Q, Ctrl+C, or the relay ending the session.
+                await (view ?? Interactive.InteractiveApp.RunHostAsync)(session);
+            }
+            catch
+            {
+                await hostStop.CancelAsync();
+                await running;
+                throw;
+            }
 
-                        if (key == ConsoleKey.D1)
-                        {
-                            view = "Overview";
-                        }
-
-                        if (key == ConsoleKey.D2)
-                        {
-                            view = "Requests";
-                        }
-
-                        if (key == ConsoleKey.D3)
-                        {
-                            view = "Statistics";
-                        }
-                    }
-                    context.UpdateTarget(new Rows(TerminalViews.Session(telemetry.Snapshot(), view),
-                        new Text("1 Overview · 2 Requests · 3 Statistics · Esc/Q Stop and return")));
-                    await Task.WhenAny(running, Task.Delay(200, CancellationToken.None));
-                }
-            });
             reason = await running;
             var final = telemetry.Snapshot();
             if (reason is GroundhogAgentStopReason.Cancelled or GroundhogAgentStopReason.SessionReplaced)

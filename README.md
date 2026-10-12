@@ -51,8 +51,12 @@ dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.1
 groundhog host myapp --port 5173
 ```
 
-Run `groundhog` for keyboard menus, or use `login`, `list`, and `describe` to discover remote tunnels.
-Live hosting, local status, request queries, statistics and background agents are documented in the [CLI guide](docs/cli.md).
+Run `groundhog` for a full-screen terminal app: a menu with live previews, tunnel and local-agent dashboards, in-frame
+actions and a live hosting view. Scripts use commands such as `login`, `list` and `describe`, whose output is unchanged.
+The app, live hosting, local status, request queries, statistics and background agents are documented in the
+[CLI guide](docs/cli.md).
+
+![The Groundhog CLI home dashboard](docs/images/cli-home.png)
 Remote management signs in to the service through its CLI authorization API. Supply an existing tunnel's connection key through `GROUNDHOG_KEY`.
 Use the same [workspace](https://groundhog.unifinity.com/docs/workspace) and
 [tunnel setup](https://groundhog.unifinity.com/docs/create-tunnel) before starting the CLI. Aspire and the CLI connect to the hosted
