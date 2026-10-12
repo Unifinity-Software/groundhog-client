@@ -87,6 +87,32 @@ messages are identical.
 The screenshots are the real renderer's output with synthetic sample data. See
 [screenshot generation](#refresh-the-screenshots) to reproduce them.
 
+## Check for updates and update the CLI
+
+Interactive commands check NuGet for a newer CLI at most once every 24 hours. When one is available, Groundhog
+offers **Update now before continuing?**, with **No** as the default. Declining continues your command. Accepting
+runs the .NET tool installer for the installation you are using, then exits so you can run your command again
+with the new version. Running tunnels keep their current client until you restart them.
+
+```sh
+groundhog update --check     # Check now without installing or prompting.
+groundhog update             # Check now and ask before installing.
+groundhog update --yes       # Check and install without a prompt.
+```
+
+Stable installations are offered stable releases. Preview installations include previews, and stable users can
+opt in with `groundhog update --prerelease`. Only newer, listed Groundhog.Cli packages from NuGet.org are offered.
+Updates use the exact selected version and preserve your profiles and credentials.
+
+Global tools, custom tool paths, and local tools with a matching manifest are supported. An unidentified executable
+is never used to guess another installation to update. You need the .NET SDK for the installer. If installation
+fails, Groundhog reports the failure; retry with `dotnet tool update` for your installation after exiting the CLI.
+
+Startup checks have a 2-second budget and stay quiet when offline. A declined offer or failed check is cached for
+24 hours; explicit `update` commands check again immediately. Redirected commands, JSON output, help, version,
+background hosting and `--no-interactive` skip startup checks. Add `--no-update-check` or set
+`GROUNDHOG_NO_UPDATE_CHECK=1` to disable the periodic offer. Neither option disables an explicit update command.
+
 ## Sign in and find tunnels
 
 Remote commands sign in through the service's CLI authorization API described in [protocol.md](protocol.md#cli-management-authentication).
