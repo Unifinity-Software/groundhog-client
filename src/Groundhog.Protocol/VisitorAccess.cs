@@ -194,8 +194,9 @@ public sealed class VisitorAccessDeclaration
 /// <item><description>Every <c>allow</c> list has at least one of <see cref="VisitorAccessMethods"/>, without repeats;
 /// <c>anyone</c> stands alone.</description></item>
 /// <item><description><c>tokens</c> needs at least one token and <c>ips</c> at least one IP range.</description></item>
-/// <item><description>Paths start with <c>/</c>, have no <c>?</c>, <c>#</c> or control characters, are at most
-/// <see cref="MaxPathLength"/> characters, and appear once (ignoring case and a trailing <c>/</c>).</description></item>
+/// <item><description>Paths start with <c>/</c>, have no <c>?</c>, <c>#</c>, <c>%</c>, <c>\</c>, whitespace, control
+/// characters or <c>.</c>/<c>..</c> segments, aren't <c>/</c> itself, are at most <see cref="MaxPathLength"/>
+/// characters, and appear once (ignoring case and trailing or repeated <c>/</c>).</description></item>
 /// <item><description>IP ranges are CIDR as <see cref="IPNetwork.TryParse(string, out IPNetwork)"/> reads them, for
 /// example <c>203.0.113.0/24</c> or <c>2001:db8::/32</c>.</description></item>
 /// <item><description>At most <see cref="MaxRules"/> rules, <see cref="MaxIpRanges"/> IP ranges and
@@ -333,6 +334,25 @@ public static class VisitorAccessValidator
                 error = "Rule paths can't contain control characters.";
                 return false;
             }
+
+            if (c is '%' or '\\' || char.IsWhiteSpace(c))
+            {
+                error = $"The rule path {path} must be a plain path: no spaces, backslashes or % escapes.";
+                return false;
+            }
+        }
+
+        var normalized = NormalizePath(path);
+        if (normalized == "/")
+        {
+            error = "A rule for / is the default rule; set the default instead.";
+            return false;
+        }
+
+        if (normalized.Split('/').Any(segment => segment is "." or ".."))
+        {
+            error = $"The rule path {path} can't contain . or .. segments.";
+            return false;
         }
 
         error = null;
@@ -340,14 +360,13 @@ public static class VisitorAccessValidator
     }
 
     /// <summary>
-    /// The form two rule paths are compared in for duplicates: without a trailing <c>/</c> (except the root),
-    /// lowercase.
+    /// The form a rule path is matched and compared in for duplicates: lowercase, without a trailing or repeated
+    /// <c>/</c>. The relay normalizes the same way.
     /// </summary>
     public static string NormalizePath(string path)
     {
         ArgumentNullException.ThrowIfNull(path);
-        var trimmed = path.TrimEnd('/');
-        return trimmed.Length == 0 ? "/" : trimmed.ToLowerInvariant();
+        return "/" + string.Join('/', path.ToLowerInvariant().Split('/', StringSplitOptions.RemoveEmptyEntries));
     }
 
     /// <summary>Whether <paramref name="value"/> is an IPv4 or IPv6 range in CIDR form.</summary>

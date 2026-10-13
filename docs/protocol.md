@@ -87,13 +87,15 @@ rules.
   one token hash and `ips` at least one IP range. Missing `default` means `{ "allow": ["anyone"] }`; missing
   lists are empty.
 - The longest matching `path` prefix wins, on segment boundaries and ignoring case; `default` applies when none
-  matches. Paths start with `/`, have no `?` or `#` (or control characters), are at most 256 characters, and
-  appear once, ignoring case and a trailing `/`.
+  matches. Paths start with `/`, have no `?`, `#`, `%`, `\`, whitespace, control characters or `.`/`..`
+  segments, aren't `/` itself (that's `default`), are at most 256 characters, and appear once, ignoring case and
+  trailing or repeated `/`.
 - `ipRanges` are IPv4 or IPv6 CIDR ranges as .NET's `IPNetwork.TryParse` reads them.
 - Limits: 32 rules, 64 IP ranges, 10 token hashes.
 - `tokenHashes` are SHA-256 of each visitor token's UTF-8 text, as 64 lowercase hexadecimal characters. Visitor
   tokens have the same shape as connection keys (43 base64url characters); the plaintext never leaves the
-  developer's machine.
+  developer's machine. Declared hashes replace the tokens an earlier declaration added; tokens created in the
+  dashboard are kept.
 - `Groundhog.Protocol` holds the model (`VisitorAccessDeclaration`), the shared validator
   (`VisitorAccessValidator`) and the encoding, so the relay, the agent and the CLI apply the same rules.
 - The agent sends the same declaration on every pooled connection. A relay that applied it (validated, and

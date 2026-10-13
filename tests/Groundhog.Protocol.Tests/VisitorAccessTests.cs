@@ -106,7 +106,12 @@ public class VisitorAccessTests
         { "control characters", new() { Rules = [new("/a\nb", ["members"])] } },
         { "at most 256", new() { Rules = [new("/" + new string('a', 256), ["members"])] } },
         { "more than one rule", new() { Rules = [new("/api", ["members"]), new("/API/", ["anyone"])] } },
-        { "more than one rule", new() { Rules = [new("/", ["members"]), new("//", ["anyone"])] } },
+        { "more than one rule", new() { Rules = [new("/api//hooks", ["members"]), new("/api/hooks", ["anyone"])] } },
+        { "is the default rule", new() { Rules = [new("/", ["members"])] } },
+        { "plain path", new() { Rules = [new("/a%2Fb", ["members"])] } },
+        { "plain path", new() { Rules = [new("/a\\b", ["members"])] } },
+        { "plain path", new() { Rules = [new("/a b", ["members"])] } },
+        { ". or ..", new() { Rules = [new("/a/../b", ["members"])] } },
         { "at most 32 path rules", new() { Rules = [.. Enumerable.Range(0, 33).Select(i => new VisitorAccessPathRule($"/p{i}", ["members"]))] } },
         { "at most 64 IP ranges", new() { IpRanges = [.. Enumerable.Range(0, 65).Select(i => $"10.0.{i}.0/24")] } },
         { "at most 10 visitor tokens", new() { TokenHashes = [.. Enumerable.Range(0, 11).Select(i => VisitorToken.Hash($"t{i}"))] } },
@@ -146,7 +151,7 @@ public class VisitorAccessTests
     {
         Assert.True(new VisitorAccessDeclaration
         {
-            Rules = [new("/api", ["members"]), new("/apix", ["anyone"]), new("/", ["members"])],
+            Rules = [new("/api", ["members"]), new("/apix", ["anyone"])],
         }.TryValidate(out var error), error);
     }
 
