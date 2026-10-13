@@ -71,7 +71,7 @@ internal static class TunnelViews
         var insight = model.Insight;
         var overview = Overview(model);
         var breakdown = Breakdown(insight.Usage, compact: !size.Wide);
-        var overviewHeight = size.Wide ? 9 : 8;
+        var overviewHeight = (size.Wide ? 9 : 8) + (insight.Access is null ? 0 : 1);
         if (size.Wide)
         {
             var top = new Layout("top").Size(overviewHeight).SplitColumns(
@@ -100,6 +100,11 @@ internal static class TunnelViews
         Row("This machine", model.LocalAgent is { } agent
             ? $"{Theme.State(agent.Snapshot.State)} {Theme.Dim("→ " + Theme.Safe(agent.Snapshot.Target))}"
             : Theme.Dim("not hosted from here (H to host)"));
+        if (model.Insight.Access is { } access)
+        {
+            Row("Visitors", $"{Theme.Safe(VisitorAccessCommands.Summary(access))} {Theme.Dim(access.ManagedBy == VisitorAccessCommands.ManagedByDashboard ? "· set in the dashboard" : "· set by the agent")}");
+        }
+
         Row("Actions", Actions(t.Actions));
         return Theme.Section(t.Name, grid, focus: true);
     }

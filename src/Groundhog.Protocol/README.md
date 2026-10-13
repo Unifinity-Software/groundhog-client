@@ -17,6 +17,9 @@ The relay and the agent both reference this package, so they agree on every valu
 | `ConnectionKey` | Key generation, SHA-256 hashing and constant-time verification |
 | `WebSocketDuplexStream` | A `WebSocket` as a duplex `Stream`, for HTTP/2 to run over |
 | `HealthResponse` | The health endpoint's JSON body |
+| `VisitorAccessDeclaration`, `VisitorAccessRule`, `VisitorAccessPathRule` | A tunnel's visitor access rules as an agent declares them, with base64url JSON encoding |
+| `VisitorAccessValidator`, `VisitorAccessMethods` | The shared validation rules and limits, and the `allow` values (`anyone`, `members`, `tokens`, `ips`) |
+| `VisitorToken` | Visitor token generation and SHA-256 hashing |
 
 The protocol itself is described in `docs/protocol.md` in the source repository (linked from this
 package's project page).

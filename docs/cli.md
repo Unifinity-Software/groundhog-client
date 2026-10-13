@@ -195,13 +195,90 @@ app (a tunnel's **H** or a saved profile), you return to the screen you came fro
 Noninteractive hosting retains the original connection/disconnection output; `--verbose` adds request lines. Use
 `--no-interactive` to select that behavior in a terminal.
 
-The host's options are `--port`, `--target`, `--local-ca`, `--insecure-local`, `--key`, `--pool` and `--verbose`.
+The host's options are `--port`, `--target`, `--local-ca`, `--insecure-local`, `--key`, `--pool` and `--verbose`,
+plus the [visitor access options](#visitor-access-rules) below.
 See [the Agent guide](agent.md) for forwarding and certificate behavior.
+
+## Visitor access rules
+
+By default anyone with the address can reach a tunnel. Visitor access rules decide, per path, who may visit:
+
+| Method | Who passes |
+| --- | --- |
+| `anyone` | Everyone (webhook senders, OAuth providers). Can't be combined with other methods. |
+| `members` | Members of the tunnel's workspace, after signing in to Groundhog in the browser. |
+| `tokens` | Requests with a visitor token in the `X-Groundhog-Visitor-Token` header. |
+| `ips` | Requests from one of the tunnel's IP ranges. |
+
+A request passes when any listed method passes. The longest matching path prefix wins (on segment boundaries,
+ignoring case); the default rule applies elsewhere. Visitor access is enabled per workspace; where it isn't, the
+commands below print "Visitor access rules aren't enabled for this workspace."
+
+### Declare them when hosting
+
+Rules given to `host` are sent with the tunnel's connection and replace the tunnel's stored rules, so they live with
+the command or profile that hosts the app:
+
+```sh
+export MYAPP_VISITOR_TOKEN=...                # from groundhog token create, or your secret store
+groundhog host myapp --port 5173 \
+  --allow members \
+  --path /webhooks=anyone \
+  --path /api=tokens,ips \
+  --ip 203.0.113.0/24 \
+  --visitor-token-env MYAPP_VISITOR_TOKEN
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--allow <methods>` | The default rule: `anyone`, or any of `members`, `tokens`, `ips` joined by commas. Defaults to `anyone`. |
+| `--path <prefix>=<methods>` | A rule for one path prefix, for example `--path /webhooks=anyone`. Repeatable, up to 32. |
+| `--ip <cidr>` | An IPv4 or IPv6 range for `ips`, for example `203.0.113.0/24`. Repeatable, up to 64. |
+| `--visitor-token-env <VAR>` | An environment variable holding a visitor token for `tokens`. Repeatable, up to 10. Only the token's SHA-256 hash is sent; tokens never go on the command line. |
+| `--access-file <file>` | The rules as JSON instead of `--allow`, `--path` and `--ip` (not together with them). |
+
+The access file uses the service's shape, so the output of `groundhog access <name> --output json` can be edited into
+one (its `tokens` and `managedBy` are ignored):
+
+```json
+{
+  "default": { "allow": ["members"] },
+  "rules": [
+    { "path": "/webhooks", "allow": ["anyone"] },
+    { "path": "/api", "allow": ["tokens", "ips"] }
+  ],
+  "ipRanges": ["203.0.113.0/24"]
+}
+```
+
+The rules are checked before connecting, with the same rules the service applies. Without any of these options,
+`host` leaves the tunnel's stored rules unchanged. If the tunnel's rules are managed in the dashboard, or the service
+refuses them, hosting stops with the service's reason (exit code 3). If the service doesn't support visitor access,
+hosting stops with "This relay doesn't support visitor access rules; update the relay or remove them." rather than
+exposing the app without them.
+
+### Manage them while signed in
+
+```sh
+groundhog access myapp                                   # Show the rules, tokens and who manages them.
+groundhog access myapp --output json                     # The same, as JSON (a starting point for --access-file).
+groundhog access set myapp --allow members --path /webhooks=anyone --ip 203.0.113.0/24
+groundhog access set myapp --access-file rules.json
+groundhog access myapp --agent-managed                   # Let hosting agents declare the rules again.
+groundhog token create myapp ci                          # Prints the new token once.
+groundhog token list myapp
+groundhog token revoke myapp <token-id>
+```
+
+`access set` saves the rules as managed in the dashboard: agents that declare rules are then refused until you run
+`access <name> --agent-managed`. Tokens live on the service, so `access set` takes no `--visitor-token-env`; create
+them with `token create` and copy the printed token, which isn't shown again. `token revoke` asks for confirmation;
+scripts pass `--yes`. The app's tunnel screen shows the current rules on a **Visitors** line.
 
 ## Saved profiles
 
-A **saved profile** remembers two things about a tunnel you host often: its **name** and the **local address your
-app listens on** (for example `myapp` → `http://localhost:5173`). With a profile saved, hosting that tunnel again is
+A **saved profile** remembers what you need to host a tunnel often: its **name**, the **local address your app listens
+on** (for example `myapp` → `http://localhost:5173`) and, optionally, its [visitor access options](#visitor-access-rules). With a profile saved, hosting that tunnel again is
 one word on the command line, or Enter on **Saved profiles** in the app, instead of retyping the name and target.
 A profile never stores a connection key.
 
@@ -224,6 +301,8 @@ Create and manage profiles:
 ```sh
 groundhog init                                       # Asks for the tunnel name and local target, then saves them.
 groundhog profile save myapp --target http://localhost:5173
+groundhog profile save myapp --target http://localhost:5173 --allow members --path /webhooks=anyone \
+  --visitor-token-env MYAPP_VISITOR_TOKEN               # Saves the variable's name, never the token.
 groundhog profile list
 groundhog host myapp                                 # Foreground, with the live view.
 groundhog start myapp                                # Background; returns once connected.
@@ -238,8 +317,10 @@ In the app, **Saved profiles** lists each profile with whether it is running on 
 on the service or a running agent.
 
 A profile's name must be an existing tunnel's name. Saving checks that the target is an `http://` or `https://`
-address without a path or credentials; it does not contact the service. Profiles save only the name and target, so use
-foreground `host` with options for a custom CA, connection pool size or `--insecure-local`. After renaming a tunnel,
+address without a path or credentials, and checks any visitor access options; it does not contact the service.
+Profiles save the name, target and visitor access options (an `--access-file` as a full path, `--visitor-token-env` as
+the variable's name; the variable must be set wherever the profile is hosted, including for `start`). Use foreground
+`host` with options for a custom CA, connection pool size or `--insecure-local`. After renaming a tunnel,
 delete the old profile and save a new one under the new name.
 
 `host <profile>` runs in the foreground. `start` and `restart` return after the agent connects. The background

@@ -66,7 +66,7 @@ public sealed class InteractiveFeatureTests
             var store = new ProfileStore(directory);
             store.Save(new("sample", "http://localhost:5173"));
             Assert.Equal("sample", Assert.Single(store.Read()).Name);
-            Assert.Throws<ArgumentException>(() => store.Save(new("sample", "https://secret@example.com")));
+            Assert.ThrowsAny<ArgumentException>(() => store.Save(new("sample", "https://secret@example.com")));
             Assert.DoesNotContain("key", File.ReadAllText(Path.Combine(directory, "profiles.json")), StringComparison.OrdinalIgnoreCase);
             Assert.True(store.Delete("sample")); Assert.Empty(store.Read());
         }

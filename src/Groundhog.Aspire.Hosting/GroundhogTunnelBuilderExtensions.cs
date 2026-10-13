@@ -62,6 +62,77 @@ public static class GroundhogTunnelBuilderExtensions
         return resource;
     }
 
+    /// <summary>
+    /// Gives this resource a public HTTPS address through the hosted Groundhog service, like
+    /// <see cref="WithGroundhogTunnel{T}(IResourceBuilder{T}, string, string?, Action{IResourceBuilder{GroundhogTunnelResource}}?)"/>,
+    /// and declares who may visit it.
+    /// </summary>
+    /// <typeparam name="T">The resource type.</typeparam>
+    /// <param name="resource">The resource to expose, for example a project.</param>
+    /// <param name="tunnelName">The name created in the Groundhog website, for example <c>myapp</c>.</param>
+    /// <param name="access">
+    /// The tunnel's visitor access rules, for example
+    /// <c>access =&gt; access.Allow(VisitorAllow.Members).Path("/webhooks", VisitorAllow.Anyone)</c>.
+    /// </param>
+    /// <param name="endpointName">The endpoint to forward to; see the other overload.</param>
+    /// <param name="configure">Configures the tunnel resource, for example to turn on <see cref="WithRequestLogging"/>.</param>
+    /// <returns>The resource builder, for chaining.</returns>
+    /// <exception cref="ArgumentException">
+    /// The rules are invalid (the message says why), or the endpoint or key parameter can't be used.
+    /// </exception>
+    /// <remarks>See <see cref="WithVisitorAccess"/> for how the rules are applied.</remarks>
+    public static IResourceBuilder<T> WithGroundhogTunnel<T>(
+        this IResourceBuilder<T> resource,
+        string tunnelName,
+        Action<GroundhogVisitorAccessBuilder> access,
+        string? endpointName = null,
+        Action<IResourceBuilder<GroundhogTunnelResource>>? configure = null)
+        where T : IResourceWithEndpoints
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        return resource.WithGroundhogTunnel(tunnelName, endpointName, tunnel =>
+        {
+            tunnel.WithVisitorAccess(access);
+            configure?.Invoke(tunnel);
+        });
+    }
+
+    /// <summary>
+    /// Declares who may visit the tunnel: by default, per path, from IP ranges and with visitor tokens. The agent sends
+    /// the rules on every connection, replacing the tunnel's stored rules.
+    /// </summary>
+    /// <param name="builder">The tunnel.</param>
+    /// <param name="access">Builds the rules.</param>
+    /// <returns>The tunnel.</returns>
+    /// <exception cref="ArgumentException">The rules are invalid; the message says why.</exception>
+    /// <remarks>
+    /// <para>
+    /// The rules are checked here with the service's own validation. Visitor token values come from secret parameters
+    /// when the tunnel starts; only their SHA-256 hashes are sent.
+    /// </para>
+    /// <para>
+    /// If the tunnel's visitor access is managed in the Groundhog dashboard, or the service refuses the rules, the
+    /// tunnel stops with the service's reason. A service without visitor access support stops it too, so the app is
+    /// never exposed without its rules.
+    /// </para>
+    /// </remarks>
+    public static IResourceBuilder<GroundhogTunnelResource> WithVisitorAccess(
+        this IResourceBuilder<GroundhogTunnelResource> builder,
+        Action<GroundhogVisitorAccessBuilder> access)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(access);
+        var rules = new GroundhogVisitorAccessBuilder();
+        access(rules);
+        builder.Resource.VisitorAccess = rules.Build();
+        foreach (var token in rules.Tokens)
+        {
+            builder.WithReferenceRelationship(token.Resource);
+        }
+
+        return builder;
+    }
+
     /// <summary>Adds a tunnel through the public Groundhog service using a secret connection key.</summary>
     /// <param name="builder">The AppHost builder.</param>
     /// <param name="name">The resource name in the Aspire dashboard.</param>

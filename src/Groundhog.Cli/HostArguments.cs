@@ -5,7 +5,8 @@ namespace Groundhog.Cli;
 
 /// <summary>The parsed arguments of <c>groundhog host</c>.</summary>
 internal sealed record HostArguments(string Name, int Port, Uri Relay, string Key, int? Pool, bool Verbose,
-    Uri? Target = null, string? LocalCaFile = null, bool InsecureLocal = false)
+    Uri? Target = null, string? LocalCaFile = null, bool InsecureLocal = false,
+    GroundhogVisitorAccess? VisitorAccess = null, VisitorAccessFlags? AccessFlags = null)
 {
     public Uri LocalTarget => Target ?? new Uri($"http://localhost:{Port}");
     /// <summary>The environment variable the key is read from when <c>--key</c> isn't given.</summary>
@@ -19,6 +20,17 @@ internal sealed record HostArguments(string Name, int Port, Uri Relay, string Ke
         IReadOnlyList<string> args,
         Func<string, string?> getEnvironmentVariable)
     {
+        if (args.Any(arg => arg is "-h" or "--help"))
+        {
+            return (null, null, true);
+        }
+
+        if (!VisitorAccessFlags.TryExtract(args, out var accessFlags, out var otherArgs, out var accessError))
+        {
+            return (null, accessError, false);
+        }
+
+        args = otherArgs;
         string? name = null;
         string? port = null;
         string relay = GroundhogService.DefaultRelayAddress;
@@ -158,10 +170,18 @@ internal sealed record HostArguments(string Name, int Port, Uri Relay, string Ke
             return (null, $"No connection key: set the {KeyVariable} environment variable (or pass --key).", false);
         }
 
-        return (new HostArguments(name, portNumber, relayUri, key, poolSize, verbose, targetUri, localCa, insecureLocal), null, false);
+        GroundhogVisitorAccess? visitorAccess = null;
+        if (accessFlags is not null && !accessFlags.TryBuildAgentAccess(getEnvironmentVariable, out visitorAccess, out accessError))
+        {
+            return (null, accessError, false);
+        }
+
+        return (new HostArguments(name, portNumber, relayUri, key, poolSize, verbose, targetUri, localCa, insecureLocal,
+            visitorAccess, accessFlags), null, false);
     }
 
     /// <summary>Never prints the key.</summary>
     public override string ToString() =>
-        $"{nameof(HostArguments)} {{ Name = {Name}, Port = {Port}, Relay = {Relay}, Pool = {Pool}, Verbose = {Verbose} }}";
+        $"{nameof(HostArguments)} {{ Name = {Name}, Port = {Port}, Relay = {Relay}, Pool = {Pool}, Verbose = {Verbose}, "
+        + $"VisitorAccess = {AccessFlags?.Describe() ?? "unchanged"} }}";
 }

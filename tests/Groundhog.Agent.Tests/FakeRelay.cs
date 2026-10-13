@@ -88,11 +88,18 @@ public sealed class FakeRelay : IAsyncDisposable
             context.Request.Headers[GroundhogHeaders.Agent].ToString(),
             context.WebSockets.WebSocketRequestedProtocols.ToArray(),
             context.Request.Headers[GroundhogHeaders.ClientPackage].ToString(),
-            context.Request.Headers[GroundhogHeaders.ClientVersion].ToString()));
+            context.Request.Headers[GroundhogHeaders.ClientVersion].ToString(),
+            context.Request.Headers[GroundhogHeaders.VisitorAccess].ToString()));
 
-        if (tunnel.TryTakeRefusal(out var status))
+        if (tunnel.TryTakeRefusal(out var status, out var message))
         {
             context.Response.StatusCode = status;
+            if (message is not null)
+            {
+                context.Response.ContentType = "text/plain; charset=utf-8";
+                await context.Response.WriteAsync(message + "\n");
+            }
+
             return;
         }
 
@@ -103,6 +110,11 @@ public sealed class FakeRelay : IAsyncDisposable
         }
 
         context.Response.Headers[GroundhogHeaders.PublicAddress] = $"https://{tunnel.Name}.groundhog.unifinity.com";
+        if (tunnel.AppliesVisitorAccess && context.Request.Headers.ContainsKey(GroundhogHeaders.VisitorAccess))
+        {
+            context.Response.Headers[GroundhogHeaders.VisitorAccess] = GroundhogHeaders.VisitorAccessApplied;
+        }
+
         var webSocket = await context.WebSockets.AcceptWebSocketAsync(GroundhogProtocol.SubProtocol);
         await using var connection = new AgentConnection(webSocket);
         tunnel.AddConnection(connection);
@@ -114,12 +126,12 @@ public sealed class FakeRelay : IAsyncDisposable
 
 /// <summary>What one connect request carried.</summary>
 public sealed record ConnectAttempt(string Authorization, string Session, string Agent, IReadOnlyList<string> SubProtocols,
-    string ClientPackage, string ClientVersion);
+    string ClientPackage, string ClientVersion, string VisitorAccess = "");
 
 /// <summary>Scripted answers and observed connections for one tunnel name on the <see cref="FakeRelay"/>.</summary>
 public sealed class FakeTunnel(string name)
 {
-    private readonly ConcurrentQueue<int> _refusals = new();
+    private readonly ConcurrentQueue<(int Status, string? Message)> _refusals = new();
     private readonly ConcurrentBag<AgentConnection> _all = [];
     private int _attemptCount;
     private int _alwaysRefuse;
@@ -134,14 +146,23 @@ public sealed class FakeTunnel(string name)
 
     public int AttemptCount => Volatile.Read(ref _attemptCount);
 
+    /// <summary>
+    /// Whether a connection that declares visitor access gets <c>X-Groundhog-Visitor-Access: applied</c>, as a relay
+    /// that supports it answers. Set false to act like an older relay.
+    /// </summary>
+    public bool AppliesVisitorAccess { get; set; } = true;
+
     /// <summary>Answers the next connect requests with these HTTP statuses, one each, before accepting again.</summary>
     public void Refuse(params int[] statuses)
     {
         foreach (var status in statuses)
         {
-            _refusals.Enqueue(status);
+            _refusals.Enqueue((status, null));
         }
     }
+
+    /// <summary>Answers the next connect request with this status and a <c>text/plain</c> message, as the relay does.</summary>
+    public void RefuseWithMessage(int status, string message) => _refusals.Enqueue((status, message));
 
     /// <summary>
     /// Answers every connect request from now on with this HTTP status, as the relay does for a rejected key: an
@@ -149,13 +170,15 @@ public sealed class FakeTunnel(string name)
     /// </summary>
     public void RefuseAll(int status) => Volatile.Write(ref _alwaysRefuse, status);
 
-    internal bool TryTakeRefusal(out int status)
+    internal bool TryTakeRefusal(out int status, out string? message)
     {
-        if (_refusals.TryDequeue(out status))
+        if (_refusals.TryDequeue(out var refusal))
         {
+            (status, message) = refusal;
             return true;
         }
 
+        message = null;
         status = Volatile.Read(ref _alwaysRefuse);
         return status != 0;
     }

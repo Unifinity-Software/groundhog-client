@@ -50,7 +50,7 @@ internal static class GroundhogCommand
           groundhog update [--check | --yes] [--prerelease]
           groundhog dashboard
           groundhog init
-          groundhog profile list|save|delete [name] [--target <url>]
+          groundhog profile list|save|delete [name] [--target <url>] [visitor access options]
           groundhog ps [--output json]
           groundhog status|stats <name> [--output json] [--watch]
           groundhog requests <name> [--output json] [--follow] [filters]
@@ -69,14 +69,19 @@ internal static class GroundhogCommand
           groundhog delete <name> [--workspace <slug>] [--yes]
           groundhog key rotate|revoke <name> [--workspace <slug>] [--yes]
           groundhog open <name> [--workspace <slug>]
+          groundhog access <name> [--workspace <slug>] [--output json]
+          groundhog access set <name> (--allow <methods> [--path <prefix>=<methods>]... [--ip <cidr>]... | --access-file <file>)
+          groundhog access <name> --agent-managed
+          groundhog token create <name> <label> | token list <name> | token revoke <name> <id> [--yes]
           groundhog stats|requests <name> --remote [--workspace <slug>] [--output json]
           groundhog requests <name> --remote --follow [--workspace <slug>] [filters]
 
         Requests options: --status 5xx|<code>, --method <method>, --path <substring>,
                           --since <number>s|m|h, --min-duration <milliseconds>, --limit <1..1000>
-        Saved profiles remember a tunnel name and its local target, so host <profile> and
-        start <profile> need no other options. Profiles never store keys; the key comes from
-        GROUNDHOG_KEY, --key, or the key saved when you created or rotated the tunnel here.
+        Saved profiles remember a tunnel name, its local target and its visitor access options, so
+        host <profile> and start <profile> need no other options. Profiles never store keys or visitor
+        tokens (only --visitor-token-env names); the key comes from GROUNDHOG_KEY, --key, or the key
+        saved when you created or rotated the tunnel here.
         Status and traffic commands describe local sessions; history retains the last 1,000 requests.
         Global options: --no-interactive (disable menus), --no-color (disable colors; also NO_COLOR),
                         --no-update-check (skip the periodic update offer; also GROUNDHOG_NO_UPDATE_CHECK=1).
@@ -91,6 +96,15 @@ internal static class GroundhogCommand
                            which keeps the key out of your shell history and process list.
           --pool <n>       Connections to keep open to the relay, 1 to 8 (default 2).
           -v, --verbose    Print one line per request.
+
+        Visitor access (who may reach the public address; leave out to keep the tunnel's current rules):
+          --allow <methods>        Default rule: anyone, or any of members, tokens, ips joined by commas.
+          --path <prefix>=<methods> A rule for one path prefix, for example --path /webhooks=anyone. Repeatable.
+          --ip <cidr>              An IP range for ips, for example 203.0.113.0/24. Repeatable.
+          --visitor-token-env <VAR> An environment variable holding a visitor token for tokens. Repeatable.
+                                   Only the token's SHA-256 hash is sent.
+          --access-file <file>     The rules as JSON ({"default":{"allow":[...]},"rules":[...],"ipRanges":[...]})
+                                   instead of --allow, --path and --ip.
 
         Exit codes: 0 stopped (Ctrl+C), 1 other failure, 2 bad arguments, 3 key rejected or unknown tunnel.
 
@@ -141,6 +155,11 @@ internal static class GroundhogCommand
             error.WriteLine($"groundhog: {ex.Message}");
             return ExitCodes.Failed;
         }
+        catch (UsageException ex)
+        {
+            error.WriteLine($"groundhog: {ex.Message}");
+            return ExitCodes.BadArguments;
+        }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -186,8 +205,7 @@ internal static class GroundhogCommand
             var profile = new ProfileStore(ProfileStore.DefaultDirectory).Read().SingleOrDefault(p => p.Name == args[0]);
             if (profile is not null)
             {
-                args = profile.Relay is null ? [profile.Name, "--target", profile.Target]
-                    : [profile.Name, "--target", profile.Target, "--relay", profile.Relay];
+                args = profile.ToHostArguments();
             }
         }
         var credential = getEnvironmentVariable(HostArguments.KeyVariable);
@@ -232,6 +250,7 @@ internal static class GroundhogCommand
                 LocalCaFile = arguments.LocalCaFile,
                 InsecureLocal = arguments.InsecureLocal,
                 PoolSize = arguments.Pool ?? ConnectionPool.DefaultSize,
+                VisitorAccess = arguments.VisitorAccess,
                 Client = GroundhogClientInfo.FromAssembly("Groundhog.Cli", typeof(GroundhogCommand).Assembly),
             });
         }
@@ -252,7 +271,7 @@ internal static class GroundhogCommand
         var telemetry = new SessionTelemetry(arguments.Name, arguments.LocalTarget);
         await using var sessions = new LocalSessions(telemetry, hostStop);
         var interactive = view is not null || (ReferenceEquals(output, Console.Out) && InteractiveCli.Available);
-        var reporter = new StatusReporter(output, error, arguments.LocalTarget, arguments.Verbose);
+        var reporter = new StatusReporter(output, error, arguments.LocalTarget, arguments.Verbose, arguments.VisitorAccess is not null);
         agent.StatusChanged += (_, status) => { telemetry.OnStatus(status); if (!interactive) { reporter.OnStatus(status); } };
         agent.RequestCompleted += (_, request) => { telemetry.OnRequest(request); if (!interactive) { reporter.OnRequest(request); } };
         GroundhogAgentStopReason reason;
@@ -299,7 +318,7 @@ internal static class GroundhogCommand
     }
 
     /// <summary>Turns the agent's events into the command's output lines.</summary>
-    private sealed class StatusReporter(TextWriter output, TextWriter error, Uri target, bool verbose)
+    private sealed class StatusReporter(TextWriter output, TextWriter error, Uri target, bool verbose, bool declaresAccess)
     {
         private readonly Lock _gate = new();
         private readonly string _arrow = CanWrite(output, "→") ? "→" : "->";
@@ -359,7 +378,9 @@ internal static class GroundhogCommand
                 case GroundhogAgentStopReason.SessionReplaced:
                     output.WriteLine($"Stopped: {status.Reason}");
                     break;
-                case GroundhogAgentStopReason.CredentialRejected or GroundhogAgentStopReason.NotAllowed:
+                // A refused visitor access declaration is also a 403; the relay's reason then says what to fix.
+                case GroundhogAgentStopReason.CredentialRejected:
+                case GroundhogAgentStopReason.NotAllowed when !declaresAccess:
                     error.WriteLine($"Stopped: {status.Reason} Check the key in {HostArguments.KeyVariable} or --key.");
                     break;
                 default:

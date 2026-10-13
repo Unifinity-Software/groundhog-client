@@ -3,7 +3,22 @@ using Groundhog.Protocol;
 
 namespace Groundhog.Cli;
 
-internal sealed record TunnelProfile(string Name, string Target, string? Relay = null);
+/// <summary>A saved <c>host</c> setup. <paramref name="Access"/> keeps visitor access options, never token values.</summary>
+internal sealed record TunnelProfile(string Name, string Target, string? Relay = null, VisitorAccessFlags? Access = null)
+{
+    /// <summary>The <c>host</c> arguments this profile stands for.</summary>
+    internal string[] ToHostArguments()
+    {
+        var args = new List<string> { Name, "--target", Target };
+        if (Relay is not null)
+        {
+            args.AddRange(["--relay", Relay]);
+        }
+
+        args.AddRange(Access?.ToArguments() ?? []);
+        return [.. args];
+    }
+}
 
 internal sealed class ProfileStore(string directory)
 {
@@ -36,17 +51,12 @@ internal sealed class ProfileStore(string directory)
 
     internal static void Validate(TunnelProfile profile)
     {
-        // Reuse argument validation with a generated placeholder credential; never persist a credential.
-        var args = new List<string> { profile.Name, "--target", profile.Target };
-        if (profile.Relay is not null)
-        {
-            args.AddRange(["--relay", profile.Relay]);
-        }
-
-        var (parsed, error, _) = HostArguments.Parse(args, _ => ConnectionKey.Generate());
+        // Reuse argument validation with generated placeholder credentials (the key and any visitor tokens);
+        // never persist a credential.
+        var (parsed, error, _) = HostArguments.Parse(profile.ToHostArguments(), _ => ConnectionKey.Generate());
         if (parsed is null)
         {
-            throw new ArgumentException(error);
+            throw new UsageException(error ?? "Invalid profile.");
         }
 
         _ = new Groundhog.Agent.GroundhogAgent(new()

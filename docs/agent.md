@@ -60,6 +60,7 @@ groundhog host <name> (--port <port> | --target <url>) [options]
 | `--key <key>` | The tunnel's connection key. Prefer the `GROUNDHOG_KEY` environment variable (below). |
 | `--pool <n>` | How many connections to keep open to the relay, 1 to 8. Default 2. |
 | `-v`, `--verbose` | Print one line per request. |
+| `--allow`, `--path`, `--ip`, `--visitor-token-env`, `--access-file` | Declare the tunnel's visitor access rules; see [the CLI guide](cli.md#visitor-access-rules). |
 
 Pass the key through `GROUNDHOG_KEY` using a hidden prompt, so its literal value stays out of your
 shell history and command-line arguments. The environment still contains the key until cleared. `--key` wins if you give both. The command never prints the key.
@@ -142,9 +143,11 @@ It stops instead of retrying when retrying can't help:
 | You pressed Ctrl+C | `Stopped.` | 0 |
 | Another agent started hosting the same tunnel (the newer one wins) | `Stopped: Another agent started hosting this tunnel …` | 0 |
 | The relay rejected the key, or the key was revoked or regenerated | `Stopped: The relay rejected the credential …` | 3 |
-| The key is valid but belongs to another tunnel | `Stopped: The credential isn't allowed to host tunnel …` | 3 |
+| The key is valid but belongs to another tunnel | `Stopped: The relay refused to host tunnel … (HTTP 403): <the relay's reason>` | 3 |
 | The relay has no tunnel with that name, or it was deleted or renamed | `Stopped: The relay has no tunnel named …` | 3 |
 | The relay speaks a different protocol version | `Stopped: The relay doesn't support protocol version 1 …` | 1 |
+| You declared visitor access rules and the relay refused them | `Stopped: The relay refused to host tunnel … (HTTP 403): <the relay's reason>` | 3 |
+| You declared visitor access rules and the relay doesn't support them | `Stopped: This relay doesn't support visitor access rules; update the relay or remove them.` | 1 |
 | Missing or invalid arguments, or a malformed key | `groundhog: …` and a pointer to `--help` | 2 |
 
 ### What your app sees
@@ -218,6 +221,48 @@ GroundhogAgentStopReason reason = await agent.RunAsync(stop.Token);
   tests.
 - For HTTPS, set `LocalTarget` to the HTTPS origin. Optional `LocalCaFile` and `InsecureLocal` expose the same
   loopback-only controls as the CLI; insecure mode also emits a warning through `LoggerFactory`.
+
+### Visitor access rules
+
+Set `VisitorAccess` to declare who may visit the tunnel, so the rules live with your app's configuration instead of
+in the dashboard:
+
+```csharp
+using Groundhog.Protocol;
+
+var agent = new GroundhogAgent(new GroundhogAgentOptions
+{
+    TunnelName = "myapp",
+    Credential = new TunnelKeyCredential(Environment.GetEnvironmentVariable("GROUNDHOG_KEY")!),
+    LocalTarget = new Uri("http://localhost:5173"),
+    VisitorAccess = new GroundhogVisitorAccess
+    {
+        Allow = [VisitorAccessMethods.Members],                        // the default rule
+        Rules =
+        [
+            new VisitorAccessPathRule("/webhooks", [VisitorAccessMethods.Anyone]),
+            new VisitorAccessPathRule("/api", [VisitorAccessMethods.Tokens, VisitorAccessMethods.Ips]),
+        ],
+        IpRanges = ["203.0.113.0/24"],
+        Tokens = [Environment.GetEnvironmentVariable("MYAPP_VISITOR_TOKEN")!],
+    },
+});
+```
+
+- `Allow` is the default rule (who may visit paths no rule matches) and defaults to `anyone`. Each rule's path is a
+  prefix; the longest match wins, on segment boundaries and ignoring case.
+- Methods: `anyone` (on its own), `members` (signed-in members of the tunnel's workspace), `tokens` (a visitor
+  token in the `X-Groundhog-Visitor-Token` header) and `ips` (an address in `IpRanges`). A request passes when any
+  listed method passes.
+- Visitor tokens are 43 base64url characters; create one with `VisitorToken.Generate()` or
+  `groundhog token create`, and keep it in a secret store. The agent sends only each token's SHA-256 hash.
+- The constructor checks the rules with the same validator the service uses (limits: 32 rules, 64 IP ranges,
+  10 tokens) and throws `ArgumentException` for the first problem.
+- The rules are sent on every connection. If the tunnel's visitor access is managed in the dashboard, or the
+  rules are refused, the agent stops with `NotAllowed` and the service's reason. A service that doesn't confirm
+  it applied the rules stops the agent with `VisitorAccessUnsupported`, so declared rules are never silently
+  ignored.
+- Leave `VisitorAccess` unset to keep whatever rules the tunnel already has.
 
 ### Custom credentials
 

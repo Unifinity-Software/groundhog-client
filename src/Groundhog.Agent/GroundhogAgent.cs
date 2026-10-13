@@ -64,6 +64,8 @@ public sealed class GroundhogAgent
             PoolSize = options.PoolSize,
             TimeProvider = options.TimeProvider,
             LoggerFactory = options.LoggerFactory,
+            VisitorAccess = options.VisitorAccess,
+            VisitorAccessHeader = options.VisitorAccess?.ToDeclaration().Encode(),
             Client = options.Client ?? new GroundhogClientInfo("Groundhog.Agent", Version),
         };
         _logger = (options.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger("Groundhog.Agent");

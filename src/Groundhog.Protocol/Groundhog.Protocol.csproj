@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Groundhog.Protocol</PackageId>
-    <Description>Shared constants and types for the Groundhog relay ⇄ agent protocol: paths, headers, close codes, tunnel-name rules, connection keys, the reconnect schedule and a WebSocket stream adapter.</Description>
+    <Description>Shared constants and types for the Groundhog relay ⇄ agent protocol: paths, headers, close codes, tunnel-name rules, connection keys, visitor access rules, the reconnect schedule and a WebSocket stream adapter.</Description>
   </PropertyGroup>
 
 </Project>
