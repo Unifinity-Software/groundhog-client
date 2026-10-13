@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Groundhog.Agent;
 using Groundhog.Cli.Interactive;
 using Microsoft.Extensions.Time.Testing;
@@ -104,7 +105,8 @@ internal sealed class FakeServices : IInteractiveServices
             string[] methods = ["GET", "POST", "GET", "GET", "GET", "POST", "PUT"];
             int[] statuses = [200, 201, 200, 304, 200, 302, 200, 404, 200, 502];
             return Enumerable.Range(0, 30).Select(i => new RemoteRequest(Now.AddSeconds(-i * 17 - 3), methods[i % methods.Length],
-                paths[i % paths.Length].Replace("?q=", "", StringComparison.Ordinal), statuses[i % statuses.Length], 12 + i * 37 % 240)).ToArray();
+                paths[i % paths.Length].Replace("?q=", "", StringComparison.Ordinal), statuses[i % statuses.Length], 12 + i * 37 % 240,
+                $"req-{i:D3}")).ToArray();
         }
     }
 
@@ -143,6 +145,31 @@ internal sealed class FakeServices : IInteractiveServices
     public Task<TunnelInsight> TunnelAsync(string workspace, string name, CancellationToken cancellation) =>
         Task.FromResult(new TunnelInsight(Tunnels.FirstOrDefault(t => t.Name == name) ?? Tunnel(name, "Connected", 0, 0, 0, 0, TimeSpan.Zero),
             Usage, RemoteRequests, null));
+
+    /// <summary>Requests the live stream delivers, in order; the stream stays open until the screen closes it.</summary>
+    internal Channel<RemoteRequest> LiveRequests { get; } = Channel.CreateUnbounded<RemoteRequest>();
+
+    /// <summary>How many live streams were opened, and completes each time one is closed.</summary>
+    internal int Follows { get; private set; }
+    internal TaskCompletionSource FollowClosed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task FollowRequestsAsync(string workspace, string name, IEnumerable<RemoteRequest> known,
+        Action<RemoteRequest> onRequest, Action<LiveState> onState, CancellationToken cancellation)
+    {
+        Follows++;
+        try
+        {
+            onState(new(LiveStatus.Live));
+            await foreach (var request in LiveRequests.Reader.ReadAllAsync(cancellation))
+            {
+                onRequest(request);
+            }
+        }
+        finally
+        {
+            FollowClosed.TrySetResult();
+        }
+    }
 
     public Task<LocalAgent[]> LocalAgentsAsync(CancellationToken cancellation)
     {

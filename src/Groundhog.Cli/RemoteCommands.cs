@@ -17,7 +17,11 @@ internal static class RemoteCommands
         var options = Options.Parse(args[1..]);
         if (args[0] == "requests")
         {
-            options.RequireKnown("--remote", "--workspace", "--output", "--status", "--method", "--path", "--since", "--min-duration", "--limit");
+            options.RequireKnown("--remote", "--workspace", "--output", "--status", "--method", "--path", "--since", "--min-duration", "--limit", "--follow");
+            if (options.Has("--follow") && options.Get("--output") == "json")
+            {
+                throw new ArgumentException("JSON output is a snapshot.");
+            }
         }
         else if (args[0] == "stats") { options.RequireKnown("--remote", "--workspace", "--output"); }
         else { options.RequireKnown("--relay", "--workspace", "--output", "--yes", "--status"); }
@@ -174,7 +178,13 @@ internal static class RemoteCommands
                 output.WriteLine("Remote persisted request metadata · filters apply to the newest 200 matching server records.");
                 UtilityCommands.Render(output, TerminalViews.Requests(filtered));
             }
-            return 0;
+
+            if (!options.Has("--follow"))
+            {
+                return 0;
+            }
+
+            return await FollowAsync(client, workspaceSlug, name, search, records.Entries, options, output, error, cancellation);
         }
         if (args[0] == "stats")
         {
@@ -272,6 +282,39 @@ internal static class RemoteCommands
         store.Save(session);
     }
     private static string Plain(string value) => new(value.Where(c => !char.IsControl(c)).ToArray());
+
+    /// <summary>
+    /// <c>requests &lt;name&gt; --remote --follow</c>: after the snapshot, prints each request the service finishes, one line
+    /// each, until Ctrl+C. Filters other than <c>--since</c> and <c>--limit</c> apply to every line.
+    /// </summary>
+    private static async Task<int> FollowAsync(ManagementClient client, string workspace, string name, string search,
+        RemoteRequest[] known, Options options, TextWriter output, TextWriter error, CancellationToken cancellation)
+    {
+        var follower = new RequestFollower(
+            token => client.OpenRequestStreamAsync(workspace, name, token),
+            async token => (await client.SendAsync<RemoteSearchResult>(HttpMethod.Get, search, null, token)).Entries,
+            TimeProvider.System);
+        follower.Seen(known);
+        output.WriteLine("Following live requests · Ctrl+C to stop.");
+        output.Flush();
+        string? stopped = null;
+        await follower.RunAsync(request =>
+        {
+            var record = new RequestRecord(request.Completed, request.Method, request.Path, request.StatusCode, request.DurationMs, false, null);
+            if (UtilityCommands.Filter([record], options, request.Completed).Length == 0)
+            {
+                return;
+            }
+
+            output.WriteLine(Line(record));
+            output.Flush();
+        }, state => stopped = state.Status == LiveStatus.Stopped ? state.Message : stopped, cancellation);
+        error.WriteLine("groundhog: live requests stopped. " + stopped);
+        return ExitCodes.Failed;
+    }
+
+    internal static string Line(RequestRecord r) =>
+        $"{r.Time:HH:mm:ss}  {Plain(r.Method),-7} {r.Status,3} {r.DurationMs,8:0.##} ms  {Plain(r.Path)}";
 
     /// <summary>
     /// Runs the browser-approved device sign-in. The interactive app passes <paramref name="challenge"/> to draw the code

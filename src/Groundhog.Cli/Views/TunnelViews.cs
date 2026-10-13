@@ -6,7 +6,7 @@ namespace Groundhog.Cli.Views;
 
 /// <summary>The tunnel detail screen's model. <see cref="Insight"/> is null while loading.</summary>
 internal sealed record TunnelDetailModel(string Workspace, string Name, TunnelInsight? Insight, string? Problem,
-    LocalAgent? LocalAgent, DateTimeOffset Now);
+    LocalAgent? LocalAgent, DateTimeOffset Now, LiveState? Live = null);
 
 internal static class TunnelViews
 {
@@ -78,14 +78,14 @@ internal static class TunnelViews
                 new Layout("overview", overview).Ratio(2),
                 new Layout("status", breakdown).Ratio(1));
             var requestRows = Math.Max(1, size.Height - overviewHeight - 4);
-            return new Layout("detail").SplitRows(top, new Layout("requests", Requests(insight, requestRows, size)));
+            return new Layout("detail").SplitRows(top, new Layout("requests", Requests(insight, model.Live, requestRows, size)));
         }
 
         var narrowRows = Math.Max(1, size.Height - overviewHeight - 4 - 4);
         return new Layout("detail").SplitRows(
             new Layout("overview", overview).Size(overviewHeight),
             new Layout("status", breakdown).Size(4),
-            new Layout("requests", Requests(insight, narrowRows, size)));
+            new Layout("requests", Requests(insight, model.Live, narrowRows, size)));
     }
 
     private static IRenderable Overview(TunnelDetailModel model)
@@ -158,8 +158,15 @@ internal static class TunnelViews
         return Theme.Section("Status classes", new Rows(rows));
     }
 
-    private static IRenderable Requests(TunnelInsight insight, int maxRows, ViewSize size)
+    private static IRenderable Requests(TunnelInsight insight, LiveState? live, int maxRows, ViewSize size)
     {
+        var title = live?.Status switch
+        {
+            LiveStatus.Live => "Recent requests · live",
+            LiveStatus.Reconnecting => "Recent requests · reconnecting…",
+            _ => "Recent requests · service log",
+        };
+
         if (insight.Requests is null)
         {
             return Theme.Section("Recent requests", new Markup(Theme.Dim(Theme.Safe(insight.Problem ?? "The request log is unavailable."))));
@@ -167,7 +174,8 @@ internal static class TunnelViews
 
         if (insight.Requests.Length == 0)
         {
-            return Theme.Section("Recent requests", new Markup(Theme.Dim("No requests recorded yet.")));
+            return Theme.Section(title, new Markup(Theme.Dim(live?.Status == LiveStatus.Live
+                ? "No requests recorded yet. New requests appear here as they finish." : "No requests recorded yet.")));
         }
 
         var table = Theme.Grid("Time (UTC)", "Method", "Path", "Status", "Duration");
@@ -175,13 +183,20 @@ internal static class TunnelViews
         table.Columns[4].RightAligned();
         table.Columns[2].NoWrap = true;
         var pathWidth = Math.Max(10, size.Width - 48);
-        foreach (var r in insight.Requests.OrderByDescending(r => r.Completed).Take(Math.Max(1, maxRows)))
+        var stopped = live is { Status: LiveStatus.Stopped, Message: not null };
+        // The caption takes one of the rows, so it stays visible.
+        foreach (var r in insight.Requests.OrderByDescending(r => r.Completed).Take(Math.Max(1, stopped ? maxRows - 1 : maxRows)))
         {
             table.AddRow(r.Completed.ToString("HH:mm:ss"), Theme.Safe(r.Method), Theme.Safe(Theme.Clip(r.Path, pathWidth)),
                 Theme.StatusCode(r.StatusCode), Theme.Milliseconds(r.DurationMs));
         }
 
-        return Theme.Section("Recent requests · service log", table);
+        if (stopped)
+        {
+            table.Caption = new TableTitle(Theme.Dim("Not updating: " + Theme.Safe(live!.Message!) + " Press R to reload."));
+        }
+
+        return Theme.Section(title, table);
     }
 
     internal static string Host(string url) =>

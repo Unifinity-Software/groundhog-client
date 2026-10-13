@@ -92,6 +92,14 @@ internal interface IInteractiveServices
     Task<TunnelInfo[]> TunnelsAsync(string workspace, CancellationToken cancellation);
     Task<TunnelInsight> TunnelAsync(string workspace, string name, CancellationToken cancellation);
     Task<LocalAgent[]> LocalAgentsAsync(CancellationToken cancellation);
+
+    /// <summary>
+    /// Reports each request the tunnel finishes, live, until <paramref name="cancellation"/> fires or the service stops
+    /// the stream for good. <paramref name="known"/> are already shown and are not reported again.
+    /// </summary>
+    Task FollowRequestsAsync(string workspace, string name, IEnumerable<RemoteRequest> known, Action<RemoteRequest> onRequest,
+        Action<LiveState> onState, CancellationToken cancellation);
+
     Task<SessionSnapshot?> QueryAgentAsync(SessionRegistration registration, bool stop, CancellationToken cancellation);
     TunnelProfile[] Profiles();
 
@@ -172,8 +180,7 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
         var path = ManagementClient.TunnelPath(workspace, name);
         var tunnel = client.SendAsync<TunnelInfo>(HttpMethod.Get, path, null, cancellation);
         var usage = client.SendAsync<JsonElement>(HttpMethod.Get, path + "/usage", null, cancellation);
-        var requests = client.SendAsync<RemoteSearchResult>(HttpMethod.Get,
-            $"/api/w/{Uri.EscapeDataString(workspace)}/requests?tunnel={Uri.EscapeDataString(name)}&limit=200", null, cancellation);
+        var requests = client.SendAsync<RemoteSearchResult>(HttpMethod.Get, RecentRequests(workspace, name), null, cancellation);
         // Wait for all three so none is left running against the disposed client; failures are inspected one by one.
         await Task.WhenAll(tunnel, usage, requests).ContinueWith(_ => { }, CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -203,6 +210,21 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
 
         return new(info, summary, entries, problem);
     }
+
+    public async Task FollowRequestsAsync(string workspace, string name, IEnumerable<RemoteRequest> known,
+        Action<RemoteRequest> onRequest, Action<LiveState> onState, CancellationToken cancellation)
+    {
+        using var client = Client();
+        var follower = new RequestFollower(
+            token => client.OpenRequestStreamAsync(workspace, name, token),
+            async token => (await client.SendAsync<RemoteSearchResult>(HttpMethod.Get, RecentRequests(workspace, name), null, token)).Entries,
+            TimeProvider.System);
+        follower.Seen(known);
+        await follower.RunAsync(onRequest, onState, cancellation);
+    }
+
+    private static string RecentRequests(string workspace, string name) =>
+        $"/api/w/{Uri.EscapeDataString(workspace)}/requests?tunnel={Uri.EscapeDataString(name)}&limit=200";
 
     public async Task<LocalAgent[]> LocalAgentsAsync(CancellationToken cancellation)
     {

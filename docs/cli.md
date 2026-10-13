@@ -40,7 +40,7 @@ and dashboards stack their panels and drop less important columns.
 | --- | --- |
 | Home | Account and workspace, tunnels with state, address, requests and data, agents on this machine, and requests per tunnel in the last hour |
 | Tunnels | The workspace's tunnels; Enter opens a tunnel, N creates one |
-| Tunnel detail | Public URL, state, traffic totals, a status-class breakdown, requests per minute and the service's recent request log, with actions |
+| Tunnel detail | Public URL, state, traffic totals, a status-class breakdown, requests per minute and the service's recent request log, updated live as requests finish, with actions |
 | Running agents | Agents hosting from this machine; Enter opens a live view of one, S stops it |
 | Saved profiles | [Saved profiles](#saved-profiles) (a tunnel name plus your app's local address) and whether each is running; Enter hosts one here, B starts it in the background, A adds, D deletes |
 | Workspaces | Your workspaces as a tree with the highlighted workspace's tunnels; Enter makes it the default |
@@ -63,7 +63,8 @@ and dashboards stack their panels and drop less important columns.
 | Q | Quit (Ctrl+C also quits) |
 
 Data refreshes by itself while a dashboard is open: local agents every few seconds, the account and tunnels every 30
-seconds. Text entry (a tunnel name, a local target) and confirmations appear inside the frame; while you type, letters
+seconds. A tunnel's request log follows the service live while its screen is open; its title says `live`,
+`reconnecting…`, or `service log` with the reason when live updates stopped (R reloads). Text entry (a tunnel name, a local target) and confirmations appear inside the frame; while you type, letters
 are text rather than shortcuts.
 
 ### Tunnels and their actions
@@ -282,12 +283,16 @@ agent over a named pipe restricted to the same OS user; they do not require acco
 groundhog stats myapp --remote
 groundhog requests myapp --remote --status 5xx
 groundhog requests myapp --remote --method POST --path /api/ --output json
+groundhog requests myapp --remote --follow --status 5xx
 ```
 
 Remote stats show the relay's stored usage window with status-class counts. Gaps indicate unavailable data;
 the current minute may not yet be persisted. Remote requests query the persisted request log and return metadata only.
 Status filtering runs on the service; other filters apply to its newest 200 matching records. Remote queries are snapshots,
 and their availability and retention depend on the service configuration. They work even when no local agent is running.
+`--follow` prints the snapshot, then one line per request as the service finishes it, until Ctrl+C. Status, method, path and
+duration filters apply to every line. It reconnects by itself and fills any gap from the request log, printing each request
+once; it stops if the sign-in expires or access is removed. It cannot be combined with `--output json`.
 
 ## Diagnose and automate
 
