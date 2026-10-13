@@ -38,7 +38,8 @@ internal static class InteractiveCli
         try
         {
             store.Save(new(name, target));
-            AnsiConsole.WriteLine("Profile saved. Supply its key through GROUNDHOG_KEY before hosting.");
+            AnsiConsole.WriteLine($"Profile saved. Host it with: groundhog host {name}");
+            AnsiConsole.WriteLine("Profiles never store keys; the key comes from GROUNDHOG_KEY or the one saved when you created the tunnel here.");
         }
         catch (ArgumentException ex) { AnsiConsole.Write(new Text(ex.Message)); }
     }

@@ -61,12 +61,23 @@ internal static class LocalViews
         return Theme.Section("Running agents", AgentTable(agents, size.Height - 4, now, size, selected), focus: true);
     }
 
-    internal static IRenderable Profiles(TunnelProfile[] profiles, LocalAgent[]? agents, int? selected, ViewSize size)
+    /// <summary>What a saved profile is, in one sentence; shown wherever profiles are listed.</summary>
+    internal const string ProfileExplanation =
+        "A saved profile remembers a tunnel's name and where your app runs, so you can host it again with one key. It never stores a connection key.";
+
+    internal const string ProfileGuide = "Guide: https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/cli.md#saved-profiles";
+
+    /// <summary>Saved profiles; <paramref name="preview"/> is the menu's preview pane, where the screen's keys don't work yet.</summary>
+    internal static IRenderable Profiles(TunnelProfile[] profiles, LocalAgent[]? agents, int? selected, ViewSize size, bool preview = false)
     {
         if (profiles.Length == 0)
         {
-            return Theme.Section("Saved profiles", new Markup(Theme.Dim(
-                "No saved profiles. Press A to save a tunnel name with its local target.\nProfiles never contain keys; supply them through GROUNDHOG_KEY or sign in.")));
+            return Theme.Section("Saved profiles", new Rows(
+                new Markup(Theme.Safe(ProfileExplanation)),
+                new Text(""),
+                new Markup(Theme.Dim(preview ? "No saved profiles yet. Open Saved profiles to add one."
+                    : "No saved profiles yet. Press A to add one: you give a tunnel name and your app's local address.")),
+                new Markup(Theme.Dim(Theme.Safe(ProfileGuide)))));
         }
 
         var table = Theme.Grid("", "Profile", "Local target", "Service", "On this machine");
@@ -83,10 +94,11 @@ internal static class LocalViews
                 running is null ? Theme.Dim("not running") : Theme.State(running.Snapshot.State));
         }
 
-        return Theme.Section("Saved profiles", table, focus: selected is not null);
+        return Theme.Section("Saved profiles", new Rows(table, new Text(""), new Markup(Theme.Dim(Theme.Safe(ProfileExplanation)))),
+            focus: selected is not null);
     }
 
-    internal static IRenderable Diagnostics(IReadOnlyList<CheckRow> rows, string spinner, bool done, ViewSize size)
+    internal static IRenderable Diagnostics(IReadOnlyList<CheckRow> rows, string spinner, bool done, ViewSize size, bool preview = false)
     {
         var table = new Table { Border = TableBorder.None, ShowHeaders = false };
         table.AddColumn(new TableColumn("") { Width = 2, NoWrap = true });
@@ -117,7 +129,7 @@ internal static class LocalViews
         var failed = rows.Count(r => r.State == CheckState.Failed);
         var warnings = rows.Count(r => r.State == CheckState.Warning);
         var summary = !done ? Theme.Dim("Running checks…")
-            : failed > 0 ? $"[{Theme.RedTag}]{Dashboard.Plural(failed, "check")} failed.[/] {Theme.Dim("Fix the items marked ✗, then press R to run the checks again.")}"
+            : failed > 0 ? $"[{Theme.RedTag}]{Dashboard.Plural(failed, "check")} failed.[/] {Theme.Dim(preview ? "Open Diagnostics to run the checks again." : "Fix the items marked ✗, then press R to run the checks again.")}"
             : warnings > 0 ? $"[{Theme.AmberTag}]All required checks passed, with {Dashboard.Plural(warnings, "warning")}.[/]"
             : $"[{Theme.GreenTag}]All checks passed.[/]";
         var note = Theme.Dim("Target checks send a HEAD request; any HTTP response proves the app is reachable, not that it is healthy.");
@@ -128,7 +140,8 @@ internal static class LocalViews
 /// <summary>Views of the account: workspaces and sign-in.</summary>
 internal static class AccountViews
 {
-    internal static IRenderable Workspaces(AccountState? account, int selected, IReadOnlyDictionary<string, TunnelInfo[]?> tunnels, ViewSize size)
+    internal static IRenderable Workspaces(AccountState? account, int selected, IReadOnlyDictionary<string, TunnelInfo[]?> tunnels, ViewSize size,
+        bool preview = false)
     {
         if (account is null)
         {
@@ -184,13 +197,15 @@ internal static class AccountViews
         }
 
         return Theme.Section("Workspaces", new Rows(tree, new Text(""),
-            new Markup(Theme.Dim("Enter makes the highlighted workspace your default for tunnels and commands."))), focus: true);
+            new Markup(Theme.Dim(preview ? "Open Workspaces to change your default workspace."
+                : "Enter makes the highlighted workspace your default for tunnels and commands."))), focus: !preview);
     }
 
     internal sealed record SignInModel(AccountState? Account, SignInChallenge? Challenge, bool Waiting, StatusMessage? Outcome,
         string Spinner, DateTimeOffset Now);
 
-    internal static IRenderable SignIn(SignInModel model, ViewSize size)
+    /// <summary>The sign-in screen; <paramref name="preview"/> is the menu's preview pane, which names no key but Enter.</summary>
+    internal static IRenderable SignIn(SignInModel model, ViewSize size, bool preview = false)
     {
         var rows = new List<IRenderable>();
         if (model.Challenge is { } challenge)
@@ -221,14 +236,20 @@ internal static class AccountViews
                 }
 
                 rows.Add(new Text(""));
-                rows.Add(new Markup($"{Chrome.KeyCap("Enter")} Sign in again   {Chrome.KeyCap("X")} Sign out and remove saved keys"));
+                rows.Add(preview
+                    ? new Markup(Theme.Dim("Press Enter to open Sign in, where you can sign in again or sign out."))
+                    : new Markup($"{Chrome.KeyCap("Enter")} Sign in again   {Chrome.KeyCap("X")} Sign out and remove saved keys"));
+            }
+            else if (model.Account is null)
+            {
+                rows.Add(new Markup(Theme.Dim("Checking whether this CLI is signed in…")));
             }
             else
             {
                 rows.Add(new Markup("Sign in to manage your remote tunnels from this terminal."));
                 rows.Add(new Markup(Theme.Dim("Your browser approves the CLI; the CLI never sees your password. Sessions last eight hours.")));
                 rows.Add(new Text(""));
-                rows.Add(new Markup($"{Chrome.KeyCap("Enter")} Sign in"));
+                rows.Add(preview ? new Markup(Theme.Dim("Press Enter to sign in.")) : new Markup($"{Chrome.KeyCap("Enter")} Sign in"));
             }
         }
 
@@ -239,6 +260,6 @@ internal static class AccountViews
             rows.Add(new Markup($"[{color}]{Theme.Safe(outcome.Text)}[/]"));
         }
 
-        return Theme.Section("Sign in to Groundhog", new Rows(rows), focus: true);
+        return Theme.Section("Sign in to Groundhog", new Rows(rows), focus: !preview);
     }
 }

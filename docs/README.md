@@ -9,6 +9,7 @@ The clients share protocol version 1 and the same connection and forwarding beha
 | Integrate with your AppHost | [Aspire reference](aspire.md) |
 | Run the CLI or embed the Agent | [Agent and CLI reference](agent.md) |
 | A full-screen terminal app, tunnel management and traffic queries | [CLI guide](cli.md) |
+| Host the same tunnel again with one word, or in the background | [Saved profiles](cli.md#saved-profiles) |
 | Diagnose failures or update credentials | [Troubleshooting](troubleshooting.md) |
 | Understand ownership and public source | [Source provenance](source-provenance.md) |
 | Understand the wire protocol | [Protocol contract](protocol.md) |
