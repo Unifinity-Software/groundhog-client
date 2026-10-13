@@ -39,6 +39,12 @@ public enum GroundhogAgentStopReason
 
     /// <summary>A newer agent session for the same tunnel replaced this one (close code 4409).</summary>
     SessionReplaced,
+
+    /// <summary>
+    /// The agent declared <see cref="GroundhogAgentOptions.VisitorAccess"/>, but the relay didn't confirm it applied
+    /// the rules: it predates visitor access.
+    /// </summary>
+    VisitorAccessUnsupported,
 }
 
 /// <summary>A change in a <see cref="GroundhogAgent"/>'s state.</summary>

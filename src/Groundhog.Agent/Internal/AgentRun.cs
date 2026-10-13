@@ -67,6 +67,7 @@ internal sealed class AgentRun
         finally
         {
             _stopping.Dispose();
+            _connector.Dispose();
         }
 
         GroundhogAgentStopReason reason;

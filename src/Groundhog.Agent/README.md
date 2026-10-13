@@ -22,11 +22,13 @@ var reason = await agent.RunAsync(cancellationToken);
   is built in.
 - `LocalTarget` accepts HTTP or HTTPS. TLS uses the target hostname while the app receives the public `Host`.
   HTTPS uses platform trust; optional `LocalCaFile` or `InsecureLocal` controls apply only to loopback HTTPS.
+- Optional `VisitorAccess` declares who may visit the tunnel (anyone, workspace members, visitor tokens, IP
+  ranges, per path). Visitor tokens are passed as plaintext from your secrets; only their SHA-256 hashes are sent.
 - `StatusChanged` reports connecting, connected (with the public address), reconnecting (with the reason and the
   wait) and stopped. `RequestCompleted` reports each request's method, path (without query string), status and
   duration.
 - `RunAsync` returns why the agent stopped: cancelled, credential rejected, not allowed, unknown tunnel,
-  unsupported protocol, or replaced by a newer session.
+  unsupported protocol, replaced by a newer session, or a service that doesn't support declared visitor access rules.
 
 Requires the ASP.NET Core shared framework (.NET 10 or later). See `docs/agent.md` in the source repository for
 the full guide.

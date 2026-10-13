@@ -55,6 +55,19 @@ public sealed class GroundhogAgentOptions
     /// </summary>
     public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 
+    /// <summary>
+    /// The tunnel's visitor access rules, declared on every connection, or <see langword="null"/> (the default) to
+    /// leave the rules stored on the relay unchanged.
+    /// </summary>
+    /// <remarks>
+    /// A relay that doesn't confirm it applied the rules stops the agent with
+    /// <see cref="GroundhogAgentStopReason.VisitorAccessUnsupported"/>, so declared rules are never silently ignored.
+    /// </remarks>
+    public GroundhogVisitorAccess? VisitorAccess { get; set; }
+
+    /// <summary>The encoded <see cref="VisitorAccess"/> declaration, set when the agent copies its options.</summary>
+    internal string? VisitorAccessHeader { get; set; }
+
     /// <summary>Where the agent writes its diagnostic logs. Defaults to none.</summary>
     public ILoggerFactory? LoggerFactory { get; set; }
 
@@ -114,6 +127,8 @@ public sealed class GroundhogAgentOptions
         {
             throw new ArgumentException("A time provider is required.", nameof(TimeProvider));
         }
+
+        _ = VisitorAccess?.ToDeclaration();
     }
 
     private static string DescribeNameProblem(TunnelNameValidation problem) => problem switch

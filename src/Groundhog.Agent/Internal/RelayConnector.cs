@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Net;
 using System.Net.WebSockets;
+using System.Text;
 using Groundhog.Protocol;
 
 namespace Groundhog.Agent.Internal;
@@ -19,8 +21,14 @@ internal abstract record ConnectOutcome
 }
 
 /// <summary>Opens WebSockets to the relay's connect endpoint and classifies the result.</summary>
-internal sealed class RelayConnector
+internal sealed class RelayConnector : IDisposable
 {
+    /// <summary>The longest refusal message read from the relay's response body, in characters.</summary>
+    internal const int MaxRefusalMessageLength = 200;
+
+    // How much of a refusal's body is read: enough for a message, never a whole page.
+    private const int MaxRefusalBodyBytes = 2048;
+
     /// <summary>The longest a single connection attempt may take, so a dead network can't hang the agent.</summary>
     public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(30);
 
@@ -30,15 +38,23 @@ internal sealed class RelayConnector
     private readonly GroundhogAgentOptions _options;
     private readonly Uri _connectUri;
     private readonly Guid _sessionId;
-    private readonly Func<HttpMessageInvoker?> _invokerFactory;
+    // Like ClientWebSocket's own handler (system proxy, no cookies, no connection reuse), but owned here so a
+    // refusal's body can be read.
+    private readonly SocketsHttpHandler _handler = new()
+    {
+        PooledConnectionLifetime = TimeSpan.Zero,
+        UseCookies = false,
+        AllowAutoRedirect = false,
+    };
 
-    public RelayConnector(GroundhogAgentOptions options, Guid sessionId, Func<HttpMessageInvoker?>? invokerFactory = null)
+    public RelayConnector(GroundhogAgentOptions options, Guid sessionId)
     {
         _options = options;
         _sessionId = sessionId;
         _connectUri = BuildConnectUri(options.RelayAddress!, options.TunnelName!);
-        _invokerFactory = invokerFactory ?? (() => null);
     }
+
+    public void Dispose() => _handler.Dispose();
 
     public static Uri BuildConnectUri(Uri relayAddress, string tunnelName)
     {
@@ -77,6 +93,11 @@ internal sealed class RelayConnector
             settings.SetRequestHeader(GroundhogHeaders.ClientVersion, client.Version);
         }
         settings.SetRequestHeader(GroundhogHeaders.Session, _sessionId.ToString("D"));
+        if (_options.VisitorAccessHeader is { } visitorAccess)
+        {
+            settings.SetRequestHeader(GroundhogHeaders.VisitorAccess, visitorAccess);
+        }
+
         settings.CollectHttpResponseDetails = true;
 
         // Ping every 15 s; a ping not answered within 30 s means 45 s without hearing from the relay, which
@@ -86,9 +107,14 @@ internal sealed class RelayConnector
 
         using var timeout = new CancellationTokenSource(ConnectTimeout, _options.TimeProvider);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+
+        // The capturing handler wraps the shared one and must not dispose it, so neither it nor the invoker is
+        // disposed.
+        var capture = new RefusalCapture(_handler);
+        var invoker = new HttpMessageInvoker(capture, disposeHandler: false);
         try
         {
-            await webSocket.ConnectAsync(_connectUri, _invokerFactory(), linked.Token).ConfigureAwait(false);
+            await webSocket.ConnectAsync(_connectUri, invoker, linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -97,7 +123,7 @@ internal sealed class RelayConnector
         }
         catch (Exception ex) when (ex is WebSocketException or HttpRequestException or IOException)
         {
-            var outcome = Classify(webSocket, token);
+            var outcome = Classify(webSocket, token, capture.Message);
             webSocket.Dispose();
             return outcome;
         }
@@ -107,12 +133,44 @@ internal sealed class RelayConnector
             throw;
         }
 
+        if (_options.VisitorAccessHeader is not null
+            && !string.Equals(Header(webSocket, GroundhogHeaders.VisitorAccess)?.Trim(), GroundhogHeaders.VisitorAccessApplied,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            // An older relay accepted the connection without the rules; hosting without them would expose the app.
+            await CloseQuietlyAsync(webSocket, cancellationToken).ConfigureAwait(false);
+            return new ConnectOutcome.Refused(
+                (int)HttpStatusCode.SwitchingProtocols,
+                GroundhogAgentStopReason.VisitorAccessUnsupported,
+                "This relay doesn't support visitor access rules; update the relay or remove them.",
+                false);
+        }
+
         var publicAddress = ReadPublicAddress(webSocket) ?? DefaultPublicAddress();
         webSocket.HttpResponseHeaders = null;
         return new ConnectOutcome.Connected(webSocket, publicAddress);
     }
 
-    private ConnectOutcome Classify(ClientWebSocket webSocket, GroundhogAccessToken token)
+    private async Task CloseQuietlyAsync(ClientWebSocket webSocket, CancellationToken cancellationToken)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5), _options.TimeProvider);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        try
+        {
+            await webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "visitor access unsupported", linked.Token)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is WebSocketException or IOException or OperationCanceledException)
+        {
+            // The socket is disposed either way.
+        }
+        finally
+        {
+            webSocket.Dispose();
+        }
+    }
+
+    private ConnectOutcome Classify(ClientWebSocket webSocket, GroundhogAccessToken token, string? relayMessage)
     {
         var status = (int)webSocket.HttpStatusCode;
         if (status < 400)
@@ -137,7 +195,9 @@ internal sealed class RelayConnector
                 return new ConnectOutcome.Refused(
                     status,
                     GroundhogAgentStopReason.NotAllowed,
-                    $"The credential isn't allowed to host tunnel '{name}' (HTTP 403).",
+                    relayMessage is null
+                        ? $"The credential isn't allowed to host tunnel '{name}' (HTTP 403)."
+                        : $"The relay refused to host tunnel '{name}' (HTTP 403): {relayMessage}",
                     false);
             case ConnectRefusal.UnknownTunnel:
                 return new ConnectOutcome.Refused(
@@ -184,5 +244,75 @@ internal sealed class RelayConnector
         var scheme = relay.Scheme is "wss" or "https" ? "https" : "http";
         var builder = new UriBuilder(scheme, relay.Host, relay.IsDefaultPort ? -1 : relay.Port);
         return builder.Uri;
+    }
+
+    /// <summary>
+    /// The first line of a refusal's <c>text/plain</c> body, with control characters removed, at most
+    /// <see cref="MaxRefusalMessageLength"/> characters, ending in a full stop; <see langword="null"/> if empty.
+    /// </summary>
+    internal static string? ToRefusalMessage(string body)
+    {
+        var line = body.Split('\n', 2)[0];
+        var builder = new StringBuilder(Math.Min(line.Length, MaxRefusalMessageLength + 1));
+        foreach (var c in line)
+        {
+            if (builder.Length == MaxRefusalMessageLength)
+            {
+                builder.Append('…');
+                break;
+            }
+
+            if (!char.IsControl(c))
+            {
+                builder.Append(c);
+            }
+        }
+
+        var message = builder.ToString().Trim();
+        if (message.Length == 0)
+        {
+            return null;
+        }
+
+        return message[^1] is '.' or '!' or '?' or '…' ? message : message + ".";
+    }
+
+    /// <summary>
+    /// Passes the WebSocket upgrade through and, when the relay refuses with 403, keeps the start of its message.
+    /// </summary>
+    private sealed class RefusalCapture(HttpMessageHandler inner) : DelegatingHandler(inner)
+    {
+        public string? Message { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if ((int)response.StatusCode == ConnectRefusal.Forbidden
+                && response.Content.Headers.ContentType?.MediaType == "text/plain")
+            {
+                try
+                {
+                    var buffer = new byte[MaxRefusalBodyBytes];
+                    var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                    var read = 0;
+                    int count;
+                    while (read < buffer.Length
+                           && (count = await stream.ReadAsync(buffer.AsMemory(read), cancellationToken).ConfigureAwait(false)) > 0)
+                    {
+                        read += count;
+                    }
+
+                    Message = ToRefusalMessage(Encoding.UTF8.GetString(buffer, 0, read));
+                }
+                catch (Exception ex) when (ex is IOException or HttpRequestException)
+                {
+                    // The status alone still says what happened.
+                }
+            }
+
+            return response;
+        }
     }
 }
