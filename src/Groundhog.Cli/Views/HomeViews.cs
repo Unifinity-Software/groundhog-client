@@ -51,9 +51,11 @@ internal static class HomeViews
         var items = new List<IRenderable>();
         for (var i = 0; i < entries.Count; i++)
         {
+            // The number is the entry's shortcut: pressing it opens the entry directly.
+            var number = i < 9 ? $"{i + 1} " : "";
             items.Add(i == selected
-                ? new Bar($" [bold]▶ {Theme.Safe(entries[i].Title)}[/]", null, new Style(Theme.Ink, Theme.Signal))
-                : new Bar($"   {Theme.Safe(entries[i].Title)}", null, new Style(Theme.Text)));
+                ? new Bar($" [bold]▶ {Theme.Safe(entries[i].Title)}[/]", number, new Style(Theme.Ink, Theme.Signal))
+                : new Bar($"   {Theme.Safe(entries[i].Title)}", Theme.Dim(number), new Style(Theme.Text)));
         }
 
         var description = new Markup(Theme.Dim(Theme.Safe(entries[selected].Description)));
@@ -204,9 +206,10 @@ internal static class HomeViews
         Group("Everywhere");
         Key("↑ ↓  j k", "Move the highlight");
         Key("Enter", "Open the highlighted item");
+        Key("1–9", "Open a menu entry by its number");
         Key("Esc  Backspace", "Back to the previous screen");
         Key("R", "Refresh");
-        Key("?", "This help");
+        Key("?  F1", "This help");
         Key("Q", "Quit (Ctrl+C also quits)");
         Group("Tunnel detail");
         Key("O  C", "Open the public URL · copy it");

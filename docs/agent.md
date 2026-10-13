@@ -43,7 +43,7 @@ and key. `groundhog doctor` checks that the service is reachable and supports pr
 
 ## Use the command
 
-See the [illustrated CLI guide](cli.md) for the full-screen terminal app, remote tunnel discovery, profiles, background agents,
+See the [illustrated CLI guide](cli.md) for the full-screen terminal app, remote tunnel discovery, [saved profiles](cli.md#saved-profiles), background agents,
 traffic queries and diagnostics. The reference below covers key-based foreground hosting.
 
 ```

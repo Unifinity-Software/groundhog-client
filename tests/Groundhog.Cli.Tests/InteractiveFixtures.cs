@@ -66,6 +66,10 @@ internal sealed class FakeServices : IInteractiveServices
     internal HostSession? LastSession { get; private set; }
     internal TunnelProfile[] ProfileList { get; set; } =
         [new("api-preview", "https://localhost:7132"), new("myapp", "http://localhost:5173")];
+    internal LocalAgent[] AgentList { get; set; } = [Agent()];
+
+    /// <summary>How many service reads and checks ran; a key that reloads or rechecks something changes it.</summary>
+    internal int Calls { get; private set; }
 
     public string Version => "0.4.0-preview.1";
 
@@ -125,9 +129,13 @@ internal sealed class FakeServices : IInteractiveServices
     internal static LocalAgent Agent(string name = "myapp") =>
         new(new SessionRegistration(name, "groundhog-" + new string('0', 32), 4242), Session(name));
 
-    public Task<AccountState> AccountAsync(CancellationToken cancellation) => Task.FromResult(SignedIn
-        ? new AccountState(Account, "web-team", Now.AddHours(7).AddMinutes(12), GroundhogService.DefaultRelayAddress, null)
-        : new AccountState(null, null, null, GroundhogService.DefaultRelayAddress, "Not signed in."));
+    public Task<AccountState> AccountAsync(CancellationToken cancellation)
+    {
+        Calls++;
+        return Task.FromResult(SignedIn
+            ? new AccountState(Account, "web-team", Now.AddHours(7).AddMinutes(12), GroundhogService.DefaultRelayAddress, null)
+            : new AccountState(null, null, null, GroundhogService.DefaultRelayAddress, "Not signed in."));
+    }
 
     public Task<TunnelInfo[]> TunnelsAsync(string workspace, CancellationToken cancellation) =>
         Task.FromResult(workspace == "web-team" ? Tunnels : [Tunnel("blog", "Disconnected", 0, 0, 0, 0, TimeSpan.FromDays(3))]);
@@ -136,7 +144,11 @@ internal sealed class FakeServices : IInteractiveServices
         Task.FromResult(new TunnelInsight(Tunnels.FirstOrDefault(t => t.Name == name) ?? Tunnel(name, "Connected", 0, 0, 0, 0, TimeSpan.Zero),
             Usage, RemoteRequests, null));
 
-    public Task<LocalAgent[]> LocalAgentsAsync(CancellationToken cancellation) => Task.FromResult<LocalAgent[]>([Agent()]);
+    public Task<LocalAgent[]> LocalAgentsAsync(CancellationToken cancellation)
+    {
+        Calls++;
+        return Task.FromResult(AgentList);
+    }
 
     public Task<SessionSnapshot?> QueryAgentAsync(SessionRegistration registration, bool stop, CancellationToken cancellation)
     {
@@ -185,8 +197,11 @@ internal sealed class FakeServices : IInteractiveServices
         return pending.Task;
     }
 
-    public Task<DoctorCheck> CheckServiceAsync(string relay, CancellationToken cancellation) =>
-        Task.FromResult(new DoctorCheck("Relay health and protocol", true, "Relay supports protocol 1."));
+    public Task<DoctorCheck> CheckServiceAsync(string relay, CancellationToken cancellation)
+    {
+        Calls++;
+        return Task.FromResult(new DoctorCheck("Relay health and protocol", true, "Relay supports protocol 1."));
+    }
 
     public Task<DoctorCheck> CheckTargetAsync(string target, CancellationToken cancellation) => Task.FromResult(target.Contains("7132", StringComparison.Ordinal)
         ? new DoctorCheck("Local target", false, "Start your app, verify its port, and trust its development certificate.")

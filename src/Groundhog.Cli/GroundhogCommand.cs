@@ -73,7 +73,9 @@ internal static class GroundhogCommand
 
         Requests options: --status 5xx|<code>, --method <method>, --path <substring>,
                           --since <number>s|m|h, --min-duration <milliseconds>, --limit <1..1000>
-        Profiles save connection settings only. Keys remain in GROUNDHOG_KEY.
+        Saved profiles remember a tunnel name and its local target, so host <profile> and
+        start <profile> need no other options. Profiles never store keys; the key comes from
+        GROUNDHOG_KEY, --key, or the key saved when you created or rotated the tunnel here.
         Status and traffic commands describe local sessions; history retains the last 1,000 requests.
         Global options: --no-interactive (disable menus), --no-color (disable colors; also NO_COLOR),
                         --no-update-check (skip the periodic update offer; also GROUNDHOG_NO_UPDATE_CHECK=1).
