@@ -211,6 +211,7 @@ internal static class HomeViews
         Key("R", "Refresh");
         Key("?  F1", "This help");
         Key("Q", "Quit (Ctrl+C also quits)");
+        Key("U", "Install a newer CLI when the top bar shows one");
         Group("Tunnel detail");
         Key("O  C", "Open the public URL · copy it");
         Key("H", "Host the tunnel from this machine");

@@ -4,7 +4,7 @@ Groundhog provides a full-screen terminal app, live tunnel dashboards and comman
 Requires .NET 10 and the ASP.NET Core runtime (both are included with the SDK).
 
 ```sh
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.2
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.3
 groundhog
 ```
 
@@ -15,8 +15,13 @@ instead. Redirected input or output, and `--no-interactive`, print help instead 
 
 ![The Groundhog boot screen](images/cli-boot.png)
 
-A short boot screen shows the version, your account and workspace and how many tunnels are connected. Any key skips it,
-and it never lasts longer than a second.
+The launch screen shows the version, your account and workspace, how many tunnels are connected and, when there is
+one, a newer CLI version. It stays until you press **Enter**; **Q** or **Esc** quits, and **U** installs an available
+update (see [updating](#check-for-updates-and-update-the-cli)).
+
+On Windows the CLI switches the console to UTF-8 while it runs and restores the previous code page when it exits.
+Windows consoles otherwise start in a legacy code page that can't draw the app's symbols, which showed up as `?`
+characters and made the full-screen app scroll on every redraw.
 
 ### The menu
 
@@ -90,10 +95,26 @@ The screenshots are the real renderer's output with synthetic sample data. See
 
 ## Check for updates and update the CLI
 
-Interactive commands check NuGet for a newer CLI at most once every 24 hours. When one is available, Groundhog
-offers **Update now before continuing?**, with **No** as the default. Declining continues your command. Accepting
-runs the .NET tool installer for the installation you are using, then exits so you can run your command again
-with the new version. Running tunnels keep their current client until you restart them.
+Groundhog checks NuGet for a newer CLI at most once every 24 hours.
+
+- **The full-screen app** checks in the background, so it never delays starting. A newer version appears on the
+  launch screen and in the top bar on every start until you install it. Press **U** on any screen (or on the launch
+  screen) and confirm with **Y**; Groundhog closes and installs it.
+- **Other interactive commands** print one line, such as `Groundhog CLI 0.5.0 is available (you have 0.4.0). Run
+  groundhog update to install it.`, and carry on. They never stop to ask a question.
+
+How the install finishes depends on the platform:
+
+- **macOS and Linux:** the .NET tool installer runs in the same terminal and replaces the CLI in place. Start
+  `groundhog` again when it says it's done.
+- **Windows:** Windows locks the files of a running program, so a global or tool-path CLI can't replace itself while
+  it is open. Groundhog starts a small PowerShell window, exits, and that window waits for Groundhog to close, runs
+  the same `dotnet tool update` command and reports the result. Agents started with `groundhog start` and other open
+  Groundhog windows hold the same files: stop them first (`groundhog ps`, `groundhog stop <name>`), or the update
+  fails and the window tells you to stop them and run `groundhog update` again. Local tools (a `dotnet-tools.json`
+  manifest) update in place on every platform.
+
+Running tunnels keep their current client until you restart them.
 
 ```sh
 groundhog update --check     # Check now without installing or prompting.
@@ -109,10 +130,11 @@ Global tools, custom tool paths, and local tools with a matching manifest are su
 is never used to guess another installation to update. You need the .NET SDK for the installer. If installation
 fails, Groundhog reports the failure; retry with `dotnet tool update` for your installation after exiting the CLI.
 
-Startup checks have a 2-second budget and stay quiet when offline. A declined offer or failed check is cached for
-24 hours; explicit `update` commands check again immediately. Redirected commands, JSON output, help, version,
-background hosting and `--no-interactive` skip startup checks. Add `--no-update-check` or set
-`GROUNDHOG_NO_UPDATE_CHECK=1` to disable the periodic offer. Neither option disables an explicit update command.
+Command-line checks have a 2-second budget and stay quiet when offline. A check's result, including a failed check,
+is cached for 24 hours; explicit `update` commands check again immediately. Redirected commands, JSON output, help,
+version, background hosting and `--no-interactive` skip the check. Add `--no-update-check` or set
+`GROUNDHOG_NO_UPDATE_CHECK=1` to turn off the notice and the app's update check. Neither option disables an explicit
+update command.
 
 ## Sign in and find tunnels
 
