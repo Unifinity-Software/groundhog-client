@@ -86,14 +86,14 @@ public class VisitorAccessTests
         var encoded = Base64Url.EncodeToString("""{"default":{"allow":["everyone"]}}"""u8);
 
         Assert.False(VisitorAccessDeclaration.TryDecode(encoded, out _, out var error));
-        Assert.Contains("everyone", error);
+        Assert.Contains("allow values must be", error);
     }
 
     public static TheoryData<string, VisitorAccessDeclaration> Invalid => new()
     {
         { "allow needs", new() { Default = new([]) } },
-        { "isn't one of", new() { Default = new(["everyone"]) } },
-        { "isn't one of", new() { Default = new(["Members"]) } },
+        { "allow values must be", new() { Default = new(["everyone"]) } },
+        { "allow values must be", new() { Default = new(["Members"]) } },
         { "listed twice", new() { Default = new(["members", "members"]) } },
         { "anyone can't be combined", new() { Default = new(["anyone", "members"]) } },
         { "tokens needs", new() { Default = new(["tokens"]) } },
@@ -110,7 +110,7 @@ public class VisitorAccessTests
         { "at most 32 path rules", new() { Rules = [.. Enumerable.Range(0, 33).Select(i => new VisitorAccessPathRule($"/p{i}", ["members"]))] } },
         { "at most 64 IP ranges", new() { IpRanges = [.. Enumerable.Range(0, 65).Select(i => $"10.0.{i}.0/24")] } },
         { "at most 10 visitor tokens", new() { TokenHashes = [.. Enumerable.Range(0, 11).Select(i => VisitorToken.Hash($"t{i}"))] } },
-        { "CIDR", new() { IpRanges = ["203.0.113.0"] } },
+        { "IP range 1 isn't in CIDR form", new() { IpRanges = ["203.0.113.0"] } },
         { "CIDR", new() { IpRanges = ["203.0.113.0/33"] } },
         { "CIDR", new() { IpRanges = ["office"] } },
         { "64 lowercase", new() { TokenHashes = [s_hash.ToUpperInvariant()] } },

@@ -1,7 +1,6 @@
 using System.Buffers.Text;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -253,11 +252,11 @@ public static class VisitorAccessValidator
             return false;
         }
 
-        foreach (var range in ipRanges)
+        for (var i = 0; i < ipRanges.Count; i++)
         {
-            if (!IsIpRange(range))
+            if (!IsIpRange(ipRanges[i]))
             {
-                error = $"'{Printable(range)}' isn't an IP range in CIDR form, for example 203.0.113.0/24 or 2001:db8::/32.";
+                error = $"IP range {i + 1} isn't in CIDR form, for example 203.0.113.0/24 or 2001:db8::/32.";
                 return false;
             }
         }
@@ -372,7 +371,7 @@ public static class VisitorAccessValidator
         {
             if (!VisitorAccessMethods.IsKnown(method))
             {
-                error = $"'{Printable(method)}' isn't one of anyone, members, tokens or ips.";
+                error = "allow values must be anyone, members, tokens or ips.";
                 return false;
             }
 
@@ -405,22 +404,6 @@ public static class VisitorAccessValidator
         return true;
     }
 
-    // Values are echoed in messages; keep them short and free of control characters.
-    private static string Printable(string? value)
-    {
-        if (value is null)
-        {
-            return "null";
-        }
-
-        var builder = new StringBuilder(Math.Min(value.Length, 64));
-        foreach (var c in value.AsSpan(0, Math.Min(value.Length, 64)))
-        {
-            builder.Append(char.IsControl(c) ? '?' : c);
-        }
-
-        return value.Length > 64 ? builder.Append('…').ToString() : builder.ToString();
-    }
 }
 
 /// <summary>

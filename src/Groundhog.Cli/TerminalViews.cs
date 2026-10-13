@@ -56,10 +56,11 @@ internal static class TerminalViews
 
     internal static Table Profiles(IEnumerable<TunnelProfile> profiles)
     {
-        var table = new Table().RoundedBorder().AddColumn("Saved profile").AddColumn("Local target").AddColumn("Relay");
+        var table = new Table().RoundedBorder().AddColumn("Saved profile").AddColumn("Local target").AddColumn("Relay")
+            .AddColumn("Visitor access");
         foreach (var p in profiles)
         {
-            table.AddRow(Safe(p.Name), Safe(p.Target), Safe(p.Relay ?? "Hosted service"));
+            table.AddRow(Safe(p.Name), Safe(p.Target), Safe(p.Relay ?? "Hosted service"), Safe(p.Access?.Describe() ?? "Unchanged"));
         }
 
         return table;

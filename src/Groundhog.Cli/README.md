@@ -17,8 +17,11 @@ dashboards, tunnel actions, sign-in, diagnostics and a live hosting view. Arrow 
 and Q quits; your terminal is restored on exit.
 Use `login`, `workspace list`, `list` and `describe <name>` to discover your remote tunnels.
 Local `ps`, `status`, `stats`, `requests`, `logs`, `stop`, `doctor` and `wait` work independently of account login.
-A saved profile remembers a tunnel name and your app's local address (never a key): save one with `init` or
+A saved profile remembers a tunnel name, your app's local address and its visitor access options (never a key or token): save one with `init` or
 `profile save <name> --target <url>`, then run it with `host <name>` or in the background with `start <name>`.
+Visitor access rules decide who may reach the public address (anyone, workspace members, visitor tokens, IP ranges,
+per path): declare them when hosting with `--allow`, `--path <prefix>=<methods>`, `--ip`, `--visitor-token-env <VAR>`
+or `--access-file`, or manage them with `access <name>`, `access set <name>` and `token create|list|revoke <name>`.
 Read commands support `--output json`; `--no-interactive` selects script behavior and `--no-color` disables colors.
 See the [illustrated CLI guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/cli.md).
 

@@ -13,7 +13,14 @@ internal static class UtilityCommands
     {
         var command = args[0];
         if (args.Contains("--help", StringComparer.Ordinal)) { output.Write(GroundhogCommand.Usage); return 0; }
-        var options = Options.Parse(args[1..]);
+        var rest = args[1..];
+        VisitorAccessFlags? access = null;
+        if (command == "profile" && !VisitorAccessFlags.TryExtract(rest, out access, out rest, out var accessError))
+        {
+            throw new UsageException(accessError);
+        }
+
+        var options = Options.Parse(rest);
         var json = options.Get("--output") == "json";
         if (options.Get("--output") is { } format && format != "json")
         {
@@ -40,8 +47,10 @@ internal static class UtilityCommands
             }
             if (options.Positional is ["save", var name])
             {
-                store.Save(new(name, options.Get("--target") ?? throw new ArgumentException("Target required."), options.Get("--relay")));
-                output.WriteLine($"Profile saved (keys are never stored). Host it with: groundhog host {name}"); return 0;
+                // A background host runs elsewhere, so the access file is saved as a full path.
+                access = access?.AccessFile is { } file ? access with { AccessFile = Path.GetFullPath(file) } : access;
+                store.Save(new(name, options.Get("--target") ?? throw new ArgumentException("Target required."), options.Get("--relay"), access));
+                output.WriteLine($"Profile saved (keys and visitor tokens are never stored). Host it with: groundhog host {name}"); return 0;
             }
             if (options.Positional is ["delete", var removed])
             {
@@ -338,7 +347,7 @@ internal sealed class Options
             var split = args[i].Split('=', 2);
             var key = split[0];
             string? value = null;
-            if (key is "--watch" or "--follow" or "--yes" or "--remote")
+            if (key is "--watch" or "--follow" or "--yes" or "--remote" or "--agent-managed")
             {
                 if (split.Length != 1)
                 {

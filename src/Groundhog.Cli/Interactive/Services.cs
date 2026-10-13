@@ -59,7 +59,13 @@ internal sealed record UsageSummary(DateTimeOffset From, DateTimeOffset To, IRea
 }
 
 /// <summary>Everything the tunnel detail screen shows; usage and requests are optional extras.</summary>
-internal sealed record TunnelInsight(TunnelInfo Tunnel, UsageSummary? Usage, RemoteRequest[]? Requests, string? Problem);
+/// <param name="Tunnel">The tunnel.</param>
+/// <param name="Usage">Stored usage, when available.</param>
+/// <param name="Requests">Recent requests, when available.</param>
+/// <param name="Problem">What couldn't be loaded.</param>
+/// <param name="Access">The visitor access rules, or null where the workspace doesn't have them or they couldn't be read.</param>
+internal sealed record TunnelInsight(TunnelInfo Tunnel, UsageSummary? Usage, RemoteRequest[]? Requests, string? Problem,
+    VisitorAccessInfo? Access = null);
 
 /// <summary>The outcome of running one of the CLI's own commands from the interactive app.</summary>
 internal sealed record CommandResult(int ExitCode, string Output, string Error)
@@ -181,8 +187,9 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
         var tunnel = client.SendAsync<TunnelInfo>(HttpMethod.Get, path, null, cancellation);
         var usage = client.SendAsync<JsonElement>(HttpMethod.Get, path + "/usage", null, cancellation);
         var requests = client.SendAsync<RemoteSearchResult>(HttpMethod.Get, RecentRequests(workspace, name), null, cancellation);
-        // Wait for all three so none is left running against the disposed client; failures are inspected one by one.
-        await Task.WhenAll(tunnel, usage, requests).ContinueWith(_ => { }, CancellationToken.None,
+        var access = client.SendAsync<VisitorAccessInfo>(HttpMethod.Get, path + "/visitor-access", null, cancellation);
+        // Wait for all of them so none is left running against the disposed client; failures are inspected one by one.
+        await Task.WhenAll(tunnel, usage, requests, access).ContinueWith(_ => { }, CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         var info = await tunnel;
         string? problem = null;
@@ -208,7 +215,18 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
             problem ??= "The request log is unavailable right now.";
         }
 
-        return new(info, summary, entries, problem);
+        VisitorAccessInfo? rules = null;
+        try
+        {
+            rules = await access;
+        }
+        catch (Exception ex) when (ex is ManagementException or HttpRequestException or JsonException
+            or TaskCanceledException && !cancellation.IsCancellationRequested)
+        {
+            // Not enabled for this workspace (404), or unavailable: the screen leaves the row out.
+        }
+
+        return new(info, summary, entries, problem, rules);
     }
 
     public async Task FollowRequestsAsync(string workspace, string name, IEnumerable<RemoteRequest> known,

@@ -60,6 +60,7 @@ groundhog host <name> (--port <port> | --target <url>) [options]
 | `--key <key>` | The tunnel's connection key. Prefer the `GROUNDHOG_KEY` environment variable (below). |
 | `--pool <n>` | How many connections to keep open to the relay, 1 to 8. Default 2. |
 | `-v`, `--verbose` | Print one line per request. |
+| `--allow`, `--path`, `--ip`, `--visitor-token-env`, `--access-file` | Declare the tunnel's visitor access rules; see [the CLI guide](cli.md#visitor-access-rules). |
 
 Pass the key through `GROUNDHOG_KEY` using a hidden prompt, so its literal value stays out of your
 shell history and command-line arguments. The environment still contains the key until cleared. `--key` wins if you give both. The command never prints the key.
