@@ -134,41 +134,57 @@ public sealed class TunnelFixture : IAsyncLifetime
     }
 }
 
-/// <summary>An agent running in the background, with its events captured in order.</summary>
+/// <summary>An agent running in the background, with its status changes and requests captured in order.</summary>
 public sealed class RunningAgent : IAsyncDisposable
 {
     // Generous: it only matters when something is broken, and then the test fails with a clear message.
     private static readonly TimeSpan s_eventTimeout = TimeSpan.FromSeconds(15);
 
     private readonly CancellationTokenSource _stop = new();
-    private readonly Channel<GroundhogAgentStatusEventArgs> _statuses = Channel.CreateUnbounded<GroundhogAgentStatusEventArgs>();
-    private readonly Channel<GroundhogRequestEventArgs> _requests = Channel.CreateUnbounded<GroundhogRequestEventArgs>();
+    private readonly IAsyncEnumerator<GroundhogAgentStatus> _statuses;
+    private readonly Channel<GroundhogCompletedRequest> _requests = Channel.CreateUnbounded<GroundhogCompletedRequest>();
 
     public RunningAgent(GroundhogAgentOptions options)
     {
-        var agent = new GroundhogAgent(options);
-        agent.StatusChanged += (_, status) => _statuses.Writer.TryWrite(status);
-        agent.RequestCompleted += (_, request) => _requests.Writer.TryWrite(request);
-        Run = agent.RunAsync(_stop.Token);
+        options.OnRequestCompleted = request => _requests.Writer.TryWrite(request);
+        Agent = new GroundhogAgent(options);
+        _statuses = Agent.WatchStatusAsync().GetAsyncEnumerator();
+        Run = Agent.RunAsync(_stop.Token);
     }
+
+    public GroundhogAgent Agent { get; }
 
     /// <summary>Completes with the stop reason when the agent stops.</summary>
     public Task<GroundhogAgentStopReason> Run { get; }
 
-    /// <summary>The next status change, skipping <see cref="GroundhogAgentState.Connecting"/>.</summary>
-    public async Task<GroundhogAgentStatusEventArgs> NextStatusAsync()
+    /// <summary>The next status change, skipping <see cref="GroundhogAgentState.NotStarted"/> and <see cref="GroundhogAgentState.Connecting"/>.</summary>
+    public async Task<GroundhogAgentStatus> NextStatusAsync()
     {
         while (true)
         {
-            var status = await ReadAsync(_statuses, "status change");
-            if (status.State != GroundhogAgentState.Connecting)
+            bool more;
+            try
             {
-                return status;
+                more = await _statuses.MoveNextAsync().AsTask().WaitAsync(s_eventTimeout, TestContext.Current.CancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                throw NoEvent("status change");
+            }
+
+            if (!more)
+            {
+                throw new InvalidOperationException("The status stream ended.");
+            }
+
+            if (_statuses.Current.State is not (GroundhogAgentState.NotStarted or GroundhogAgentState.Connecting))
+            {
+                return _statuses.Current;
             }
         }
     }
 
-    public Task<GroundhogRequestEventArgs> NextRequestAsync() => ReadAsync(_requests, "request record");
+    public Task<GroundhogCompletedRequest> NextRequestAsync() => ReadAsync(_requests, "request record");
 
     public async ValueTask DisposeAsync()
     {
@@ -186,8 +202,13 @@ public sealed class RunningAgent : IAsyncDisposable
         }
         catch (TimeoutException)
         {
-            var stopped = Run.IsCompleted ? $" The agent had stopped: {Run.Status}." : string.Empty;
-            throw new TimeoutException($"No {what} arrived.{stopped}", Run.Exception);
+            throw NoEvent(what);
         }
+    }
+
+    private TimeoutException NoEvent(string what)
+    {
+        var stopped = Run.IsCompleted ? $" The agent had stopped: {Run.Status}." : string.Empty;
+        return new TimeoutException($"No {what} arrived.{stopped}", Run.Exception);
     }
 }

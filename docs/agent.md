@@ -188,39 +188,79 @@ var agent = new GroundhogAgent(new GroundhogAgentOptions
     Credential = new TunnelKeyCredential(Environment.GetEnvironmentVariable("GROUNDHOG_KEY")!),
     LocalTarget = new Uri("http://localhost:5173"),
     PoolSize = 2, // optional, 1 to 8
+    OnRequestCompleted = r => Console.WriteLine($"{r.Method} {r.Path} {r.StatusCode} {r.Duration}"), // optional
 });
-
-agent.StatusChanged += (_, e) =>
-{
-    switch (e.State)
-    {
-        case GroundhogAgentState.Connected:
-            Console.WriteLine($"Public address: {e.PublicAddress}");
-            break;
-        case GroundhogAgentState.Reconnecting:
-            Console.WriteLine($"{e.Reason} Retrying in {e.RetryDelay}.");
-            break;
-        case GroundhogAgentState.Stopped:
-            Console.WriteLine($"Stopped ({e.StopReason}): {e.Reason}");
-            break;
-    }
-};
-agent.RequestCompleted += (_, r) => Console.WriteLine($"{r.Method} {r.Path} {r.StatusCode} {r.Duration}");
 
 using var stop = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
-GroundhogAgentStopReason reason = await agent.RunAsync(stop.Token);
+
+var run = agent.RunAsync(stop.Token);
+await foreach (var status in agent.WatchStatusAsync())
+{
+    switch (status.State)
+    {
+        case GroundhogAgentState.Connected:
+            Console.WriteLine($"Public address: {status.PublicAddress}");
+            break;
+        case GroundhogAgentState.Reconnecting:
+            Console.WriteLine($"{status.Reason} Retrying in {status.RetryDelay}.");
+            break;
+        case GroundhogAgentState.Stopped:
+            Console.WriteLine($"Stopped ({status.StopReason}): {status.Reason}");
+            break;
+    }
+}
+
+GroundhogAgentStopReason reason = await run;
 ```
 
 - The constructor validates the options and throws `ArgumentException` with a message that says what's wrong
   (never repeating the key).
 - `RunAsync` keeps the tunnel connected until you cancel it or the relay refuses the agent for good, and returns
   why it stopped. Cancelling returns `Cancelled` rather than throwing.
-- Events are raised on the agent's threads; keep handlers quick. Exceptions from handlers are logged and ignored.
+- `Status` is the agent's current `GroundhogAgentStatus`: `NotStarted`, `Connecting`, `Connected` (with
+  `PublicAddress`), `Reconnecting` (with `Reason` and `RetryDelay`) or `Stopped` (with `Reason` and `StopReason`).
+- `WatchStatusAsync` streams the status as it is when you call it, then every change, and ends after `Stopped`.
+  Call it before `RunAsync` to see every change. Each stream has its own buffer, so a slow reader never holds up
+  the agent, and you can have several. Cancelling its token ends only that stream, not the agent.
+- `OnRequestCompleted` is called on the request's thread as each request finishes (method, path without the query
+  string, status, duration, WebSocket, `X-Groundhog-Error`). Keep it quick; exceptions it throws are logged and
+  ignored.
 - Set `LoggerFactory` for diagnostic logs, and `TimeProvider` to drive the reconnection waits from a fake clock in
   tests.
 - For HTTPS, set `LocalTarget` to the HTTPS origin. Optional `LocalCaFile` and `InsecureLocal` expose the same
   loopback-only controls as the CLI; insecure mode also emits a warning through `LoggerFactory`.
+
+### Run the agent in an ASP.NET Core or worker app
+
+In an app built on the .NET generic host, register the agent and the host runs it from start to shutdown:
+
+```csharp
+builder.Services.AddGroundhogAgent(options =>
+{
+    options.TunnelName = "myapp";
+    options.Credential = new TunnelKeyCredential(builder.Configuration["Groundhog:Key"]!);
+    options.LocalTarget = new Uri("http://localhost:5000");
+});
+```
+
+- The agent uses the app's `ILoggerFactory`, `IMeterFactory` and `TimeProvider` unless you set your own.
+- Invalid options fail the host's start with the same `ArgumentException` the constructor throws.
+- Inject `GroundhogAgent` to read `Status` or call `WatchStatusAsync`, for example for a health check.
+- If the relay refuses the agent for good, the error is logged and the app keeps running.
+
+### Metrics
+
+The agent records metrics on the `Groundhog.Agent` meter (`GroundhogAgent.MeterName`), so OpenTelemetry,
+`dotnet-counters` and the Aspire dashboard can show them without extra code:
+
+| Instrument | Type | Unit | Tags |
+| --- | --- | --- | --- |
+| `groundhog.agent.request.duration` | Histogram | `s` | `groundhog.tunnel`, `http.request.method`, `http.response.status_code`, `groundhog.websocket`, `error.type` (when the agent answered, for example `local-unreachable`) |
+| `groundhog.agent.connections` | UpDownCounter | `{connection}` | `groundhog.tunnel` |
+
+Set `MeterFactory` to create the meter from your app's `IMeterFactory`; `AddGroundhogAgent` does this for you.
+With OpenTelemetry, add `.AddMeter(GroundhogAgent.MeterName)` to your metrics setup.
 
 ### Visitor access rules
 

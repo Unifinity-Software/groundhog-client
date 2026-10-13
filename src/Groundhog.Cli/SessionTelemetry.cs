@@ -24,8 +24,13 @@ internal sealed class SessionTelemetry(string name, Uri target, TimeProvider? cl
     private long _errors;
     private int _reconnects;
 
-    internal void OnStatus(GroundhogAgentStatusEventArgs status)
+    internal void OnStatus(GroundhogAgentStatus status)
     {
+        if (status.State == GroundhogAgentState.NotStarted)
+        {
+            return;
+        }
+
         lock (_gate)
         {
             _state = status.State.ToString();
@@ -44,7 +49,7 @@ internal sealed class SessionTelemetry(string name, Uri target, TimeProvider? cl
         }
     }
 
-    internal void OnRequest(GroundhogRequestEventArgs request)
+    internal void OnRequest(GroundhogCompletedRequest request)
     {
         Record(new(_clock.GetUtcNow(), request.Method, request.Path, request.StatusCode,
             request.Duration.TotalMilliseconds, request.IsWebSocket, request.Error));

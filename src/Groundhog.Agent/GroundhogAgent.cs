@@ -23,8 +23,9 @@ namespace Groundhog.Agent;
 /// the relay rejects the credential, refuses the tunnel, or a newer agent session takes over.
 /// </para>
 /// <para>
-/// Events are raised on the agent's own threads. Handlers should return quickly; exceptions they throw are logged
-/// and ignored.
+/// <see cref="Status"/> is the agent's current state; <see cref="WatchStatusAsync"/> streams every change. The agent
+/// records metrics on the <see cref="MeterName"/> meter. In an app built on the .NET generic host, register the agent
+/// with <c>services.AddGroundhogAgent(...)</c> instead of running it yourself.
 /// </para>
 /// </remarks>
 /// <example>
@@ -35,14 +36,20 @@ namespace Groundhog.Agent;
 ///     Credential = new TunnelKeyCredential(Environment.GetEnvironmentVariable("GROUNDHOG_KEY")!),
 ///     LocalTarget = new Uri("http://localhost:5173"),
 /// });
-/// agent.StatusChanged += (_, e) => Console.WriteLine($"{e.State} {e.PublicAddress} {e.Reason}");
-/// var reason = await agent.RunAsync(cancellationToken);
+/// var run = agent.RunAsync(cancellationToken);
+/// await foreach (var status in agent.WatchStatusAsync())
+/// {
+///     Console.WriteLine($"{status.State} {status.PublicAddress} {status.Reason}");
+/// }
+/// var reason = await run;
 /// </code>
 /// </example>
 public sealed class GroundhogAgent
 {
     private readonly GroundhogAgentOptions _options;
     private readonly ILogger _logger;
+    private readonly AgentMetrics _metrics;
+    private readonly StatusFeed _status = new();
     private int _running;
 
     /// <summary>Creates an agent. Nothing connects until <see cref="RunAsync"/>.</summary>
@@ -64,11 +71,14 @@ public sealed class GroundhogAgent
             PoolSize = options.PoolSize,
             TimeProvider = options.TimeProvider,
             LoggerFactory = options.LoggerFactory,
+            MeterFactory = options.MeterFactory,
+            OnRequestCompleted = options.OnRequestCompleted,
             VisitorAccess = options.VisitorAccess,
             VisitorAccessHeader = options.VisitorAccess?.ToDeclaration().Encode(),
             Client = options.Client ?? new GroundhogClientInfo("Groundhog.Agent", Version),
         };
         _logger = (options.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger("Groundhog.Agent");
+        _metrics = AgentMetrics.Create(options.MeterFactory);
     }
 
     private static byte[]? ReadLocalCertificate(string? file)
@@ -96,13 +106,37 @@ public sealed class GroundhogAgent
     public static string Version { get; } = ReadVersion();
 
     /// <summary>
-    /// Raised when the agent connects (with the tunnel's public address), loses its last connection and waits to
-    /// retry, or stops.
+    /// The name of the <see cref="System.Diagnostics.Metrics.Meter"/> the agent records its metrics on:
+    /// <c>groundhog.agent.request.duration</c> and <c>groundhog.agent.connections</c>.
     /// </summary>
-    public event EventHandler<GroundhogAgentStatusEventArgs>? StatusChanged;
+    public const string MeterName = "Groundhog.Agent";
 
-    /// <summary>Raised when a request that came through the tunnel finishes.</summary>
-    public event EventHandler<GroundhogRequestEventArgs>? RequestCompleted;
+    /// <summary>
+    /// What the agent is doing now: <see cref="GroundhogAgentState.NotStarted"/> until <see cref="RunAsync"/> is called,
+    /// then connecting, connected (with the tunnel's public address), reconnecting, or stopped.
+    /// </summary>
+    public GroundhogAgentStatus Status => _status.Current;
+
+    /// <summary>
+    /// Streams the agent's status: <see cref="Status"/> as it is when this method is called, then every change.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The stream starts recording when the method is called, so call it before <see cref="RunAsync"/> to see every
+    /// change, or later to start from the current status. It ends after a <see cref="GroundhogAgentState.Stopped"/>
+    /// status; a stream started after the agent stopped yields that status and ends.
+    /// </para>
+    /// <para>
+    /// Each stream is buffered separately, so a slow reader never holds up the agent or other readers. Any number
+    /// of streams may be open at once.
+    /// </para>
+    /// </remarks>
+    /// <param name="cancellationToken">
+    /// Cancel to stop watching early; the enumeration then throws <see cref="OperationCanceledException"/>.
+    /// It doesn't stop the agent.
+    /// </param>
+    public IAsyncEnumerable<GroundhogAgentStatus> WatchStatusAsync(CancellationToken cancellationToken = default) =>
+        _status.Watch(cancellationToken);
 
     /// <summary>
     /// Connects and keeps the tunnel connected until <paramref name="cancellationToken"/> is cancelled or the relay
@@ -128,8 +162,14 @@ public sealed class GroundhogAgent
                 _logger.LogWarning("Local TLS certificate validation is disabled for the loopback target.");
             }
 
-            var run = new AgentRun(_options, RaiseStatus, RaiseRequest, cancellationToken);
+            var run = new AgentRun(_options, _status.Publish, OnRequestCompleted, _metrics, cancellationToken);
             return await run.RunAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // A bug rather than a network problem. Still end every status stream, then let the caller see it.
+            _status.Publish(new GroundhogAgentStatus(GroundhogAgentState.Stopped, Reason: $"The agent failed: {ex.Message}"));
+            throw;
         }
         finally
         {
@@ -137,27 +177,21 @@ public sealed class GroundhogAgent
         }
     }
 
-    private void RaiseStatus(GroundhogAgentStatusEventArgs status)
+    private void OnRequestCompleted(GroundhogCompletedRequest request)
     {
-        try
+        _metrics.RequestCompleted(_options.TunnelName!, request);
+        if (_options.OnRequestCompleted is not { } callback)
         {
-            StatusChanged?.Invoke(this, status);
+            return;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "A StatusChanged handler threw.");
-        }
-    }
 
-    private void RaiseRequest(GroundhogRequestEventArgs request)
-    {
         try
         {
-            RequestCompleted?.Invoke(this, request);
+            callback(request);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "A RequestCompleted handler threw.");
+            _logger.LogError(ex, "The OnRequestCompleted callback threw.");
         }
     }
 

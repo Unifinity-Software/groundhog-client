@@ -238,6 +238,9 @@ internal static class GroundhogCommand
             return ExitCodes.BadArguments;
         }
 
+        var telemetry = new SessionTelemetry(arguments.Name, arguments.LocalTarget);
+        var interactive = view is not null || (ReferenceEquals(output, Console.Out) && InteractiveCli.Available);
+        var reporter = new StatusReporter(output, error, arguments.LocalTarget, arguments.Verbose, arguments.VisitorAccess is not null);
         GroundhogAgent agent;
         try
         {
@@ -252,6 +255,7 @@ internal static class GroundhogCommand
                 PoolSize = arguments.Pool ?? ConnectionPool.DefaultSize,
                 VisitorAccess = arguments.VisitorAccess,
                 Client = GroundhogClientInfo.FromAssembly("Groundhog.Cli", typeof(GroundhogCommand).Assembly),
+                OnRequestCompleted = request => { telemetry.OnRequest(request); if (!interactive) { reporter.OnRequest(request); } },
             });
         }
         catch (ArgumentException ex)
@@ -268,12 +272,10 @@ internal static class GroundhogCommand
         }
 
         using var hostStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var telemetry = new SessionTelemetry(arguments.Name, arguments.LocalTarget);
         await using var sessions = new LocalSessions(telemetry, hostStop);
-        var interactive = view is not null || (ReferenceEquals(output, Console.Out) && InteractiveCli.Available);
-        var reporter = new StatusReporter(output, error, arguments.LocalTarget, arguments.Verbose, arguments.VisitorAccess is not null);
-        agent.StatusChanged += (_, status) => { telemetry.OnStatus(status); if (!interactive) { reporter.OnStatus(status); } };
-        agent.RequestCompleted += (_, request) => { telemetry.OnRequest(request); if (!interactive) { reporter.OnRequest(request); } };
+
+        // The stream ends after the agent's Stopped status, so awaiting it means every status has been reported.
+        var watching = ReportStatusAsync(agent.WatchStatusAsync(CancellationToken.None), telemetry, interactive ? null : reporter);
         GroundhogAgentStopReason reason;
         if (interactive)
         {
@@ -288,10 +290,12 @@ internal static class GroundhogCommand
             {
                 await hostStop.CancelAsync();
                 await running;
+                await watching;
                 throw;
             }
 
             reason = await running;
+            await watching;
             var final = telemetry.Snapshot();
             if (reason is GroundhogAgentStopReason.Cancelled or GroundhogAgentStopReason.SessionReplaced)
             {
@@ -305,6 +309,7 @@ internal static class GroundhogCommand
         else
         {
             reason = await agent.RunAsync(hostStop.Token);
+            await watching;
         }
 
         return reason switch
@@ -317,14 +322,24 @@ internal static class GroundhogCommand
         };
     }
 
-    /// <summary>Turns the agent's events into the command's output lines.</summary>
+    private static async Task ReportStatusAsync(
+        IAsyncEnumerable<GroundhogAgentStatus> statuses, SessionTelemetry telemetry, StatusReporter? reporter)
+    {
+        await foreach (var status in statuses)
+        {
+            telemetry.OnStatus(status);
+            reporter?.OnStatus(status);
+        }
+    }
+
+    /// <summary>Turns the agent's status and requests into the command's output lines.</summary>
     private sealed class StatusReporter(TextWriter output, TextWriter error, Uri target, bool verbose, bool declaresAccess)
     {
         private readonly Lock _gate = new();
         private readonly string _arrow = CanWrite(output, "→") ? "→" : "->";
         private bool _wasConnected;
 
-        public void OnStatus(GroundhogAgentStatusEventArgs status)
+        public void OnStatus(GroundhogAgentStatus status)
         {
             lock (_gate)
             {
@@ -350,7 +365,7 @@ internal static class GroundhogCommand
             }
         }
 
-        public void OnRequest(GroundhogRequestEventArgs request)
+        public void OnRequest(GroundhogCompletedRequest request)
         {
             if (!verbose)
             {
@@ -368,7 +383,7 @@ internal static class GroundhogCommand
             }
         }
 
-        private void WriteStopped(GroundhogAgentStatusEventArgs status)
+        private void WriteStopped(GroundhogAgentStatus status)
         {
             switch (status.StopReason)
             {

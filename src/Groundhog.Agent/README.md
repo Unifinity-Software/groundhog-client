@@ -13,8 +13,23 @@ var agent = new GroundhogAgent(new GroundhogAgentOptions
     Credential = new TunnelKeyCredential(Environment.GetEnvironmentVariable("GROUNDHOG_KEY")!),
     LocalTarget = new Uri("http://localhost:5173"),
 });
-agent.StatusChanged += (_, e) => Console.WriteLine($"{e.State} {e.PublicAddress} {e.Reason}");
-var reason = await agent.RunAsync(cancellationToken);
+var run = agent.RunAsync(cancellationToken);
+await foreach (var status in agent.WatchStatusAsync())
+{
+    Console.WriteLine($"{status.State} {status.PublicAddress} {status.Reason}");
+}
+var reason = await run;
+```
+
+In an ASP.NET Core or worker app, let the host run it instead:
+
+```csharp
+builder.Services.AddGroundhogAgent(options =>
+{
+    options.TunnelName = "myapp";
+    options.Credential = new TunnelKeyCredential(builder.Configuration["Groundhog:Key"]!);
+    options.LocalTarget = new Uri("http://localhost:5000");
+});
 ```
 
 - The agent connects to the hosted Groundhog service; there's no service address to configure.
@@ -24,9 +39,11 @@ var reason = await agent.RunAsync(cancellationToken);
   HTTPS uses platform trust; optional `LocalCaFile` or `InsecureLocal` controls apply only to loopback HTTPS.
 - Optional `VisitorAccess` declares who may visit the tunnel (anyone, workspace members, visitor tokens, IP
   ranges, per path). Visitor tokens are passed as plaintext from your secrets; only their SHA-256 hashes are sent.
-- `StatusChanged` reports connecting, connected (with the public address), reconnecting (with the reason and the
-  wait) and stopped. `RequestCompleted` reports each request's method, path (without query string), status and
-  duration.
+- `Status` is the current state; `WatchStatusAsync` streams it and every change: connecting, connected (with the
+  public address), reconnecting (with the reason and the wait) and stopped. Each stream is buffered separately and
+  never holds up the agent.
+- `OnRequestCompleted` reports each request's method, path (without query string), status and duration.
+- Metrics go to the `Groundhog.Agent` meter: `groundhog.agent.request.duration` and `groundhog.agent.connections`.
 - `RunAsync` returns why the agent stopped: cancelled, credential rejected, not allowed, unknown tunnel,
   unsupported protocol, replaced by a newer session, or a service that doesn't support declared visitor access rules.
 
