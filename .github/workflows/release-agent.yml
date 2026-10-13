@@ -4,9 +4,18 @@ name: Release agent
 # packages and symbols to a GitHub Release. A suffix such as agent-v0.2.0-preview.1 becomes a pre-release.
 # Publishes the same artifacts to nuget.org using trusted publishing. Only a merged master commit whose
 # pull request passed Build may be tagged. Run the full affected local checks before that pull request.
+# Running it by hand on master (Actions > Release agent > Run workflow, or
+# `gh workflow run release-agent.yml -f version=<version>`) releases master's tip and creates the tag itself, so a
+# release needs only GitHub access.
 on:
   push:
     tags: ['agent-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, without the agent-v prefix (for example 0.4.0-preview.4)
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,7 +24,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: release-agent-${{ github.ref }}
+  group: release-agent-${{ inputs.version || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -39,6 +48,9 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
+            if (context.eventName === 'workflow_dispatch' && context.ref !== 'refs/heads/master') {
+              throw new Error('Run Release agent from master.');
+            }
             await exec.exec('git', ['merge-base', '--is-ancestor', context.sha, 'origin/master']);
             const prs = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
               ...context.repo, commit_sha: context.sha,
@@ -60,7 +72,7 @@ jobs:
         id: version
         shell: bash
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.version && format('agent-v{0}', inputs.version) || github.ref_name }}
         run: |
           version="${TAG#agent-v}"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
@@ -68,6 +80,30 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # A manual run tags the commit it checked above. A tag that already exists must point at this commit (a
+      # rerun); anything else fails.
+      - name: Create the tag for a manual run
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        with:
+          script: |
+            const ref = `tags/${process.env.TAG}`;
+            try {
+              await github.rest.git.createRef({ ...context.repo, ref: `refs/${ref}`, sha: context.sha });
+              core.notice(`Created ${process.env.TAG} at ${context.sha}`);
+            } catch (error) {
+              if (error.status !== 422) {
+                throw error;
+              }
+              const { data: existing } = await github.rest.git.getRef({ ...context.repo, ref });
+              if (existing.object.type !== 'commit' || existing.object.sha !== context.sha) {
+                throw new Error(`${process.env.TAG} already exists on another commit.`);
+              }
+            }
 
       - uses: actions/setup-dotnet@v6
         with:
@@ -115,7 +151,7 @@ jobs:
       - name: Attach to the GitHub Release
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
         with:
           script: |
