@@ -242,7 +242,7 @@ internal static class HomeViews
 /// <summary>The launch screen in the idiom of an 8-bit home computer: banner, account summary, READY and a cursor.</summary>
 internal static class BootView
 {
-    internal static IRenderable Render(string version, string? status, bool ready, bool cursor, int width, int height)
+    internal static IRenderable Render(string version, string? status, bool ready, bool cursor, int width, int height, string? update = null)
     {
         var lines = new List<IRenderable>();
         if (height >= 26)
@@ -256,7 +256,14 @@ internal static class BootView
         lines.Add(Left($"[{Theme.TextTag}] HTTPS TUNNELS FOR LOCALHOST · GROUNDHOG.UNIFINITY.COM[/]"));
         lines.Add(Left($"[{Theme.TextTag}] {Theme.Safe(status ?? "CHECKING ACCOUNT…")}[/]"));
         lines.Add(new Text(""));
+        if (update is not null)
+        {
+            lines.Add(Left($"[bold {Theme.AmberTag}] UPDATE AVAILABLE: {Theme.Safe(update.ToUpperInvariant())} · PRESS U TO INSTALL IT[/]"));
+            lines.Add(new Text(""));
+        }
+
         lines.Add(Left(ready ? $"[{Theme.TextTag}]READY.[/]" : " "));
+        lines.Add(Left($"[bold {Theme.WhiteTag}]PRESS ENTER TO CONTINUE[/][{Theme.TextTag}] · Q TO QUIT[/]"));
         lines.Add(Left(cursor ? $"[{Theme.SignalTag}]█[/]" : " "));
         var panel = new Panel(new CenteredBlock(new Rows(lines)))
         {

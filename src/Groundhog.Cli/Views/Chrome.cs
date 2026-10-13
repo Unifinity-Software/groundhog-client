@@ -8,6 +8,9 @@ internal sealed record ChromeModel(string Version, string? Account, string? Work
 {
     /// <summary>The stand-alone host view shows no account details.</summary>
     internal bool Standalone { get; init; }
+
+    /// <summary>A newer CLI version, advertised next to the current one with the key that installs it.</summary>
+    internal string? Update { get; init; }
 }
 
 /// <summary>One key hint in the footer bar, for example <c>Esc</c> <c>Back</c>.</summary>
@@ -41,7 +44,8 @@ internal static class Chrome
     internal static IRenderable Header(ChromeModel chrome)
     {
         var path = string.Concat(chrome.Path.Select(p => $" [{Theme.MutedTag}]›[/] [{Theme.TextTag}]{Theme.Safe(p)}[/]"));
-        var left = $" [bold {Theme.SignalTag}]◆ GROUNDHOG[/] [{Theme.MutedTag}]{Theme.Safe(chrome.Version)}[/]{path}";
+        var update = chrome.Update is null ? "" : $" [{Theme.AmberTag}]· {Theme.Safe(chrome.Update)} available, press U[/]";
+        var left = $" [bold {Theme.SignalTag}]◆ GROUNDHOG[/] [{Theme.MutedTag}]{Theme.Safe(chrome.Version)}[/]{update}{path}";
         var right = chrome.Standalone ? $"[{Theme.MutedTag}]live session[/] "
             : chrome.Account is null
             ? $"[{Theme.MutedTag}]not signed in[/] "

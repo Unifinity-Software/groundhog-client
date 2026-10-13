@@ -61,8 +61,6 @@ internal sealed record AppOptions(bool Boot = true, bool AlternateScreen = true)
 /// </summary>
 internal sealed class InteractiveApp
 {
-    internal static readonly TimeSpan BootLimit = TimeSpan.FromMilliseconds(700);
-    private static readonly TimeSpan _bootMinimum = TimeSpan.FromMilliseconds(400);
     private static readonly TimeSpan _poll = TimeSpan.FromMilliseconds(30);
     private readonly List<Screen> _screens = [];
     private readonly AppOptions _options;
@@ -96,6 +94,12 @@ internal sealed class InteractiveApp
     /// <summary>True for the stand-alone host view, which has no menu and doesn't query the account.</summary>
     internal bool Standalone { get; private init; }
 
+    /// <summary>A newer CLI version found by the background check, shown on the launch screen and in the header.</summary>
+    internal string? AvailableUpdate { get; private set; }
+
+    /// <summary>The version to install after the app closes, chosen with U.</summary>
+    internal string? UpdateRequested { get; private set; }
+
     /// <summary>The latest diagnostics results, previewed in the menu.</summary>
     internal CheckRow[]? LastDiagnostics { get; set; }
 
@@ -123,20 +127,59 @@ internal sealed class InteractiveApp
         }
     }
 
-    /// <summary>Runs the dashboard: boot screen, then the main menu until the user quits.</summary>
+    /// <summary>Runs the dashboard: the launch screen until Enter, then the main menu until the user quits.</summary>
     internal async Task<int> RunAsync()
     {
         Data.Refresh();
+        _ = CheckForUpdateAsync();
         await InFrameAsync(async () =>
         {
+            var next = BootChoice.Continue;
             if (_options.Boot && Console.Profile.Capabilities.Interactive)
             {
-                await BootAsync();
+                next = await BootAsync();
             }
 
-            await RunScreensAsync(new MenuScreen());
+            if (next != BootChoice.Quit)
+            {
+                await RunScreensAsync(new MenuScreen(), next == BootChoice.Update ? UpdateScreen() : null);
+            }
         });
         return 0;
+    }
+
+    private async Task CheckForUpdateAsync()
+    {
+        try
+        {
+            AvailableUpdate = await Services.AvailableUpdateAsync(Cancellation);
+            Invalidate();
+        }
+        catch (OperationCanceledException) when (Cancellation.IsCancellationRequested)
+        {
+        }
+    }
+
+    /// <summary>Asks before closing the app to install <see cref="AvailableUpdate"/>.</summary>
+    internal Screen UpdateScreen()
+    {
+        var version = AvailableUpdate!;
+        var agents = Data.Current.Agents?.Length ?? 0;
+        var detail = OperatingSystem.IsWindows()
+            ? $"Groundhog closes and a new window installs {version}; it takes about 15 seconds. Start groundhog again when that window says it's done."
+            : $"Groundhog closes and installs {version} in this terminal. Start groundhog again when it's done.";
+        if (agents > 0)
+        {
+            detail += OperatingSystem.IsWindows()
+                ? $" {Dashboard.Plural(agents, "agent")} running on this machine keep the old version open, so the update will fail until you stop them in Running agents."
+                : $" {Dashboard.Plural(agents, "agent")} running on this machine keep the old version until you restart them.";
+        }
+
+        return new ConfirmScreen($"Update Groundhog CLI to {version}?", detail, "Update now", danger: false, () =>
+        {
+            UpdateRequested = version;
+            return Task.FromResult(Nav.Exit);
+        });
     }
 
     /// <summary>The live view of <c>groundhog host</c> started from the command line; Esc or Q stops hosting.</summary>
@@ -169,10 +212,15 @@ internal sealed class InteractiveApp
     /// Runs screens starting at <paramref name="root"/> until it closes. Nested calls (hosting from a menu) draw into
     /// the same live display, so the host view replaces the menu and the menu comes back afterwards.
     /// </summary>
-    internal async Task<bool> RunScreensAsync(Screen root)
+    internal async Task<bool> RunScreensAsync(Screen root, Screen? above = null)
     {
         var floor = _screens.Count;
         Open(root);
+        if (above is not null)
+        {
+            Open(above);
+        }
+
         try
         {
             while (true)
@@ -252,6 +300,7 @@ internal sealed class InteractiveApp
             'Q' => Nav.Exit,
             '?' when screen is not HelpScreen => Nav.Open(new HelpScreen()),
             'R' when !Standalone => Refresh(),
+            'U' when !Standalone && AvailableUpdate is not null && screen is not ConfirmScreen => Nav.Open(UpdateScreen()),
             _ => key.Key == ConsoleKey.F1 && screen is not HelpScreen ? Nav.Open(new HelpScreen()) : Nav.Stay,
         };
 
@@ -272,6 +321,7 @@ internal sealed class InteractiveApp
         var chrome = new ChromeModel(Services.Version, account?.Account?.Email, account?.SignedIn == true ? account.Workspace : null, path)
         {
             Standalone = Standalone,
+            Update = Standalone ? null : AvailableUpdate,
         };
         var frame = Chrome.Shell(chrome, screen.Render(this, size), screen.Keys(this), Status);
         Drawn?.Invoke(screen.Title, frame);
@@ -310,29 +360,52 @@ internal sealed class InteractiveApp
         }
     }
 
-    /// <summary>The C64-style launch screen; any key skips it and it never lasts longer than <see cref="BootLimit"/>.</summary>
-    private async Task BootAsync()
+    private enum BootChoice { Continue, Quit, Update }
+
+    /// <summary>
+    /// The C64-style launch screen. It stays until Enter so its summary (version, account, tunnels, an available update)
+    /// can be read; Q or Esc quits and U starts an available update. The frame is redrawn only when something on it
+    /// changes: data arriving or the cursor blinking.
+    /// </summary>
+    private async Task<BootChoice> BootAsync()
     {
         var started = Time.GetTimestamp();
+        string? shown = null;
         while (true)
         {
-            var elapsed = Time.GetElapsedTime(started);
             var dashboard = Data.Current;
             var loaded = dashboard.Account is not null && (dashboard.Tunnels is not null || !dashboard.Account.SignedIn);
-            if (elapsed >= BootLimit || (loaded && elapsed >= _bootMinimum))
+            var cursor = (int)(Time.GetElapsedTime(started).TotalMilliseconds / 500) % 2 == 0;
+            var update = AvailableUpdate;
+            var status = BootStatus(dashboard);
+            var key = $"{status}|{loaded}|{cursor}|{update}|{Console.Profile.Width}x{Console.Profile.Height}";
+            if (key != shown)
             {
-                return;
+                shown = key;
+                var frame = BootView.Render(Services.Version, status, loaded, cursor, Console.Profile.Width, Console.Profile.Height, update);
+                Drawn?.Invoke("Boot", frame);
+                Present(frame);
             }
 
-            var cursor = (int)(elapsed.TotalMilliseconds / 200) % 2 == 0;
-            var frame = BootView.Render(Services.Version, BootStatus(dashboard), loaded || elapsed >= _bootMinimum, cursor,
-                Console.Profile.Width, Console.Profile.Height);
-            Drawn?.Invoke("Boot", frame);
-            Present(frame);
             if (Keys.KeyAvailable)
             {
-                Keys.ReadKey();
-                return;
+                var pressed = Keys.ReadKey();
+                if (pressed.Key == ConsoleKey.Enter)
+                {
+                    return BootChoice.Continue;
+                }
+
+                if (pressed.Key == ConsoleKey.Escape || char.ToUpperInvariant(pressed.KeyChar) == 'Q')
+                {
+                    return BootChoice.Quit;
+                }
+
+                if (update is not null && char.ToUpperInvariant(pressed.KeyChar) == 'U')
+                {
+                    return BootChoice.Update;
+                }
+
+                continue;
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(50), Time, Cancellation);

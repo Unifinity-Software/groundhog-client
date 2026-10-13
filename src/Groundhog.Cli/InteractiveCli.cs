@@ -7,6 +7,9 @@ namespace Groundhog.Cli;
 internal static class InteractiveCli
 {
     internal static bool Disabled { get; set; }
+
+    /// <summary>False when update checks are turned off (<c>--no-update-check</c>, <c>GROUNDHOG_NO_UPDATE_CHECK</c>).</summary>
+    internal static bool UpdateChecks { get; set; } = true;
     internal static bool Available => !Disabled && !Console.IsInputRedirected && !Console.IsOutputRedirected
         && AnsiConsole.Profile.Capabilities.Interactive;
 
@@ -19,8 +22,12 @@ internal static class InteractiveCli
             return ExitCodes.BadArguments;
         }
 
-        var app = new InteractiveApp(AnsiConsole.Console, new ConsoleKeySource(), TimeProvider.System, new HostedServices(), cancellation);
-        return await app.RunAsync();
+        using var updates = UpdateCommands.CreateDefault(Console.Out, Console.Error);
+        var app = new InteractiveApp(AnsiConsole.Console, new ConsoleKeySource(), TimeProvider.System,
+            new HostedServices(UpdateChecks ? updates : null), cancellation);
+        var exit = await app.RunAsync();
+        // The update runs after the full-screen app has closed, so its progress prints in the normal terminal.
+        return app.UpdateRequested is { } version ? await updates.InstallAsync(version, cancellation) : exit;
     }
 
     /// <summary><c>groundhog init</c>: a short guided prompt that saves a profile.</summary>

@@ -203,6 +203,10 @@ internal sealed class FakeServices : IInteractiveServices
         Copied.Add(text);
         return true;
     }
+
+    internal string? Update { get; set; }
+
+    public Task<string?> AvailableUpdateAsync(CancellationToken cancellation) => Task.FromResult(Update);
 }
 
 /// <summary>Builds the app against a Spectre test console and renders frames to text.</summary>

@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
 using Groundhog.Cli;
 
+// Before anything touches the console: Spectre reads the encoding once, when it first creates its console.
+using var encoding = ConsoleEncoding.UseUtf8();
 using var stop = new CancellationTokenSource();
 
 // Ctrl+C (and a polite termination request) stops the agent cleanly; a second Ctrl+C ends the process at once.
@@ -22,6 +24,7 @@ if (args.Contains("--no-color", StringComparer.Ordinal))
     Environment.SetEnvironmentVariable("NO_COLOR", "1");
 }
 var checkForUpdates = UpdateCommands.ShouldCheck(InteractiveCli.Available, args, Environment.GetEnvironmentVariable);
+InteractiveCli.UpdateChecks = UpdateCommands.Enabled(InteractiveCli.Available, args, Environment.GetEnvironmentVariable);
 args = args.Where(arg => arg is not ("--no-interactive" or "--no-color" or "--no-update-check")).ToArray();
 
 try
@@ -32,10 +35,7 @@ try
         try
         {
             using var updates = UpdateCommands.CreateDefault(Console.Out, Console.Error);
-            if (await updates.OfferAsync(stop.Token))
-            {
-                return 0;
-            }
+            await updates.NoticeAsync(stop.Token);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or ArgumentException)
         {
