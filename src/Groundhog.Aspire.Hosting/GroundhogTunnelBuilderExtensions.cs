@@ -98,7 +98,7 @@ public static class GroundhogTunnelBuilderExtensions
     }
 
     /// <summary>
-    /// Declares who may visit the tunnel: by default, per path, from IP ranges and with visitor tokens. The agent sends
+    /// Declares who may visit the tunnel: by default, per path, from IP ranges and with API keys. The agent sends
     /// the rules on every connection, replacing the tunnel's stored rules.
     /// </summary>
     /// <param name="builder">The tunnel.</param>
@@ -107,7 +107,7 @@ public static class GroundhogTunnelBuilderExtensions
     /// <exception cref="ArgumentException">The rules are invalid; the message says why.</exception>
     /// <remarks>
     /// <para>
-    /// The rules are checked here with the service's own validation. Visitor token values come from secret parameters
+    /// The rules are checked here with the service's own validation. API key values come from secret parameters
     /// when the tunnel starts; only their SHA-256 hashes are sent.
     /// </para>
     /// <para>
@@ -125,9 +125,9 @@ public static class GroundhogTunnelBuilderExtensions
         var rules = new GroundhogVisitorAccessBuilder();
         access(rules);
         builder.Resource.VisitorAccess = rules.Build();
-        foreach (var token in rules.Tokens)
+        foreach (var apiKey in rules.ApiKeys)
         {
-            builder.WithReferenceRelationship(token.Resource);
+            builder.WithReferenceRelationship(apiKey.Resource);
         }
 
         return builder;

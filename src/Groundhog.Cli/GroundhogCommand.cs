@@ -72,16 +72,16 @@ internal static class GroundhogCommand
           groundhog access <name> [--workspace <slug>] [--output json]
           groundhog access set <name> (--allow <methods> [--path <prefix>=<methods>]... [--ip <cidr>]... | --access-file <file>)
           groundhog access <name> --agent-managed
-          groundhog token create <name> <label> | token list <name> | token revoke <name> <id> [--yes]
+          groundhog api-key create <name> <label> | api-key list <name> | api-key revoke <name> <id> [--yes]
           groundhog stats|requests <name> --remote [--workspace <slug>] [--output json]
           groundhog requests <name> --remote --follow [--workspace <slug>] [filters]
 
         Requests options: --status 5xx|<code>, --method <method>, --path <substring>,
                           --since <number>s|m|h, --min-duration <milliseconds>, --limit <1..1000>
         Saved profiles remember a tunnel name, its local target and its visitor access options, so
-        host <profile> and start <profile> need no other options. Profiles never store keys or visitor
-        tokens (only --visitor-token-env names); the key comes from GROUNDHOG_KEY, --key, or the key
-        saved when you created or rotated the tunnel here.
+        host <profile> and start <profile> need no other options. Profiles never store connection keys
+        or API keys (only --api-key-env names); the connection key comes from GROUNDHOG_KEY, --key, or
+        the key saved when you created or rotated the tunnel here.
         Status and traffic commands describe local sessions; history retains the last 1,000 requests.
         Global options: --no-interactive (disable menus), --no-color (disable colors; also NO_COLOR),
                         --no-update-check (skip the periodic update offer; also GROUNDHOG_NO_UPDATE_CHECK=1).
@@ -98,11 +98,11 @@ internal static class GroundhogCommand
           -v, --verbose    Print one line per request.
 
         Visitor access (who may reach the public address; leave out to keep the tunnel's current rules):
-          --allow <methods>        Default rule: anyone, or any of members, tokens, ips joined by commas.
+          --allow <methods>        Default rule: anyone, or any of members, apikeys, ips joined by commas.
           --path <prefix>=<methods> A rule for one path prefix, for example --path /webhooks=anyone. Repeatable.
           --ip <cidr>              An IP range for ips, for example 203.0.113.0/24. Repeatable.
-          --visitor-token-env <VAR> An environment variable holding a visitor token for tokens. Repeatable.
-                                   Only the token's SHA-256 hash is sent.
+          --api-key-env <VAR>      An environment variable holding an API key for apikeys (not the
+                                   connection key). Repeatable. Only its SHA-256 hash is sent.
           --access-file <file>     The rules as JSON ({"default":{"allow":[...]},"rules":[...],"ipRanges":[...]})
                                    instead of --allow, --path and --ip.
 

@@ -74,28 +74,29 @@ rules.
     "default": { "allow": ["members"] },
     "rules": [
       { "path": "/webhooks", "allow": ["anyone"] },
-      { "path": "/api", "allow": ["tokens", "ips"] }
+      { "path": "/api", "allow": ["apikeys", "ips"] }
     ],
     "ipRanges": ["203.0.113.0/24", "2001:db8::/32"],
-    "tokenHashes": ["<64 lowercase hexadecimal characters>"]
+    "apiKeyHashes": ["<64 lowercase hexadecimal characters>"]
   }
   ```
 
-- `allow` values: `anyone`, `members` (workspace members signed in through the relay), `tokens` (a visitor
-  token in `X-Groundhog-Visitor-Token`), `ips` (the visitor's address is in `ipRanges`). A request passes when
-  any listed method passes. `anyone` can't be combined with other methods in one list. `tokens` needs at least
-  one token hash and `ips` at least one IP range. Missing `default` means `{ "allow": ["anyone"] }`; missing
+- `allow` values: `anyone`, `members` (workspace members signed in through the relay), `apikeys` (one of the
+  tunnel's API keys in `X-Groundhog-Api-Key`), `ips` (the visitor's address is in `ipRanges`). A request passes
+  when any listed method passes. `anyone` can't be combined with other methods in one list. `apikeys` needs at
+  least one API key hash and `ips` at least one IP range. Missing `default` means `{ "allow": ["anyone"] }`; missing
   lists are empty.
 - The longest matching `path` prefix wins, on segment boundaries and ignoring case; `default` applies when none
   matches. Paths start with `/`, have no `?`, `#`, `%`, `\`, whitespace, control characters or `.`/`..`
   segments, aren't `/` itself (that's `default`), are at most 256 characters, and appear once, ignoring case and
   trailing or repeated `/`.
 - `ipRanges` are IPv4 or IPv6 CIDR ranges as .NET's `IPNetwork.TryParse` reads them.
-- Limits: 32 rules, 64 IP ranges, 10 token hashes.
-- `tokenHashes` are SHA-256 of each visitor token's UTF-8 text, as 64 lowercase hexadecimal characters. Visitor
-  tokens have the same shape as connection keys (43 base64url characters); the plaintext never leaves the
-  developer's machine. Declared hashes replace the tokens an earlier declaration added; tokens created in the
-  dashboard are kept.
+- Limits: 32 rules, 64 IP ranges, 10 API key hashes.
+- `apiKeyHashes` are SHA-256 of each API key's UTF-8 text, as 64 lowercase hexadecimal characters. API keys are
+  what callers send to reach a path; they're separate from the tunnel's connection key (the agent's credential)
+  but have the same shape (43 base64url characters). The plaintext never leaves the developer's machine. Declared
+  hashes replace the API keys an earlier declaration added; API keys created in the dashboard are kept.
+  The relay removes `X-Groundhog-Api-Key` before forwarding a request.
 - `Groundhog.Protocol` holds the model (`VisitorAccessDeclaration`), the shared validator
   (`VisitorAccessValidator`) and the encoding, so the relay, the agent and the CLI apply the same rules.
 - The agent sends the same declaration on every pooled connection. A relay that applied it (validated, and
@@ -202,12 +203,12 @@ The CLI uses these existing workspace endpoints (JSON is camelCase):
 | Account and accessible workspaces | `GET /api/me` |
 | Tunnel inventory / create | `GET /api/w/<slug>/tunnels`, `POST` with `{"name":"<name>"}` |
 | Tunnel details / rename / delete | `GET`, `PATCH` with `{"name":"<new-name>"}`, `DELETE /api/w/<slug>/tunnels/<name>` |
-| Rotate / revoke keys | `POST /api/w/<slug>/tunnels/<name>/rotate-key`, `/revoke-key` |
+| Rotate / revoke connection keys | `POST /api/w/<slug>/tunnels/<name>/rotate-key`, `/revoke-key` |
 | Stored usage window | `GET /api/w/<slug>/tunnels/<name>/usage` |
 | Persisted request metadata | `GET /api/w/<slug>/requests?tunnel=<name>&status=<class-or-code>&limit=200` |
 | Live requests (server-sent events) | `GET /api/w/<slug>/tunnels/<name>/requests/stream` |
 | Visitor access rules | `GET`, `PUT /api/w/<slug>/tunnels/<name>/visitor-access` |
-| Visitor tokens | `POST /api/w/<slug>/tunnels/<name>/visitor-tokens` with `{"name":"<label>"}`, `DELETE …/visitor-tokens/<id>` |
+| API keys | `POST /api/w/<slug>/tunnels/<name>/api-keys` with `{"name":"<label>"}`, `DELETE …/api-keys/<id>` |
 
 Request search returns `{ "entries": [...], "truncated": true|false }`; entries contain completion time,
 method, path, status code and duration plus relay metadata. The CLI does not retrieve request detail bodies/headers.
@@ -223,13 +224,13 @@ the CLI does not echo arbitrary response bodies.
 Visitor access (behind a per-workspace feature; without it these endpoints answer 404, which the CLI reports as
 "Visitor access rules aren't enabled for this workspace."):
 
-- `GET …/visitor-access` returns the stored policy in the declaration's shape, with `tokens`
-  (`[{"id","name","created"}]`, never hashes or plaintext) instead of `tokenHashes`, plus `managedBy`:
+- `GET …/visitor-access` returns the stored policy in the declaration's shape, with `apiKeys`
+  (`[{"id","name","created"}]`, never hashes or plaintext) instead of `apiKeyHashes`, plus `managedBy`:
   `agent` (the default; an agent's declaration replaces the rules) or `dashboard` (the relay refuses agent
   declarations with 403).
 - `PUT …/visitor-access` with `{ "default", "rules", "ipRanges", "managedBy" }` replaces the rules. The CLI
-  validates them with `VisitorAccessValidator` first (without the token checks, since tokens live on the relay),
+  validates them with `VisitorAccessValidator` first (without the API key checks, since API keys live on the relay),
   sends `managedBy: "dashboard"` when setting rules, and `managedBy: "agent"` with the stored rules to hand
   control back to agents.
-- `POST …/visitor-tokens` with `{"name":"<label>"}` returns `{"id","name","created","token"}`; the plaintext
-  `token` is shown once. `DELETE …/visitor-tokens/<id>` revokes one.
+- `POST …/api-keys` with `{"name":"<label>"}` returns `{"id","name","created","key"}`; the plaintext `key` is
+  shown once. `DELETE …/api-keys/<id>` revokes one.

@@ -108,22 +108,23 @@ builder.AddProject<Projects.MyApp_Web>("web")
     .WithGroundhogTunnel("myapp", access => access
         .Allow(VisitorAllow.Members)
         .Path("/webhooks", VisitorAllow.Anyone)
-        .Path("/api", VisitorAllow.Tokens, VisitorAllow.Ips)
+        .Path("/api", VisitorAllow.ApiKeys, VisitorAllow.Ips)
         .IpRange("203.0.113.0/24")
-        .Token(builder.AddParameter("myapp-visitor-token", secret: true)));
+        .ApiKey(builder.AddParameter("myapp-api-key", secret: true)));
 ```
 
 - `Allow(...)` is the default rule for paths no `Path` rule matches; without it, anyone may visit. A request passes
   when any listed method passes.
 - `VisitorAllow.Anyone` (on its own), `Members` (members of the tunnel's workspace, after signing in to Groundhog in
-  the browser), `Tokens` (a visitor token in the `X-Groundhog-Visitor-Token` header) and `Ips` (an address in an
-  `IpRange`).
+  the browser), `ApiKeys` (one of the tunnel's API keys in the `X-Groundhog-Api-Key` header) and `Ips` (an address in
+  an `IpRange`).
 - `Path(prefix, ...)`: the longest matching prefix wins, on segment boundaries and ignoring case. Keep webhook and
   OAuth callback paths on `Anyone`: those senders can't sign in.
-- `Token(parameter)` takes a secret parameter holding a visitor token, for example one printed by
-  `groundhog token create myapp <label>`, set in user secrets like the key. Only its SHA-256 hash is sent.
+- `ApiKey(parameter)` takes a secret parameter holding an API key, for example one printed by
+  `groundhog api-key create myapp <label>`, set in user secrets like the connection key. API keys are what callers
+  send; the connection key is the agent's own credential. Only the API key's SHA-256 hash is sent.
 - The rules are checked when the AppHost is built, with the service's own validation (limits: 32 paths, 64 IP
-  ranges, 10 tokens). The tunnel's dashboard properties show them, without tokens.
+  ranges, 10 API keys). The tunnel's dashboard properties show them, without API keys.
 - With the explicit form, use `tunnel.WithVisitorAccess(access => ...)`. The `access` overload of
   `WithGroundhogTunnel` also takes `endpointName` and `configure`.
 - The agent sends the rules on every connection and they replace the tunnel's stored rules. If the tunnel's visitor

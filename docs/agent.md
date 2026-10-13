@@ -60,7 +60,7 @@ groundhog host <name> (--port <port> | --target <url>) [options]
 | `--key <key>` | The tunnel's connection key. Prefer the `GROUNDHOG_KEY` environment variable (below). |
 | `--pool <n>` | How many connections to keep open to the relay, 1 to 8. Default 2. |
 | `-v`, `--verbose` | Print one line per request. |
-| `--allow`, `--path`, `--ip`, `--visitor-token-env`, `--access-file` | Declare the tunnel's visitor access rules; see [the CLI guide](cli.md#visitor-access-rules). |
+| `--allow`, `--path`, `--ip`, `--api-key-env`, `--access-file` | Declare the tunnel's visitor access rules; see [the CLI guide](cli.md#visitor-access-rules). |
 
 Pass the key through `GROUNDHOG_KEY` using a hidden prompt, so its literal value stays out of your
 shell history and command-line arguments. The environment still contains the key until cleared. `--key` wins if you give both. The command never prints the key.
@@ -281,23 +281,24 @@ var agent = new GroundhogAgent(new GroundhogAgentOptions
         Rules =
         [
             new VisitorAccessPathRule("/webhooks", [VisitorAccessMethods.Anyone]),
-            new VisitorAccessPathRule("/api", [VisitorAccessMethods.Tokens, VisitorAccessMethods.Ips]),
+            new VisitorAccessPathRule("/api", [VisitorAccessMethods.ApiKeys, VisitorAccessMethods.Ips]),
         ],
         IpRanges = ["203.0.113.0/24"],
-        Tokens = [Environment.GetEnvironmentVariable("MYAPP_VISITOR_TOKEN")!],
+        ApiKeys = [Environment.GetEnvironmentVariable("MYAPP_API_KEY")!],
     },
 });
 ```
 
 - `Allow` is the default rule (who may visit paths no rule matches) and defaults to `anyone`. Each rule's path is a
   prefix; the longest match wins, on segment boundaries and ignoring case.
-- Methods: `anyone` (on its own), `members` (signed-in members of the tunnel's workspace), `tokens` (a visitor
-  token in the `X-Groundhog-Visitor-Token` header) and `ips` (an address in `IpRanges`). A request passes when any
-  listed method passes.
-- Visitor tokens are 43 base64url characters; create one with `VisitorToken.Generate()` or
-  `groundhog token create`, and keep it in a secret store. The agent sends only each token's SHA-256 hash.
+- Methods: `anyone` (on its own), `members` (signed-in members of the tunnel's workspace), `apikeys` (one of
+  the tunnel's API keys in the `X-Groundhog-Api-Key` header) and `ips` (an address in `IpRanges`). A request passes
+  when any listed method passes.
+- API keys are what callers send to reach a path; they're separate from the connection key the agent signs in
+  with. They're 43 base64url characters; create one with `ApiKey.Generate()` or `groundhog api-key create`, and
+  keep it in a secret store. The agent sends only each API key's SHA-256 hash.
 - The constructor checks the rules with the same validator the service uses (limits: 32 rules, 64 IP ranges,
-  10 tokens) and throws `ArgumentException` for the first problem.
+  10 API keys) and throws `ArgumentException` for the first problem.
 - The rules are sent on every connection. If the tunnel's visitor access is managed in the dashboard, or the
   rules are refused, the agent stops with `NotAllowed` and the service's reason. A service that doesn't confirm
   it applied the rules stops the agent with `VisitorAccessUnsupported`, so declared rules are never silently

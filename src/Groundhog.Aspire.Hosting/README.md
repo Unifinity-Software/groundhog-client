@@ -52,7 +52,7 @@ name or key parameter yourself; its tunnel name can also be a parameter.
 
 ## Visitor access rules
 
-Declare who may visit the tunnel (anyone, workspace members, visitor tokens, IP ranges, per path) in the AppHost:
+Declare who may visit the tunnel (anyone, workspace members, API keys, IP ranges, per path) in the AppHost:
 
 ```csharp
 builder.AddProject<Projects.MyApp_Web>("web")
@@ -60,11 +60,12 @@ builder.AddProject<Projects.MyApp_Web>("web")
         .Allow(VisitorAllow.Members)
         .Path("/webhooks", VisitorAllow.Anyone)
         .IpRange("203.0.113.0/24")
-        .Token(builder.AddParameter("myapp-visitor-token", secret: true)));
+        .ApiKey(builder.AddParameter("myapp-api-key", secret: true)));
 ```
 
-Rules are checked when the AppHost is built and sent on every connection; visitor tokens come from secret parameters
-and only their SHA-256 hashes are sent. The explicit form uses `tunnel.WithVisitorAccess(access => ...)`.
+Rules are checked when the AppHost is built and sent on every connection. API keys are what callers send to reach a
+path, separate from the tunnel's connection key; they come from secret parameters and only their SHA-256 hashes are
+sent. The explicit form uses `tunnel.WithVisitorAccess(access => ...)`.
 
 ## Request logging
 

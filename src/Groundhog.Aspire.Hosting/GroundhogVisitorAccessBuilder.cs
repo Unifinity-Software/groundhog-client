@@ -7,7 +7,7 @@ namespace Groundhog.Aspire.Hosting;
 
 /// <summary>
 /// Declares a tunnel's visitor access rules: who may visit by default, per path, from which IP ranges and with which
-/// visitor tokens. The agent sends them on every connection.
+/// API keys. The agent sends them on every connection.
 /// </summary>
 /// <example>
 /// <code>
@@ -16,14 +16,14 @@ namespace Groundhog.Aspire.Hosting;
 ///         .Allow(VisitorAllow.Members)
 ///         .Path("/webhooks", VisitorAllow.Anyone)
 ///         .IpRange("203.0.113.0/24")
-///         .Token(builder.AddParameter("myapp-visitor-token", secret: true)));
+///         .ApiKey(builder.AddParameter("myapp-api-key", secret: true)));
 /// </code>
 /// </example>
 public sealed class GroundhogVisitorAccessBuilder
 {
     private readonly List<VisitorAccessPathRule> _rules = [];
     private readonly List<string> _ipRanges = [];
-    private readonly List<IResourceBuilder<ParameterResource>> _tokens = [];
+    private readonly List<IResourceBuilder<ParameterResource>> _apiKeys = [];
     private string[] _allow = [VisitorAccessMethods.Anyone];
 
     internal GroundhogVisitorAccessBuilder()
@@ -64,41 +64,41 @@ public sealed class GroundhogVisitorAccessBuilder
     }
 
     /// <summary>
-    /// Adds a visitor token for <see cref="VisitorAllow.Tokens"/>, from a secret parameter. Only its SHA-256 hash is
-    /// sent to the service.
+    /// Adds an API key for <see cref="VisitorAllow.ApiKeys"/>, from a secret parameter. Only its SHA-256 hash is
+    /// sent to the service. API keys are what callers send to reach a path; they're not the tunnel's connection key.
     /// </summary>
-    /// <param name="token">
-    /// A secret parameter holding a visitor token (43 base64url characters), for example one printed by
-    /// <c>groundhog token create</c>.
+    /// <param name="apiKey">
+    /// A secret parameter holding an API key (43 base64url characters), for example one printed by
+    /// <c>groundhog api-key create</c>.
     /// </param>
     /// <returns>This builder.</returns>
-    /// <exception cref="ArgumentException"><paramref name="token"/> isn't a secret parameter.</exception>
-    public GroundhogVisitorAccessBuilder Token(IResourceBuilder<ParameterResource> token)
+    /// <exception cref="ArgumentException"><paramref name="apiKey"/> isn't a secret parameter.</exception>
+    public GroundhogVisitorAccessBuilder ApiKey(IResourceBuilder<ParameterResource> apiKey)
     {
-        ArgumentNullException.ThrowIfNull(token);
-        if (!token.Resource.Secret)
+        ArgumentNullException.ThrowIfNull(apiKey);
+        if (!apiKey.Resource.Secret)
         {
             throw new ArgumentException(
-                "A visitor token must be a secret parameter, for example builder.AddParameter(\"myapp-visitor-token\", secret: true).",
-                nameof(token));
+                "An API key must be a secret parameter, for example builder.AddParameter(\"myapp-api-key\", secret: true).",
+                nameof(apiKey));
         }
 
-        _tokens.Add(token);
+        _apiKeys.Add(apiKey);
         return this;
     }
 
-    internal IReadOnlyList<IResourceBuilder<ParameterResource>> Tokens => _tokens;
+    internal IReadOnlyList<IResourceBuilder<ParameterResource>> ApiKeys => _apiKeys;
 
-    /// <summary>Checks the rules (token values are checked when the tunnel starts) and captures them.</summary>
+    /// <summary>Checks the rules (API key values are checked when the tunnel starts) and captures them.</summary>
     internal VisitorAccessSource Build()
     {
         var defaultRule = new VisitorAccessRule(_allow);
-        if (!VisitorAccessValidator.TryValidate(defaultRule, _rules, _ipRanges, _tokens.Count, out var error))
+        if (!VisitorAccessValidator.TryValidate(defaultRule, _rules, _ipRanges, _apiKeys.Count, out var error))
         {
             throw new ArgumentException($"Visitor access: {error}", "access");
         }
 
-        return new VisitorAccessSource(_allow, [.. _rules], [.. _ipRanges], [.. _tokens.Select(token => token.Resource)]);
+        return new VisitorAccessSource(_allow, [.. _rules], [.. _ipRanges], [.. _apiKeys.Select(apiKey => apiKey.Resource)]);
     }
 
     private static string[] ToValues(VisitorAllow[] methods)
@@ -108,32 +108,32 @@ public sealed class GroundhogVisitorAccessBuilder
         {
             VisitorAllow.Anyone => VisitorAccessMethods.Anyone,
             VisitorAllow.Members => VisitorAccessMethods.Members,
-            VisitorAllow.Tokens => VisitorAccessMethods.Tokens,
+            VisitorAllow.ApiKeys => VisitorAccessMethods.ApiKeys,
             VisitorAllow.Ips => VisitorAccessMethods.Ips,
             _ => throw new ArgumentOutOfRangeException(nameof(methods), method, "Unknown visitor access method."),
         })];
     }
 }
 
-/// <summary>A tunnel's declared rules, with token parameters resolved when the tunnel starts.</summary>
+/// <summary>A tunnel's declared rules, with API key parameters resolved when the tunnel starts.</summary>
 internal sealed record VisitorAccessSource(
     IReadOnlyList<string> Allow,
     IReadOnlyList<VisitorAccessPathRule> Rules,
     IReadOnlyList<string> IpRanges,
-    IReadOnlyList<ParameterResource> Tokens)
+    IReadOnlyList<ParameterResource> ApiKeys)
 {
     public async ValueTask<GroundhogVisitorAccess> ResolveAsync(CancellationToken cancellationToken)
     {
-        var tokens = new List<string>(Tokens.Count);
-        foreach (var parameter in Tokens)
+        var apiKeys = new List<string>(ApiKeys.Count);
+        foreach (var parameter in ApiKeys)
         {
-            tokens.Add((await parameter.GetValueAsync(cancellationToken).ConfigureAwait(false))?.Trim() ?? string.Empty);
+            apiKeys.Add((await parameter.GetValueAsync(cancellationToken).ConfigureAwait(false))?.Trim() ?? string.Empty);
         }
 
-        return new GroundhogVisitorAccess { Allow = Allow, Rules = Rules, IpRanges = IpRanges, Tokens = tokens };
+        return new GroundhogVisitorAccess { Allow = Allow, Rules = Rules, IpRanges = IpRanges, ApiKeys = apiKeys };
     }
 
-    /// <summary>For the dashboard: the rules without tokens, for example <c>members; /webhooks: anyone</c>.</summary>
+    /// <summary>For the dashboard: the rules without API keys, for example <c>members; /webhooks: anyone</c>.</summary>
     public string Describe()
     {
         var parts = new List<string> { string.Join(" or ", Allow) };
@@ -143,9 +143,9 @@ internal sealed record VisitorAccessSource(
             parts.Add($"{IpRanges.Count} IP range(s)");
         }
 
-        if (Tokens.Count > 0)
+        if (ApiKeys.Count > 0)
         {
-            parts.Add($"{Tokens.Count} token(s)");
+            parts.Add($"{ApiKeys.Count} API key(s)");
         }
 
         return string.Join("; ", parts);

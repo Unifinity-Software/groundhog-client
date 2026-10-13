@@ -7,7 +7,7 @@ namespace Groundhog.Agent.Tests;
 
 public class VisitorAccessTests(TunnelFixture fixture) : IClassFixture<TunnelFixture>
 {
-    private static readonly string s_token = VisitorToken.Generate();
+    private static readonly string s_apiKey = ApiKey.Generate();
 
     private static GroundhogVisitorAccess Rules() => new()
     {
@@ -15,14 +15,14 @@ public class VisitorAccessTests(TunnelFixture fixture) : IClassFixture<TunnelFix
         Rules =
         [
             new("/webhooks", [VisitorAccessMethods.Anyone]),
-            new("/api", [VisitorAccessMethods.Tokens, VisitorAccessMethods.Ips]),
+            new("/api", [VisitorAccessMethods.ApiKeys, VisitorAccessMethods.Ips]),
         ],
         IpRanges = ["203.0.113.0/24"],
-        Tokens = [s_token],
+        ApiKeys = [s_apiKey],
     };
 
     [Fact(Timeout = 30_000)]
-    public async Task Declares_the_rules_on_every_pooled_connection_with_token_hashes_only()
+    public async Task Declares_the_rules_on_every_pooled_connection_with_api_key_hashes_only()
     {
         var ct = TestContext.Current.CancellationToken;
         var tunnel = fixture.Relay.Tunnel("access-declared");
@@ -34,10 +34,10 @@ public class VisitorAccessTests(TunnelFixture fixture) : IClassFixture<TunnelFix
         Assert.Equal(first.VisitorAccess, second.VisitorAccess);
 
         var json = Encoding.UTF8.GetString(Base64Url.DecodeFromChars(first.VisitorAccess));
-        Assert.DoesNotContain(s_token, json, StringComparison.Ordinal);
-        Assert.DoesNotContain(s_token, first.VisitorAccess, StringComparison.Ordinal);
+        Assert.DoesNotContain(s_apiKey, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(s_apiKey, first.VisitorAccess, StringComparison.Ordinal);
         Assert.True(VisitorAccessDeclaration.TryDecode(first.VisitorAccess, out var declaration, out var error), error);
-        Assert.Equal([VisitorToken.Hash(s_token)], declaration.TokenHashes);
+        Assert.Equal([ApiKey.Hash(s_apiKey)], declaration.ApiKeyHashes);
         Assert.Equal(["members"], declaration.Default.Allow);
         Assert.Equal("/webhooks", declaration.Rules[0].Path);
 
@@ -128,23 +128,23 @@ public class VisitorAccessTests(TunnelFixture fixture) : IClassFixture<TunnelFix
             TunnelName = "myapp",
             Credential = new TunnelKeyCredential(ConnectionKey.Generate()),
             LocalTarget = new Uri("http://localhost:5173"),
-            VisitorAccess = new GroundhogVisitorAccess { Allow = [VisitorAccessMethods.Tokens] },
+            VisitorAccess = new GroundhogVisitorAccess { Allow = [VisitorAccessMethods.ApiKeys] },
         };
 
         var problem = Assert.Throws<ArgumentException>(() => new GroundhogAgent(options));
-        Assert.Contains("tokens needs at least one visitor token", problem.Message);
+        Assert.Contains("apikeys needs at least one API key", problem.Message);
     }
 
     [Theory]
     [InlineData("too-short-secret")]
     [InlineData("password with spaces and a fair bit of length to it")]
-    public void Malformed_tokens_are_refused_without_repeating_them(string token)
+    public void Malformed_api_keys_are_refused_without_repeating_them(string apiKey)
     {
-        var access = new GroundhogVisitorAccess { Allow = [VisitorAccessMethods.Tokens], Tokens = [token] };
+        var access = new GroundhogVisitorAccess { Allow = [VisitorAccessMethods.ApiKeys], ApiKeys = [apiKey] };
 
         var problem = Assert.Throws<ArgumentException>(access.ToDeclaration);
-        Assert.DoesNotContain(token, problem.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain(token, access.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(apiKey, problem.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(apiKey, access.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -11,10 +11,10 @@ public enum VisitorAllow
     Members,
 
     /// <summary>
-    /// Requests with one of the tunnel's visitor tokens in the <c>X-Groundhog-Visitor-Token</c> header. Add tokens
-    /// with <see cref="Groundhog.Aspire.Hosting.GroundhogVisitorAccessBuilder.Token"/>.
+    /// Requests with one of the tunnel's API keys in the <c>X-Groundhog-Api-Key</c> header (not the tunnel's
+    /// connection key). Add API keys with <see cref="Groundhog.Aspire.Hosting.GroundhogVisitorAccessBuilder.ApiKey"/>.
     /// </summary>
-    Tokens,
+    ApiKeys,
 
     /// <summary>
     /// Requests from one of the tunnel's IP ranges. Add ranges with

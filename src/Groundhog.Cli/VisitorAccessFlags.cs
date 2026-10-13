@@ -10,15 +10,15 @@ namespace Groundhog.Cli;
 internal sealed class UsageException(string message) : ArgumentException(message);
 
 /// <summary>
-/// The visitor access options as typed (<c>--allow</c>, <c>--path</c>, <c>--ip</c>, <c>--visitor-token-env</c>,
-/// <c>--access-file</c>), so a saved profile can replay them. Holds environment variable names, never token values.
+/// The visitor access options as typed (<c>--allow</c>, <c>--path</c>, <c>--ip</c>, <c>--api-key-env</c>,
+/// <c>--access-file</c>), so a saved profile can replay them. Holds environment variable names, never API key values.
 /// </summary>
 internal sealed record VisitorAccessFlags
 {
-    /// <summary>The options this record reads; <c>--path</c>, <c>--ip</c> and <c>--visitor-token-env</c> repeat.</summary>
-    internal static readonly string[] OptionNames = ["--allow", "--path", "--ip", "--visitor-token-env", "--access-file"];
+    /// <summary>The options this record reads; <c>--path</c>, <c>--ip</c> and <c>--api-key-env</c> repeat.</summary>
+    internal static readonly string[] OptionNames = ["--allow", "--path", "--ip", "--api-key-env", "--access-file"];
 
-    /// <summary><c>--allow</c>: the default rule, for example <c>members</c> or <c>tokens,ips</c>.</summary>
+    /// <summary><c>--allow</c>: the default rule, for example <c>members</c> or <c>apikeys,ips</c>.</summary>
     public string? Allow { get; init; }
 
     /// <summary><c>--path</c> values: <c>&lt;prefix&gt;=&lt;allow,...&gt;</c>.</summary>
@@ -27,8 +27,8 @@ internal sealed record VisitorAccessFlags
     /// <summary><c>--ip</c> values: CIDR ranges.</summary>
     public string[] Ips { get; init; } = [];
 
-    /// <summary><c>--visitor-token-env</c> values: names of environment variables holding visitor tokens.</summary>
-    public string[] TokenVariables { get; init; } = [];
+    /// <summary><c>--api-key-env</c> values: names of environment variables holding API keys.</summary>
+    public string[] ApiKeyVariables { get; init; } = [];
 
     /// <summary><c>--access-file</c>: a JSON file with the rules.</summary>
     public string? AccessFile { get; init; }
@@ -37,7 +37,7 @@ internal sealed record VisitorAccessFlags
     internal bool HasRuleFlags => Allow is not null || Paths.Length > 0 || Ips.Length > 0;
 
     [JsonIgnore]
-    internal bool IsEmpty => !HasRuleFlags && TokenVariables.Length == 0 && AccessFile is null;
+    internal bool IsEmpty => !HasRuleFlags && ApiKeyVariables.Length == 0 && AccessFile is null;
 
     /// <summary>
     /// Takes the visitor access options out of <paramref name="args"/>. <paramref name="flags"/> is null when there
@@ -83,7 +83,7 @@ internal sealed record VisitorAccessFlags
             switch (arg)
             {
                 case "--allow" when allow is not null:
-                    error = "Give --allow once; list several methods with commas, for example --allow tokens,ips.";
+                    error = "Give --allow once; list several methods with commas, for example --allow apikeys,ips.";
                     return false;
                 case "--allow":
                     allow = value;
@@ -111,7 +111,7 @@ internal sealed record VisitorAccessFlags
             Allow = allow,
             Paths = [.. paths],
             Ips = [.. ips],
-            TokenVariables = [.. variables],
+            ApiKeyVariables = [.. variables],
             AccessFile = file,
         };
         if (parsed.AccessFile is not null && parsed.HasRuleFlags)
@@ -147,9 +147,9 @@ internal sealed record VisitorAccessFlags
             yield return ip;
         }
 
-        foreach (var variable in TokenVariables)
+        foreach (var variable in ApiKeyVariables)
         {
-            yield return "--visitor-token-env";
+            yield return "--api-key-env";
             yield return variable;
         }
 
@@ -160,7 +160,7 @@ internal sealed record VisitorAccessFlags
         }
     }
 
-    /// <summary>A short summary for tables, without token values.</summary>
+    /// <summary>A short summary for tables, without API key values.</summary>
     internal string Describe()
     {
         var parts = new List<string>();
@@ -183,17 +183,17 @@ internal sealed record VisitorAccessFlags
             parts.Add($"{Ips.Length} IP range(s)");
         }
 
-        if (TokenVariables.Length > 0)
+        if (ApiKeyVariables.Length > 0)
         {
-            parts.Add($"{TokenVariables.Length} token(s)");
+            parts.Add($"{ApiKeyVariables.Length} API key(s)");
         }
 
         return string.Join(", ", parts);
     }
 
     /// <summary>
-    /// The rules from the file or the options, not yet validated. Token hashes come only from a file; the
-    /// environment's tokens are added by <see cref="TryBuildAgentAccess"/>.
+    /// The rules from the file or the options, not yet validated. API key hashes come only from a file;
+    /// the environment's API keys are added by <see cref="TryBuildAgentAccess"/>.
     /// </summary>
     internal bool TryReadRules(
         [NotNullWhen(true)] out VisitorAccessDeclaration? rules,
@@ -240,7 +240,7 @@ internal sealed record VisitorAccessFlags
     }
 
     /// <summary>
-    /// What <c>groundhog host</c> declares: the rules plus each <c>--visitor-token-env</c> variable's token, checked
+    /// What <c>groundhog host</c> declares: the rules plus each <c>--api-key-env</c> variable's API key, checked
     /// with the shared validator.
     /// </summary>
     internal bool TryBuildAgentAccess(
@@ -254,30 +254,30 @@ internal sealed record VisitorAccessFlags
             return false;
         }
 
-        if (rules.TokenHashes.Count > 0)
+        if (rules.ApiKeyHashes.Count > 0)
         {
-            error = "Access files can't list token hashes; give tokens with --visitor-token-env.";
+            error = "Access files can't list API key hashes; give API keys with --api-key-env.";
             return false;
         }
 
-        var tokens = new List<string>();
-        foreach (var variable in TokenVariables)
+        var apiKeys = new List<string>();
+        foreach (var variable in ApiKeyVariables)
         {
-            var token = getEnvironmentVariable(variable);
-            if (string.IsNullOrEmpty(token))
+            var apiKey = getEnvironmentVariable(variable);
+            if (string.IsNullOrEmpty(apiKey))
             {
-                error = $"The environment variable {variable} (from --visitor-token-env) isn't set.";
+                error = $"The environment variable {variable} (from --api-key-env) isn't set.";
                 return false;
             }
 
-            if (!VisitorToken.IsWellFormed(token.Trim()))
+            if (!ApiKey.IsWellFormed(apiKey.Trim()))
             {
-                error = $"The environment variable {variable} doesn't hold a visitor token ({VisitorToken.Length} base64url "
-                    + "characters, as groundhog token create prints).";
+                error = $"The environment variable {variable} doesn't hold an API key ({ApiKey.Length} base64url "
+                    + "characters, as groundhog api-key create prints).";
                 return false;
             }
 
-            tokens.Add(token.Trim());
+            apiKeys.Add(apiKey.Trim());
         }
 
         var candidate = new GroundhogVisitorAccess
@@ -285,7 +285,7 @@ internal sealed record VisitorAccessFlags
             Allow = rules.Default?.Allow ?? [],
             Rules = rules.Rules ?? [],
             IpRanges = rules.IpRanges ?? [],
-            Tokens = tokens,
+            ApiKeys = apiKeys,
         };
         try
         {
@@ -311,7 +311,7 @@ internal sealed record VisitorAccessFlags
         if (allow.Any(string.IsNullOrEmpty))
         {
             allow = null;
-            error = $"{option} takes methods separated by commas: anyone, members, tokens, ips.";
+            error = $"{option} takes methods separated by commas: anyone, members, apikeys, ips.";
             return false;
         }
 
