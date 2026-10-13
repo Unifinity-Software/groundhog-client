@@ -38,6 +38,9 @@ internal abstract class Screen
     /// <summary>Called when the screen is shown again after the screens above it closed.</summary>
     internal virtual void Resume(InteractiveApp app) { }
 
+    /// <summary>Called when the screen closes, to stop background work such as a live stream.</summary>
+    internal virtual void Leave(InteractiveApp app) { }
+
     /// <summary>
     /// Called before every frame; background work reports completion through it. A screen that runs something in the
     /// foreground (hosting from a menu) awaits it here.
@@ -252,6 +255,7 @@ internal sealed class InteractiveApp
 
                 for (var i = 0; i < nav.Pop; i++)
                 {
+                    _screens[^1].Leave(this);
                     _screens.RemoveAt(_screens.Count - 1);
                     if (_screens.Count == floor)
                     {
@@ -272,6 +276,11 @@ internal sealed class InteractiveApp
         }
         finally
         {
+            for (var i = _screens.Count - 1; i >= floor; i--)
+            {
+                _screens[i].Leave(this);
+            }
+
             _screens.RemoveRange(floor, _screens.Count - floor);
         }
     }

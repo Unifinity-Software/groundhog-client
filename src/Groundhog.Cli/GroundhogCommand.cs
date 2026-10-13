@@ -70,6 +70,7 @@ internal static class GroundhogCommand
           groundhog key rotate|revoke <name> [--workspace <slug>] [--yes]
           groundhog open <name> [--workspace <slug>]
           groundhog stats|requests <name> --remote [--workspace <slug>] [--output json]
+          groundhog requests <name> --remote --follow [--workspace <slug>] [filters]
 
         Requests options: --status 5xx|<code>, --method <method>, --path <substring>,
                           --since <number>s|m|h, --min-duration <milliseconds>, --limit <1..1000>

@@ -157,9 +157,15 @@ The CLI uses these existing workspace endpoints (JSON is camelCase):
 | Rotate / revoke keys | `POST /api/w/<slug>/tunnels/<name>/rotate-key`, `/revoke-key` |
 | Stored usage window | `GET /api/w/<slug>/tunnels/<name>/usage` |
 | Persisted request metadata | `GET /api/w/<slug>/requests?tunnel=<name>&status=<class-or-code>&limit=200` |
+| Live requests (server-sent events) | `GET /api/w/<slug>/tunnels/<name>/requests/stream` |
 
 Request search returns `{ "entries": [...], "truncated": true|false }`; entries contain completion time,
 method, path, status code and duration plus relay metadata. The CLI does not retrieve request detail bodies/headers.
+The live stream sends one `request` event per finished request, its data a request entry with `requestId`. The relay
+ends each stream after a few minutes (and on sign-in, membership or workspace changes) and answers 429 with
+`Retry-After` when streams are at capacity. The CLI honours `retry:` (1 second by default) and `Retry-After`, backs off
+up to 30 seconds after failures, stops on other 4xx responses, and after every connection reads the request log to fill
+the gap, reporting each `requestId` once.
 Create and rotate return `{ "tunnel": {...}, "connectionKey": "<one-time-key>" }`. The CLI stores this key securely
 and never prints it in normal output. Other management errors use HTTP status codes and problem details;
 the CLI does not echo arbitrary response bodies.

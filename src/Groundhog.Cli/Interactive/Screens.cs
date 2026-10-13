@@ -269,15 +269,33 @@ internal static class Names
 /// <summary>One tunnel in full: overview, status classes, request log and its management actions.</summary>
 internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
 {
+    private const int Kept = 200;
+    private readonly Lock _gate = new();
     private TunnelInsight? _insight;
     private string? _problem;
     private Task? _loading;
+    private CancellationTokenSource? _follow;
+    private LiveState? _live;
+    private bool _closed;
 
     internal override string Title => name;
     internal override TimeSpan? Refresh => TimeSpan.FromSeconds(15);
 
     internal override void Enter(InteractiveApp app) => Load(app);
     internal override void Resume(InteractiveApp app) => Load(app);
+
+    internal override void Leave(InteractiveApp app)
+    {
+        CancellationTokenSource? follow;
+        lock (_gate)
+        {
+            // A load still running when the screen closes must not start a stream afterwards.
+            _closed = true;
+            follow = _follow;
+        }
+
+        follow?.Cancel();
+    }
 
     internal override Task<Nav> UpdateAsync(InteractiveApp app)
     {
@@ -299,8 +317,20 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
     {
         try
         {
-            _insight = await app.Services.TunnelAsync(workspace, name, app.Cancellation);
-            _problem = null;
+            var insight = await app.Services.TunnelAsync(workspace, name, app.Cancellation);
+            lock (_gate)
+            {
+                // Keep requests the live stream delivered that the service's log doesn't list yet.
+                _insight = _insight?.Requests is { } shown && insight.Requests is { } loaded
+                    ? insight with { Requests = Merge(loaded, shown.Where(r => r.RequestId is not null)) }
+                    : insight;
+                _problem = null;
+            }
+
+            if (insight.Requests is not null)
+            {
+                Follow(app);
+            }
         }
         catch (ManagementException ex)
         {
@@ -317,10 +347,95 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
         app.Invalidate();
     }
 
+    /// <summary>
+    /// Starts the live request stream once the log has loaded. It runs until the screen closes (the app closes every
+    /// screen when it exits); one the service stopped starts again with the next load.
+    /// </summary>
+    private void Follow(InteractiveApp app)
+    {
+        IEnumerable<RemoteRequest> known;
+        CancellationTokenSource follow;
+        lock (_gate)
+        {
+            if (_closed || _follow is not null || _insight?.Requests is not { } requests)
+            {
+                return;
+            }
+
+            _follow = follow = new CancellationTokenSource();
+            _live = null;
+            known = requests;
+        }
+
+        _ = FollowAsync(app, known, follow);
+    }
+
+    private async Task FollowAsync(InteractiveApp app, IEnumerable<RemoteRequest> known, CancellationTokenSource follow)
+    {
+        var token = follow.Token;
+        try
+        {
+            await app.Services.FollowRequestsAsync(workspace, name, known, request =>
+            {
+                lock (_gate)
+                {
+                    if (_insight?.Requests is { } shown)
+                    {
+                        _insight = _insight with { Requests = Merge([request], shown) };
+                    }
+                }
+
+                app.Invalidate();
+            }, state =>
+            {
+                lock (_gate)
+                {
+                    _live = state;
+                }
+
+                app.Invalidate();
+            }, token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex) when (!token.IsCancellationRequested)
+        {
+            // Live updates are an extra: the screen keeps the loaded log and says why it stopped updating.
+            lock (_gate)
+            {
+                _live = new(LiveStatus.Stopped, ex is ManagementException ? ex.Message : "Live requests are unavailable right now.");
+            }
+
+            app.Invalidate();
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_follow, follow))
+                {
+                    _follow = null;
+                }
+            }
+        }
+    }
+
+    /// <summary>Newest first, each request once (by ID), at most the log's page size.</summary>
+    internal static RemoteRequest[] Merge(IEnumerable<RemoteRequest> incoming, IEnumerable<RemoteRequest> shown)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        return incoming.Concat(shown).Where(r => r.RequestId is null || ids.Add(r.RequestId))
+            .OrderByDescending(r => r.Completed).Take(Kept).ToArray();
+    }
+
     internal override IRenderable Render(InteractiveApp app, ViewSize size)
     {
         var agent = app.Data.Current.Agents?.FirstOrDefault(a => a.Snapshot.Name == name);
-        return TunnelViews.Detail(new(workspace, name, _insight, _problem, agent, app.Now), size);
+        lock (_gate)
+        {
+            return TunnelViews.Detail(new(workspace, name, _insight, _problem, agent, app.Now, _live), size);
+        }
     }
 
     internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => _insight is null
