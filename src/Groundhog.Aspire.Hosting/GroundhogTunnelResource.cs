@@ -71,6 +71,9 @@ public sealed class GroundhogTunnelResource : Resource
 
     internal bool RequestLoggingEnabled { get; set; }
 
+    /// <summary>The declared visitor access rules, set by <c>WithVisitorAccess</c>; null leaves the stored rules alone.</summary>
+    internal VisitorAccessSource? VisitorAccess { get; set; }
+
     internal Func<CancellationToken, ValueTask<string?>> RelayAddressSource { get; }
 
     internal Func<CancellationToken, ValueTask<string?>> TunnelNameSource { get; }

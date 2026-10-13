@@ -99,6 +99,38 @@ web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
 The hosted service address is defined once in `GroundhogService.DefaultRelayAddress` and shared with the CLI. A future
 address change is delivered in a client update.
 
+## Visitor access rules
+
+By default anyone with the address can reach a tunnel. Declare who may visit, per path, as part of the AppHost:
+
+```csharp
+builder.AddProject<Projects.MyApp_Web>("web")
+    .WithGroundhogTunnel("myapp", access => access
+        .Allow(VisitorAllow.Members)
+        .Path("/webhooks", VisitorAllow.Anyone)
+        .Path("/api", VisitorAllow.Tokens, VisitorAllow.Ips)
+        .IpRange("203.0.113.0/24")
+        .Token(builder.AddParameter("myapp-visitor-token", secret: true)));
+```
+
+- `Allow(...)` is the default rule for paths no `Path` rule matches; without it, anyone may visit. A request passes
+  when any listed method passes.
+- `VisitorAllow.Anyone` (on its own), `Members` (members of the tunnel's workspace, after signing in to Groundhog in
+  the browser), `Tokens` (a visitor token in the `X-Groundhog-Visitor-Token` header) and `Ips` (an address in an
+  `IpRange`).
+- `Path(prefix, ...)`: the longest matching prefix wins, on segment boundaries and ignoring case. Keep webhook and
+  OAuth callback paths on `Anyone`: those senders can't sign in.
+- `Token(parameter)` takes a secret parameter holding a visitor token, for example one printed by
+  `groundhog token create myapp <label>`, set in user secrets like the key. Only its SHA-256 hash is sent.
+- The rules are checked when the AppHost is built, with the service's own validation (limits: 32 paths, 64 IP
+  ranges, 10 tokens). The tunnel's dashboard properties show them, without tokens.
+- With the explicit form, use `tunnel.WithVisitorAccess(access => ...)`. The `access` overload of
+  `WithGroundhogTunnel` also takes `endpointName` and `configure`.
+- The agent sends the rules on every connection and they replace the tunnel's stored rules. If the tunnel's visitor
+  access is managed in the Groundhog dashboard, or the service refuses the rules, the tunnel fails with the
+  service's reason; a service without visitor access support fails it too, so the app is never exposed without its
+  rules. Without `access`, the tunnel's stored rules are left alone.
+
 ## Use the public address
 
 `tunnel` is the tunnel builder passed to `configure` (or returned by `AddGroundhogTunnel`).

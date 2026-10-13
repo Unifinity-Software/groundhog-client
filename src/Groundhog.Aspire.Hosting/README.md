@@ -50,6 +50,22 @@ name or key parameter yourself; its tunnel name can also be a parameter.
 - Nothing waits for the tunnel unless it opts in with `WaitFor`, so an unreachable service never stops your app from
   starting locally.
 
+## Visitor access rules
+
+Declare who may visit the tunnel (anyone, workspace members, visitor tokens, IP ranges, per path) in the AppHost:
+
+```csharp
+builder.AddProject<Projects.MyApp_Web>("web")
+    .WithGroundhogTunnel("myapp", access => access
+        .Allow(VisitorAllow.Members)
+        .Path("/webhooks", VisitorAllow.Anyone)
+        .IpRange("203.0.113.0/24")
+        .Token(builder.AddParameter("myapp-visitor-token", secret: true)));
+```
+
+Rules are checked when the AppHost is built and sent on every connection; visitor tokens come from secret parameters
+and only their SHA-256 hashes are sent. The explicit form uses `tunnel.WithVisitorAccess(access => ...)`.
+
 ## Request logging
 
 Add `.WithRequestLogging()` to the tunnel builder to write completed requests to its Aspire console:

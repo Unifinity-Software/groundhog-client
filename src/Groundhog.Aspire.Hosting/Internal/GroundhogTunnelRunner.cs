@@ -17,6 +17,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
     internal const string RelayProperty = "groundhog.relay";
     internal const string TunnelProperty = "groundhog.tunnel";
     internal const string TargetProperty = "groundhog.target";
+    internal const string VisitorAccessProperty = "groundhog.visitor-access";
 
     private static readonly ResourceStateSnapshot s_connecting = new("Connecting", KnownResourceStateStyles.Info);
     private static readonly ResourceStateSnapshot s_reconnecting = new("Reconnecting", KnownResourceStateStyles.Warn);
@@ -155,6 +156,9 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                 TunnelName = tunnelName,
                 Credential = await resource.CredentialSource(cancellationToken).ConfigureAwait(false),
                 LocalTarget = target,
+                VisitorAccess = resource.VisitorAccess is { } access
+                    ? await access.ResolveAsync(cancellationToken).ConfigureAwait(false)
+                    : null,
                 Client = GroundhogClientInfo.FromAssembly("Groundhog.Aspire.Hosting", typeof(GroundhogTunnelRunner).Assembly),
             };
 
@@ -167,7 +171,11 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                     s.Properties,
                     new ResourcePropertySnapshot(RelayProperty, relay!.ToString()) { DisplayName = "Relay" },
                     new ResourcePropertySnapshot(TunnelProperty, tunnelName) { DisplayName = "Tunnel name" },
-                    new ResourcePropertySnapshot(TargetProperty, target.ToString()) { DisplayName = "Forwards to" }),
+                    new ResourcePropertySnapshot(TargetProperty, target.ToString()) { DisplayName = "Forwards to" },
+                    new ResourcePropertySnapshot(VisitorAccessProperty, resource.VisitorAccess?.Describe() ?? "Unchanged")
+                    {
+                        DisplayName = "Visitor access",
+                    }),
             }).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
