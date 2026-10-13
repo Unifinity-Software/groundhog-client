@@ -18,12 +18,16 @@ Update version metadata, sample dependency pins and installation snippets togeth
 
 Present the exact commit, version, four IDs, change list and NuGet company owner for release review.
 Ask once before publishing unless that precise release has already been confirmed in this session.
-After approval, tag the reviewed commit agent-v<version>, push the tag, and watch Release agent to completion.
+After approval, run Release agent on master with the version (`gh workflow run release-agent.yml --ref master
+-f version=<version>`, or the GitHub actions tools where gh is unavailable). It releases master's tip and creates
+the tag, so no tag push is needed and it works from a cloud session. If master moved past the reviewed commit,
+stop and review again. Watch Release agent to completion.
 
 Verify all four exact versions anonymously on nuget.org, including source/symbol metadata.
 Restore the sample in a fresh cache from nuget.org only, run full package-mode Aspire tests,
-and verify global and local CLI installation. Coordinate the relay's pinned package bump and real-Agent
-integration test. Stable promotion requires public source, cross-platform checks, preview feedback,
+and verify global and local CLI installation. A client release does not need a relay release: bump the
+relay's pinned packages (and run its real-Agent integration test) only when the relay must use a Protocol or Agent
+change. Stable promotion requires public source, cross-platform checks, preview feedback,
 and an explicit owner-reviewed go/no-go. Record URLs and validation results.
 
 Published bytes are immutable. Retry unchanged artifacts only; use a new version after corrections.

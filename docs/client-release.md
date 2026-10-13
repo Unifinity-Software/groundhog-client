@@ -72,7 +72,10 @@ a generated key passed only in the child process environment.
    a merge to `master` and that the latest Build run for that PR succeeded.
 2. Present the exact commit, version, change list and NuGet owner for release review. Obtain confirmation if
    this precise publication has not already been approved in the session.
-3. Tag the reviewed commit `agent-v<version>` and push that tag. Watch **Release agent** to completion.
+3. Run **Release agent** on `master` with the version (Actions, the GitHub mobile app, or
+   `gh workflow run release-agent.yml --ref master -f version=<version>`); it releases `master`'s tip, which must
+   be the reviewed commit, and creates the tag. Pushing `agent-v<version>` from a machine that can push tags
+   does the same for a specific commit. Watch **Release agent** to completion.
 4. Verify all four IDs and versions in NuGet's flat-container API. Indexing is asynchronous: a successful push
    alone does not prove anonymous restore works.
 5. Restore the sample in a fresh NuGet package cache using only nuget.org, run package-mode suites against the
