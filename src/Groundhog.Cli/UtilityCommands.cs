@@ -41,7 +41,7 @@ internal static class UtilityCommands
             if (options.Positional is ["save", var name])
             {
                 store.Save(new(name, options.Get("--target") ?? throw new ArgumentException("Target required."), options.Get("--relay")));
-                output.WriteLine("Profile saved; keys are not stored."); return 0;
+                output.WriteLine($"Profile saved (keys are never stored). Host it with: groundhog host {name}"); return 0;
             }
             if (options.Positional is ["delete", var removed])
             {

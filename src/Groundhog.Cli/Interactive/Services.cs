@@ -109,10 +109,13 @@ internal interface IInteractiveServices
     Task<DoctorCheck> CheckTargetAsync(string target, CancellationToken cancellation);
     bool OpenBrowser(Uri address);
     bool Copy(string text);
+
+    /// <summary>A newer Groundhog CLI for this installation, or null (none, unknown, or checks turned off).</summary>
+    Task<string?> AvailableUpdateAsync(CancellationToken cancellation);
 }
 
 /// <summary>The real services: the hosted Groundhog service, this user's stores and local agents.</summary>
-internal sealed class HostedServices : IInteractiveServices
+internal sealed class HostedServices(UpdateCommands? updates = null) : IInteractiveServices
 {
     private static string Home => ProfileStore.DefaultDirectory;
 
@@ -299,6 +302,9 @@ internal sealed class HostedServices : IInteractiveServices
         Console.Out.Flush();
         return true;
     }
+
+    public Task<string?> AvailableUpdateAsync(CancellationToken cancellation) =>
+        updates?.AvailableAsync(cancellation) ?? Task.FromResult<string?>(null);
 
     private static ManagementClient Client()
     {

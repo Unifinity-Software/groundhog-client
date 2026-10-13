@@ -49,6 +49,9 @@ internal static class Hints
     internal static readonly KeyHint Back = new("Esc", "Back");
     internal static readonly KeyHint Quit = new("Q", "Quit");
     internal static readonly KeyHint Help = new("?", "Help");
+
+    /// <summary>Hints for a list of <paramref name="count"/> rows: Move only when there is somewhere to move to.</summary>
+    internal static KeyHint[] List(int count, params KeyHint[] actions) => count > 1 ? [Move, .. actions] : actions;
 }
 
 /// <summary>The main menu with a live preview of the highlighted entry.</summary>
@@ -59,7 +62,7 @@ internal sealed class MenuScreen : Screen
         new("Home", "Account, tunnels and local agents at a glance."),
         new("Tunnels", "Remote tunnels in your workspace: inspect, host, rename, rotate keys."),
         new("Running agents", "Agents hosting from this machine, with live traffic."),
-        new("Saved profiles", "Tunnel names with local targets, ready to host."),
+        new("Saved profiles", "Tunnels you host often, remembered with their local address."),
         new("Workspaces", "Choose the default workspace for tunnels and commands."),
         new("Diagnostics", "Check the service, your sign-in and your local targets."),
         new("Sign in", "Authorize this CLI in your browser."),
@@ -87,7 +90,7 @@ internal sealed class MenuScreen : Screen
     }
 
     internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) =>
-        [Hints.Move, Hints.Open, Hints.Refresh, Hints.Help, Hints.Quit];
+        [Hints.Move, Hints.Open, Hints.Refresh, Hints.Help, Hints.Quit, new("1–9", "Jump")];
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -123,15 +126,15 @@ internal sealed class MenuScreen : Screen
         "Home" => HomeViews.Home(dashboard, size, app.Now, title: false),
         "Tunnels" => HomeViews.Tunnels(dashboard, size.Height - 4, size),
         "Running agents" => HomeViews.Agents(dashboard.Agents, size.Height - 4, app.Now, size),
-        "Saved profiles" => LocalViews.Profiles(dashboard.Profiles, dashboard.Agents, null, size),
+        "Saved profiles" => LocalViews.Profiles(dashboard.Profiles, dashboard.Agents, null, size, preview: true),
         "Workspaces" => AccountViews.Workspaces(dashboard.Account,
             Array.FindIndex(dashboard.Account?.Account?.Workspaces ?? [], w => w.Slug == dashboard.Account?.Workspace),
-            new Dictionary<string, TunnelInfo[]?> { [dashboard.Account?.Workspace ?? ""] = dashboard.Tunnels }, size),
+            new Dictionary<string, TunnelInfo[]?> { [dashboard.Account?.Workspace ?? ""] = dashboard.Tunnels }, size, preview: true),
         "Diagnostics" => app.LastDiagnostics is { } rows
-            ? LocalViews.Diagnostics(rows, "", true, size)
+            ? LocalViews.Diagnostics(rows, "", true, size, preview: true)
             : Theme.Section("Diagnostics", new Markup(Theme.Dim(
                 "Press Enter to check the Groundhog service, your sign-in, local agents and the targets of your saved profiles."))),
-        "Sign in" => AccountViews.SignIn(new(dashboard.Account, null, false, null, "", app.Now), size),
+        "Sign in" => AccountViews.SignIn(new(dashboard.Account, null, false, null, "", app.Now), size, preview: true),
         "Help" => HomeViews.Help(app.Services.Version, size),
         _ => Theme.Section("Quit", new Rows(new ColorOnly(GroundhogArt.Head()), new Text(""),
             new Markup("Press Enter to leave Groundhog."), new Markup(Theme.Dim("Your terminal and its scrollback are restored as they were.")))),
@@ -184,8 +187,24 @@ internal sealed class TunnelsScreen : Screen
         return HomeViews.Tunnels(dashboard, size.Height - 4, size, _selected);
     }
 
-    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) =>
-        [Hints.Move, Hints.Open, new("N", "New"), Hints.Refresh, Hints.Back, Hints.Quit];
+    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app)
+    {
+        // Only keys that do something now: no list keys without tunnels, no N without a workspace to create in.
+        var dashboard = app.Data.Current;
+        var keys = new List<KeyHint>();
+        if (dashboard.Tunnels is { Length: > 0 } tunnels && dashboard.Account?.Workspace is not null)
+        {
+            keys.AddRange(Hints.List(tunnels.Length, Hints.Open));
+        }
+
+        if (dashboard.Account is { SignedIn: true, Workspace: not null })
+        {
+            keys.Add(new("N", "New"));
+        }
+
+        keys.AddRange([Hints.Refresh, Hints.Back, Hints.Quit]);
+        return keys;
+    }
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -304,8 +323,9 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
         return TunnelViews.Detail(new(workspace, name, _insight, _problem, agent, app.Now), size);
     }
 
-    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) =>
-        [new("O", "Open"), new("C", "Copy URL"), new("H", "Host"), Hints.Refresh, Hints.Back, Hints.Quit];
+    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => _insight is null
+        ? [Hints.Refresh, Hints.Back, Hints.Quit]
+        : [new("O", "Open"), new("C", "Copy URL"), new("H", "Host"), Hints.Refresh, Hints.Back, Hints.Quit];
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -516,7 +536,9 @@ internal sealed class AgentScreen(LocalAgent agent) : LiveSessionScreen
 
     protected override SessionSnapshot? Snapshot(InteractiveApp app) => _snapshot;
 
-    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => [.. TabHints, new("S", "Stop agent"), Hints.Back, Hints.Quit];
+    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => _gone
+        ? [Hints.Back, Hints.Quit]
+        : [.. TabHints, new("S", "Stop agent"), Hints.Back, Hints.Quit];
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -525,7 +547,8 @@ internal sealed class AgentScreen(LocalAgent agent) : LiveSessionScreen
             return Task.FromResult<Nav?>(Nav.Stay);
         }
 
-        return Task.FromResult<Nav?>(Selection.Letter(key) == 'S' ? Nav.Open(AgentsScreen.StopConfirmation(app, agent, closeDetail: true)) : null);
+        return Task.FromResult<Nav?>(Selection.Letter(key) == 'S' && !_gone
+            ? Nav.Open(AgentsScreen.StopConfirmation(app, agent, closeDetail: true)) : null);
     }
 }
 
@@ -550,8 +573,9 @@ internal sealed class AgentsScreen : Screen
         return LocalViews.Agents(agents, _selected, size, app.Now);
     }
 
-    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) =>
-        [Hints.Move, Hints.Open, new("S", "Stop"), Hints.Refresh, Hints.Back, Hints.Quit];
+    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => app.Data.Current.Agents is { Length: > 0 } agents
+        ? [.. Hints.List(agents.Length, Hints.Open, new KeyHint("S", "Stop")), Hints.Refresh, Hints.Back, Hints.Quit]
+        : [Hints.Refresh, Hints.Back, Hints.Quit];
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -603,8 +627,10 @@ internal sealed class ProfilesScreen : Screen
         return LocalViews.Profiles(dashboard.Profiles, dashboard.Agents, _selected, size);
     }
 
-    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) =>
-        [Hints.Move, new("Enter", "Host"), new("B", "Background"), new("A", "Add"), new("D", "Delete"), Hints.Back, Hints.Quit];
+    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => app.Data.Current.Profiles is { Length: > 0 } profiles
+        ? [.. Hints.List(profiles.Length, new KeyHint("Enter", "Host"), new KeyHint("B", "Background")), new("A", "Add"), new("D", "Delete"),
+            Hints.Back, Hints.Quit]
+        : [new("A", "Add"), Hints.Back, Hints.Quit];
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -703,8 +729,9 @@ internal sealed class WorkspacesScreen : Screen
     internal override IRenderable Render(InteractiveApp app, ViewSize size) =>
         AccountViews.Workspaces(app.Data.Current.Account, _selected, _tunnels, size);
 
-    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) =>
-        [Hints.Move, new("Enter", "Use"), Hints.Refresh, Hints.Back, Hints.Quit];
+    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => app.Data.Current.Account?.Account?.Workspaces is { Length: > 0 } workspaces
+        ? [.. Hints.List(workspaces.Length, new KeyHint("Enter", "Use")), Hints.Refresh, Hints.Back, Hints.Quit]
+        : [Hints.Refresh, Hints.Back, Hints.Quit];
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -810,7 +837,9 @@ internal sealed class DiagnosticsScreen : Screen
     internal override IRenderable Render(InteractiveApp app, ViewSize size) =>
         LocalViews.Diagnostics(_rows, app.Spinner, _running is { IsCompleted: true }, size);
 
-    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => [new("R", "Run again"), Hints.Back, Hints.Quit];
+    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => _running is { IsCompleted: true }
+        ? [new("R", "Run again"), Hints.Back, Hints.Quit]
+        : [Hints.Back, Hints.Quit];
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -879,9 +908,12 @@ internal sealed class SignInScreen : Screen
     internal override IRenderable Render(InteractiveApp app, ViewSize size) => AccountViews.SignIn(
         new(app.Data.Current.Account, _challenge, _signIn is not null, _outcome, app.Spinner, app.Now), size);
 
+    // X is offered only when there is a session to end, and it always works when offered.
     internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => _signIn is not null
         ? [new("Esc", "Cancel")]
-        : [new("Enter", "Sign in"), new("X", "Sign out"), Hints.Back, Hints.Quit];
+        : app.Data.Current.Account is { SignedIn: true }
+            ? [new("Enter", "Sign in again"), new("X", "Sign out"), Hints.Back, Hints.Quit]
+            : [new("Enter", "Sign in"), Hints.Back, Hints.Quit];
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {

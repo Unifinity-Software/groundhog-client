@@ -4,7 +4,7 @@ The `groundhog` command of Groundhog, the hosted HTTPS tunnel service for local 
 your machine a public HTTPS address through the Groundhog service.
 
 ```
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.2
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.3
 groundhog host myapp --port 5173
 ```
 
@@ -17,7 +17,8 @@ dashboards, tunnel actions, sign-in, diagnostics and a live hosting view. Arrow 
 and Q quits; your terminal is restored on exit.
 Use `login`, `workspace list`, `list` and `describe <name>` to discover your remote tunnels.
 Local `ps`, `status`, `stats`, `requests`, `logs`, `stop`, `doctor` and `wait` work independently of account login.
-Use `init` or `profile save` to save a target, then `host <profile>` or `start <profile>` to run it.
+A saved profile remembers a tunnel name and your app's local address (never a key): save one with `init` or
+`profile save <name> --target <url>`, then run it with `host <name>` or in the background with `start <name>`.
 Read commands support `--output json`; `--no-interactive` selects script behavior and `--no-color` disables colors.
 See the [illustrated CLI guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/cli.md).
 
@@ -48,7 +49,7 @@ environment configuration; avoid a literal key in command history. Create a tunn
 and use its name and connection key. The hosted service address is automatic.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
-`dotnet tool install Groundhog.Cli --version 0.4.0-preview.2` and `dotnet tool run groundhog -- --help`.
+`dotnet tool install Groundhog.Cli --version 0.4.0-preview.3` and `dotnet tool run groundhog -- --help`.
 Source and the full guide are available in the public Groundhog client repository.
 
 MIT licensed.

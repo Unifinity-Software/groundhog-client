@@ -4,7 +4,7 @@ Groundhog provides a full-screen terminal app, live tunnel dashboards and comman
 Requires .NET 10 and the ASP.NET Core runtime (both are included with the SDK).
 
 ```sh
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.2
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.3
 groundhog
 ```
 
@@ -15,8 +15,13 @@ instead. Redirected input or output, and `--no-interactive`, print help instead 
 
 ![The Groundhog boot screen](images/cli-boot.png)
 
-A short boot screen shows the version, your account and workspace and how many tunnels are connected. Any key skips it,
-and it never lasts longer than a second.
+The launch screen shows the version, your account and workspace, how many tunnels are connected and, when there is
+one, a newer CLI version. It stays until you press **Enter**; **Q** or **Esc** quits, and **U** installs an available
+update (see [updating](#check-for-updates-and-update-the-cli)).
+
+On Windows the CLI switches the console to UTF-8 while it runs and restores the previous code page when it exits.
+Windows consoles otherwise start in a legacy code page that can't draw the app's symbols, which showed up as `?`
+characters and made the full-screen app scroll on every redraw.
 
 ### The menu
 
@@ -25,7 +30,8 @@ and it never lasts longer than a second.
 Every screen has the same frame: a header bar with the version, where you are, your account and workspace; the body; a
 status line for the outcome of the last action; and a footer listing the keys that work on that screen. The menu lists
 the app's screens on the left. On terminals at least 100 columns wide, the right pane previews the highlighted entry
-(hovering **Tunnels** shows the tunnel table). Narrower terminals, down to 80×24, show the menu with a summary instead,
+(hovering **Tunnels** shows the tunnel table). A preview is for looking only: open the screen with Enter to use its
+keys. The number beside each entry opens it directly. Narrower terminals, down to 80×24, show the menu with a summary instead,
 and dashboards stack their panels and drop less important columns.
 
 ![The menu at 80×24](images/cli-narrow.png)
@@ -36,7 +42,7 @@ and dashboards stack their panels and drop less important columns.
 | Tunnels | The workspace's tunnels; Enter opens a tunnel, N creates one |
 | Tunnel detail | Public URL, state, traffic totals, a status-class breakdown, requests per minute and the service's recent request log, with actions |
 | Running agents | Agents hosting from this machine; Enter opens a live view of one, S stops it |
-| Saved profiles | Profiles and whether each is running; Enter hosts one here, B starts it in the background, A adds, D deletes |
+| Saved profiles | [Saved profiles](#saved-profiles) (a tunnel name plus your app's local address) and whether each is running; Enter hosts one here, B starts it in the background, A adds, D deletes |
 | Workspaces | Your workspaces as a tree with the highlighted workspace's tunnels; Enter makes it the default |
 | Diagnostics | The doctor checks as a live checklist: service health, sign-in, local agents and each saved profile's target |
 | Sign in | Browser-approved sign-in with the code shown large; sign out when already signed in |
@@ -89,10 +95,26 @@ The screenshots are the real renderer's output with synthetic sample data. See
 
 ## Check for updates and update the CLI
 
-Interactive commands check NuGet for a newer CLI at most once every 24 hours. When one is available, Groundhog
-offers **Update now before continuing?**, with **No** as the default. Declining continues your command. Accepting
-runs the .NET tool installer for the installation you are using, then exits so you can run your command again
-with the new version. Running tunnels keep their current client until you restart them.
+Groundhog checks NuGet for a newer CLI at most once every 24 hours.
+
+- **The full-screen app** checks in the background, so it never delays starting. A newer version appears on the
+  launch screen and in the top bar on every start until you install it. Press **U** on any screen (or on the launch
+  screen) and confirm with **Y**; Groundhog closes and installs it.
+- **Other interactive commands** print one line, such as `Groundhog CLI 0.5.0 is available (you have 0.4.0). Run
+  groundhog update to install it.`, and carry on. They never stop to ask a question.
+
+How the install finishes depends on the platform:
+
+- **macOS and Linux:** the .NET tool installer runs in the same terminal and replaces the CLI in place. Start
+  `groundhog` again when it says it's done.
+- **Windows:** Windows locks the files of a running program, so a global or tool-path CLI can't replace itself while
+  it is open. Groundhog starts a small PowerShell window, exits, and that window waits for Groundhog to close, runs
+  the same `dotnet tool update` command and reports the result. Agents started with `groundhog start` and other open
+  Groundhog windows hold the same files: stop them first (`groundhog ps`, `groundhog stop <name>`), or the update
+  fails and the window tells you to stop them and run `groundhog update` again. Local tools (a `dotnet-tools.json`
+  manifest) update in place on every platform.
+
+Running tunnels keep their current client until you restart them.
 
 ```sh
 groundhog update --check     # Check now without installing or prompting.
@@ -108,15 +130,16 @@ Global tools, custom tool paths, and local tools with a matching manifest are su
 is never used to guess another installation to update. You need the .NET SDK for the installer. If installation
 fails, Groundhog reports the failure; retry with `dotnet tool update` for your installation after exiting the CLI.
 
-Startup checks have a 2-second budget and stay quiet when offline. A declined offer or failed check is cached for
-24 hours; explicit `update` commands check again immediately. Redirected commands, JSON output, help, version,
-background hosting and `--no-interactive` skip startup checks. Add `--no-update-check` or set
-`GROUNDHOG_NO_UPDATE_CHECK=1` to disable the periodic offer. Neither option disables an explicit update command.
+Command-line checks have a 2-second budget and stay quiet when offline. A check's result, including a failed check,
+is cached for 24 hours; explicit `update` commands check again immediately. Redirected commands, JSON output, help,
+version, background hosting and `--no-interactive` skip the check. Add `--no-update-check` or set
+`GROUNDHOG_NO_UPDATE_CHECK=1` to turn off the notice and the app's update check. Neither option disables an explicit
+update command.
 
 ## Sign in and find tunnels
 
 Remote commands sign in through the service's CLI authorization API described in [protocol.md](protocol.md#cli-management-authentication).
-`host` with a connection key, profiles and local monitoring work without account login.
+`host` with a connection key, [saved profiles](#saved-profiles) and local monitoring work without account login.
 
 ```sh
 groundhog login
@@ -174,31 +197,60 @@ Noninteractive hosting retains the original connection/disconnection output; `--
 The host's options are `--port`, `--target`, `--local-ca`, `--insecure-local`, `--key`, `--pool` and `--verbose`.
 See [the Agent guide](agent.md) for forwarding and certificate behavior.
 
-## Save settings and run in the background
+## Saved profiles
 
-`init` guides you through saving a profile for an existing tunnel. Profiles contain a name and a local target,
-and contain no keys. Use commands for noninteractive setup:
+A **saved profile** remembers two things about a tunnel you host often: its **name** and the **local address your
+app listens on** (for example `myapp` → `http://localhost:5173`). With a profile saved, hosting that tunnel again is
+one word on the command line, or Enter on **Saved profiles** in the app, instead of retyping the name and target.
+A profile never stores a connection key.
+
+What a profile lets you do:
+
+- **Host in the foreground**: `groundhog host myapp` uses the profile's target, and in the app **Saved profiles** →
+  Enter opens the live hosting view.
+- **Run in the background**: `groundhog start myapp` (or **B** in the app) starts an agent that keeps running after you
+  close the terminal; `groundhog restart myapp` restarts it and `groundhog stop myapp` stops it. `start` and `restart`
+  only accept saved profiles.
+- **Check it**: the app's **Diagnostics** screen checks that each saved profile's local target answers.
+
+Where the key comes from: a profile only names the tunnel, so hosting still needs its connection key. Groundhog uses,
+in order, `--key`, the `GROUNDHOG_KEY` environment variable, or the key this CLI saved when you created the tunnel or
+rotated its key while signed in (for the selected workspace and the same service address). A tunnel created on the
+website has no saved key here; supply it through `GROUNDHOG_KEY`, or rotate its key from the CLI to save one (agents using the old key disconnect).
+
+Create and manage profiles:
 
 ```sh
+groundhog init                                       # Asks for the tunnel name and local target, then saves them.
 groundhog profile save myapp --target http://localhost:5173
 groundhog profile list
-groundhog host myapp
-groundhog start myapp
+groundhog host myapp                                 # Foreground, with the live view.
+groundhog start myapp                                # Background; returns once connected.
 groundhog ps
 groundhog restart myapp
 groundhog stop myapp
-groundhog profile delete myapp
+groundhog profile delete myapp                       # Removes only the saved name and target.
 ```
 
-`host <profile>` runs in the foreground. `start` and `restart` require a saved profile and return after the agent connects.
-The background process is owned by your OS user and runs until stopped, replaced, or terminated; it is not a boot-time
-service. A failed or timed-out start stops its newly launched process; run `host` in the foreground to see its error.
-Profiles currently save only the target; use foreground `host` for custom CA, pool or insecure-local options.
+In the app, **Saved profiles** lists each profile with whether it is running on this machine: Enter hosts it here,
+**B** starts it in the background, **A** adds one and **D** deletes one. Deleting a profile never touches the tunnel
+on the service or a running agent.
 
-Profiles and credentials are stored under the OS local application-data directory in `Groundhog`.
-Set `GROUNDHOG_HOME` to use a separate configuration directory (also useful for isolated automation).
-Windows credentials use DPAPI for the current user. Unix credential files are created with owner-only read/write permissions.
-Saved connection keys remain useful after account session expiry; logout removes them.
+A profile's name must be an existing tunnel's name. Saving checks that the target is an `http://` or `https://`
+address without a path or credentials; it does not contact the service. Profiles save only the name and target, so use
+foreground `host` with options for a custom CA, connection pool size or `--insecure-local`. After renaming a tunnel,
+delete the old profile and save a new one under the new name.
+
+`host <profile>` runs in the foreground. `start` and `restart` return after the agent connects. The background
+process is owned by your OS user and runs until stopped, replaced, or terminated; it is not a boot-time service. A
+failed or timed-out start stops its newly launched process; run `host` in the foreground to see its error.
+
+Profiles are stored in `profiles.json`, and CLI credentials and saved keys in a separate encrypted file, under the OS
+local application-data directory in `Groundhog` (`%LOCALAPPDATA%\Groundhog` on Windows,
+`~/.local/share/Groundhog` on Linux). Set `GROUNDHOG_HOME` to use a separate configuration directory (also useful for
+isolated automation). Windows credentials use DPAPI for the current user. Unix credential files are created with
+owner-only read/write permissions. Saved connection keys remain useful after account session expiry; logout removes
+them.
 
 ## Observe and query local traffic
 
@@ -271,7 +323,7 @@ groundhog open demo
 ```
 
 Mutations use the same workspace permissions as the website. Create and rotate save their one-time key locally without
-printing it. Rename moves a CLI-saved key to the new name, but you must update saved profiles and app callback URLs.
+printing it. Rename moves a CLI-saved key to the new name, but you must update [saved profiles](#saved-profiles) and app callback URLs.
 Rename, deletion, rotation and revocation can disconnect agents; the CLI asks for confirmation. Scripts must pass `--yes`.
 Revocation removes all live keys for the tunnel. Rotation saves a replacement key; restart hosting to use it.
 

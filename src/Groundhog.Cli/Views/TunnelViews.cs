@@ -13,7 +13,14 @@ internal static class TunnelViews
     /// <summary>The tunnel inventory as a table, optionally with a highlighted row.</summary>
     internal static IRenderable Table(IReadOnlyList<TunnelInfo> tunnels, int maxRows, ViewSize size, int? selected = null)
     {
-        // Columns drop out as the width shrinks; addresses are clipped rather than wrapped.
+        var (start, count) = Window(tunnels.Count, selected ?? 0, maxRows);
+        var widest = Enumerable.Range(start, count).Select(i => Host(tunnels[i].Url).Length).DefaultIfEmpty(0).Max();
+        return new FittedTable(host => Table(tunnels, start, count, size, selected, host), widest);
+    }
+
+    // Columns drop out as the width shrinks; addresses are clipped to the budget FittedTable finds, so numbers never wrap.
+    private static Table Table(IReadOnlyList<TunnelInfo> tunnels, int start, int count, ViewSize size, int? selected, int hostWidth)
+    {
         var full = size.Width >= 110;
         var table = Theme.Grid(full ? ["", "Tunnel", "State", "Public URL", "Req/min", "Req/hour", "Data today"]
             : ["", "Tunnel", "Public URL", "Req/h", "Today"]);
@@ -23,7 +30,6 @@ internal static class TunnelViews
             table.Columns[index].RightAligned();
         }
 
-        var (start, count) = Window(tunnels.Count, selected ?? 0, maxRows);
         for (var i = start; i < start + count; i++)
         {
             var t = tunnels[i];
@@ -32,7 +38,7 @@ internal static class TunnelViews
             {
                 Overflow = Overflow.Ellipsis,
             };
-            var host = Theme.Cell(Host(t.Url));
+            var host = Theme.Cell(Theme.Clip(Host(t.Url), hostWidth));
             var data = Theme.Bytes(t.BytesInToday + t.BytesOutToday);
             if (full)
             {
@@ -215,5 +221,30 @@ internal sealed class Sparkline(IReadOnlyList<long?> values, Color color) : Rend
         }
 
         yield return new Segment(text.ToString(), new Style(color));
+    }
+}
+
+/// <summary>
+/// A table whose one clippable column (a public address) shrinks until the whole table fits its width. Spectre
+/// otherwise narrows every column of an over-wide table, which wraps the short number columns.
+/// </summary>
+internal sealed class FittedTable(Func<int, Table> build, int natural) : Renderable
+{
+    protected override Measurement Measure(RenderOptions options, int maxWidth) =>
+        ((IRenderable)Fit(options, maxWidth)).Measure(options, maxWidth);
+
+    protected override IEnumerable<Segment> Render(RenderOptions options, int maxWidth) =>
+        ((IRenderable)Fit(options, maxWidth)).Render(options, maxWidth);
+
+    private Table Fit(RenderOptions options, int maxWidth)
+    {
+        var width = natural;
+        var table = build(width);
+        while (width > 8 && ((IRenderable)table).Measure(options, maxWidth).Max > maxWidth)
+        {
+            table = build(--width);
+        }
+
+        return table;
     }
 }

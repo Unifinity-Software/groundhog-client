@@ -51,9 +51,11 @@ internal static class HomeViews
         var items = new List<IRenderable>();
         for (var i = 0; i < entries.Count; i++)
         {
+            // The number is the entry's shortcut: pressing it opens the entry directly.
+            var number = i < 9 ? $"{i + 1} " : "";
             items.Add(i == selected
-                ? new Bar($" [bold]▶ {Theme.Safe(entries[i].Title)}[/]", null, new Style(Theme.Ink, Theme.Signal))
-                : new Bar($"   {Theme.Safe(entries[i].Title)}", null, new Style(Theme.Text)));
+                ? new Bar($" [bold]▶ {Theme.Safe(entries[i].Title)}[/]", number, new Style(Theme.Ink, Theme.Signal))
+                : new Bar($"   {Theme.Safe(entries[i].Title)}", Theme.Dim(number), new Style(Theme.Text)));
         }
 
         var description = new Markup(Theme.Dim(Theme.Safe(entries[selected].Description)));
@@ -204,10 +206,12 @@ internal static class HomeViews
         Group("Everywhere");
         Key("↑ ↓  j k", "Move the highlight");
         Key("Enter", "Open the highlighted item");
+        Key("1–9", "Open a menu entry by its number");
         Key("Esc  Backspace", "Back to the previous screen");
         Key("R", "Refresh");
-        Key("?", "This help");
+        Key("?  F1", "This help");
         Key("Q", "Quit (Ctrl+C also quits)");
+        Key("U", "Install a newer CLI when the top bar shows one");
         Group("Tunnel detail");
         Key("O  C", "Open the public URL · copy it");
         Key("H", "Host the tunnel from this machine");
@@ -242,7 +246,7 @@ internal static class HomeViews
 /// <summary>The launch screen in the idiom of an 8-bit home computer: banner, account summary, READY and a cursor.</summary>
 internal static class BootView
 {
-    internal static IRenderable Render(string version, string? status, bool ready, bool cursor, int width, int height)
+    internal static IRenderable Render(string version, string? status, bool ready, bool cursor, int width, int height, string? update = null)
     {
         var lines = new List<IRenderable>();
         if (height >= 26)
@@ -256,7 +260,14 @@ internal static class BootView
         lines.Add(Left($"[{Theme.TextTag}] HTTPS TUNNELS FOR LOCALHOST · GROUNDHOG.UNIFINITY.COM[/]"));
         lines.Add(Left($"[{Theme.TextTag}] {Theme.Safe(status ?? "CHECKING ACCOUNT…")}[/]"));
         lines.Add(new Text(""));
+        if (update is not null)
+        {
+            lines.Add(Left($"[bold {Theme.AmberTag}] UPDATE AVAILABLE: {Theme.Safe(update.ToUpperInvariant())} · PRESS U TO INSTALL IT[/]"));
+            lines.Add(new Text(""));
+        }
+
         lines.Add(Left(ready ? $"[{Theme.TextTag}]READY.[/]" : " "));
+        lines.Add(Left($"[bold {Theme.WhiteTag}]PRESS ENTER TO CONTINUE[/][{Theme.TextTag}] · Q TO QUIT[/]"));
         lines.Add(Left(cursor ? $"[{Theme.SignalTag}]█[/]" : " "));
         var panel = new Panel(new CenteredBlock(new Rows(lines)))
         {
