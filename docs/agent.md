@@ -143,7 +143,7 @@ It stops instead of retrying when retrying can't help:
 | You pressed Ctrl+C | `Stopped.` | 0 |
 | Another agent started hosting the same tunnel (the newer one wins) | `Stopped: Another agent started hosting this tunnel …` | 0 |
 | The relay rejected the key, or the key was revoked or regenerated | `Stopped: The relay rejected the credential …` | 3 |
-| The key is valid but belongs to another tunnel | `Stopped: The credential isn't allowed to host tunnel …` | 3 |
+| The key is valid but belongs to another tunnel | `Stopped: The relay refused to host tunnel … (HTTP 403): <the relay's reason>` | 3 |
 | The relay has no tunnel with that name, or it was deleted or renamed | `Stopped: The relay has no tunnel named …` | 3 |
 | The relay speaks a different protocol version | `Stopped: The relay doesn't support protocol version 1 …` | 1 |
 | You declared visitor access rules and the relay refused them | `Stopped: The relay refused to host tunnel … (HTTP 403): <the relay's reason>` | 3 |
