@@ -83,17 +83,35 @@ public sealed class TerminalNavigationTests
     }
 
     [Fact]
-    public async Task Boot_screen_is_shown_first_and_any_key_skips_it()
+    public async Task Boot_screen_stays_until_enter_and_q_there_quits()
     {
-        var keys = new ScriptedKeys().Press(ConsoleKey.Spacebar, ConsoleKey.Q);
+        var keys = new ScriptedKeys().Press(ConsoleKey.Spacebar, ConsoleKey.A, ConsoleKey.Enter, ConsoleKey.Q);
         var (app, frames) = await RunAsync(keys, options: new AppOptions(Boot: true));
         Assert.Equal("Boot", frames[0].Screen);
         var boot = Harness.Text(frames[0].Frame, 120, 36);
         Assert.Contains("**** GROUNDHOG CLI 0.4.0-PREVIEW.1 ****", boot, StringComparison.Ordinal);
         Assert.Contains("SIGNED IN AS developer@example.com · WORKSPACE web-team · 3 TUNNELS, 2 CONNECTED", boot, StringComparison.Ordinal);
         Assert.Contains("READY.", boot, StringComparison.Ordinal);
+        Assert.Contains("PRESS ENTER TO CONTINUE", boot, StringComparison.Ordinal);
         Assert.Equal(["Menu"], app.Trace);
         Assert.Equal(0, keys.Remaining);
+
+        var quit = new ScriptedKeys().Press(ConsoleKey.Q);
+        var (quitApp, _) = await RunAsync(quit, options: new AppOptions(Boot: true));
+        Assert.Empty(quitApp.Trace);
+    }
+
+    [Fact]
+    public async Task An_available_update_is_offered_on_the_boot_screen_and_installed_after_the_app_closes()
+    {
+        var services = new FakeServices { Update = "0.5.0" };
+        var keys = new ScriptedKeys().Press(ConsoleKey.U, ConsoleKey.Y);
+        var (app, frames) = await RunAsync(keys, services, options: new AppOptions(Boot: true));
+        Assert.Contains("UPDATE AVAILABLE: 0.5.0", Harness.Text(frames.Last(f => f.Screen == "Boot").Frame, 120, 36), StringComparison.Ordinal);
+        Assert.Contains("Update Groundhog CLI to 0.5.0?", Harness.Text(frames[^1].Frame, 120, 36), StringComparison.Ordinal);
+        Assert.Equal(["Menu", "Confirm"], app.Trace);
+        Assert.Equal("0.5.0", app.UpdateRequested);
+        Assert.Empty(services.Commands);
     }
 
     [Fact]

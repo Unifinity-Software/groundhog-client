@@ -225,8 +225,8 @@ internal sealed class Sparkline(IReadOnlyList<long?> values, Color color) : Rend
 }
 
 /// <summary>
-/// A table whose one clippable column (a public address) shrinks until the table fits the width it is given. Spectre
-/// measures an unbroken address as one long word, so without this it squeezes the number columns and wraps them.
+/// A table whose one clippable column (a public address) shrinks until the whole table fits its width. Spectre
+/// otherwise narrows every column of an over-wide table, which wraps the short number columns.
 /// </summary>
 internal sealed class FittedTable(Func<int, Table> build, int natural) : Renderable
 {
@@ -240,7 +240,7 @@ internal sealed class FittedTable(Func<int, Table> build, int natural) : Rendera
     {
         var width = natural;
         var table = build(width);
-        while (width > 8 && ((IRenderable)table).Measure(options, maxWidth).Min > maxWidth)
+        while (width > 8 && ((IRenderable)table).Measure(options, maxWidth).Max > maxWidth)
         {
             table = build(--width);
         }

@@ -36,20 +36,22 @@ public sealed class UpdateTests
     }
 
     [Fact]
-    public async Task Startup_offer_is_shown_once_per_day_and_declining_does_not_update()
+    public async Task Startup_notice_is_printed_once_per_day_and_never_prompts_or_installs()
     {
         using var fixture = new Fixture();
-        using var commands = fixture.Commands(interactive: true, accept: false);
-        Assert.False(await commands.OfferAsync(Cancellation));
-        Assert.Equal(1, fixture.Prompts);
-        Assert.Empty(fixture.Installed);
+        using var commands = fixture.Commands(interactive: true, accept: true);
+        await commands.NoticeAsync(Cancellation);
+        Assert.Contains("1.1.0 is available (you have 1.0.0). Run groundhog update", fixture.Error.ToString(), StringComparison.Ordinal);
         var requests = fixture.Requests.Count;
-        Assert.False(await commands.OfferAsync(Cancellation));
+        await commands.NoticeAsync(Cancellation);
         Assert.Equal(requests, fixture.Requests.Count);
-        Assert.Equal(1, fixture.Prompts);
+        Assert.Single(fixture.Error.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries));
+        // The dashboard still sees the cached result, so it can show the update on every start.
+        Assert.Equal("1.1.0", await commands.AvailableAsync(Cancellation));
         fixture.Time.Advance(TimeSpan.FromDays(1));
-        Assert.False(await commands.OfferAsync(Cancellation));
-        Assert.Equal(2, fixture.Prompts);
+        await commands.NoticeAsync(Cancellation);
+        Assert.Equal(2, fixture.Error.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.Equal(0, fixture.Prompts);
         Assert.Empty(fixture.Installed);
     }
 
@@ -71,7 +73,8 @@ public sealed class UpdateTests
     {
         using var fixture = new Fixture();
         using var commands = fixture.Commands(interactive: true, accept: true);
-        Assert.True(await commands.OfferAsync(Cancellation));
+        Assert.Equal(0, await commands.RunAsync(["update"], Cancellation));
+        Assert.Equal(1, fixture.Prompts);
         var installed = Assert.Single(fixture.Installed);
         Assert.Equal("1.1.0", installed.Version);
         Assert.Equal(fixture.Installation, installed.Installation);
@@ -79,11 +82,28 @@ public sealed class UpdateTests
     }
 
     [Fact]
+    public async Task An_update_finished_after_exit_says_so_and_waits_for_this_process_before_running_the_same_installer()
+    {
+        using var fixture = new Fixture { Outcome = InstallOutcome.AfterExit };
+        using var commands = fixture.Commands(interactive: false);
+        Assert.Equal(0, await commands.RunAsync(["update", "--yes"], Cancellation));
+        Assert.Contains("a new window finishes installing 1.1.0", fixture.Output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Updated to", fixture.Output.ToString(), StringComparison.Ordinal);
+
+        var scope = new ToolInstallation(@"C:\Users\o'brien\.dotnet\tools", null);
+        var script = UpdateCommands.AfterExitScript(scope, "1.1.0", 4242);
+        Assert.Contains("Wait-Process -Id 4242", script, StringComparison.Ordinal);
+        // Every installer argument is passed single-quoted, with embedded quotes doubled.
+        Assert.Contains("& dotnet " + string.Join(' ', scope.Arguments("1.1.0").Select(a => "'" + a.Replace("'", "''", StringComparison.Ordinal) + "'")),
+            script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Scripts_must_opt_in_with_yes_and_do_not_receive_startup_checks()
     {
         using var fixture = new Fixture();
         using var commands = fixture.Commands(interactive: false);
-        Assert.False(await commands.OfferAsync(Cancellation));
+        await commands.NoticeAsync(Cancellation);
         Assert.Equal(2, await commands.RunAsync(["update"], Cancellation));
         Assert.Empty(fixture.Requests);
         Assert.Empty(fixture.Installed);
@@ -101,9 +121,13 @@ public sealed class UpdateTests
     [InlineData("update")]
     [InlineData("--output=json")]
     [InlineData("json")]
-    public void Startup_check_skips_help_scripts_background_processes_and_explicit_checks(string option)
+    [InlineData("dashboard")]
+    public void Startup_check_skips_help_scripts_background_processes_explicit_checks_and_the_dashboard(string option)
     {
         Assert.False(UpdateCommands.ShouldCheck(true, [option], _ => null));
+        Assert.False(UpdateCommands.ShouldCheck(true, [], _ => null));
+        Assert.True(UpdateCommands.Enabled(true, [], _ => null));
+        Assert.False(UpdateCommands.Enabled(true, [], _ => "1"));
         Assert.False(UpdateCommands.ShouldCheck(false, ["host"], _ => null));
         Assert.False(UpdateCommands.ShouldCheck(true, ["host"], _ => "1"));
         Assert.True(UpdateCommands.ShouldCheck(true, ["host", "myapp", "--port", "5173"], _ => null));
@@ -112,9 +136,9 @@ public sealed class UpdateTests
     [Fact]
     public async Task Failed_install_is_reported_and_does_not_claim_success()
     {
-        using var fixture = new Fixture { InstallerExitCode = 1 };
+        using var fixture = new Fixture { Outcome = InstallOutcome.Failed };
         using var commands = fixture.Commands(interactive: true, accept: true);
-        Assert.False(await commands.OfferAsync(Cancellation));
+        Assert.Equal(1, await commands.RunAsync(["update", "--yes"], Cancellation));
         Assert.Single(fixture.Installed);
         Assert.DoesNotContain("Updated to", fixture.Output.ToString(), StringComparison.Ordinal);
         Assert.Contains("update did not complete", fixture.Error.ToString(), StringComparison.Ordinal);
@@ -125,7 +149,8 @@ public sealed class UpdateTests
     {
         using var fixture = new Fixture { Installation = null };
         using var commands = fixture.Commands(interactive: true, accept: true);
-        Assert.False(await commands.OfferAsync(Cancellation));
+        await commands.NoticeAsync(Cancellation);
+        Assert.Null(await commands.AvailableAsync(Cancellation));
         Assert.Empty(fixture.Requests);
         Assert.Equal(1, await commands.RunAsync(["update", "--yes"], Cancellation));
         Assert.Empty(fixture.Installed);
@@ -137,10 +162,10 @@ public sealed class UpdateTests
     {
         using var fixture = new Fixture { Offline = true };
         using var commands = fixture.Commands(interactive: true);
-        Assert.False(await commands.OfferAsync(Cancellation));
+        await commands.NoticeAsync(Cancellation);
         Assert.Empty(fixture.Error.ToString());
         var requests = fixture.Requests.Count;
-        Assert.False(await commands.OfferAsync(Cancellation));
+        Assert.Null(await commands.AvailableAsync(Cancellation));
         Assert.Equal(requests, fixture.Requests.Count);
         Assert.Equal(1, await commands.RunAsync(["update", "--check"], Cancellation));
         Assert.Contains("could not check NuGet", fixture.Error.ToString(), StringComparison.Ordinal);
@@ -152,7 +177,7 @@ public sealed class UpdateTests
         using var fixture = new Fixture { InvalidMetadata = true };
         File.WriteAllText(Path.Combine(fixture.Directory, "update-check.json"), "not json");
         using var commands = fixture.Commands(interactive: true);
-        Assert.False(await commands.OfferAsync(Cancellation));
+        await commands.NoticeAsync(Cancellation);
         Assert.Empty(fixture.Installed);
         Assert.Empty(fixture.Error.ToString());
     }
@@ -225,7 +250,7 @@ public sealed class UpdateTests
         internal ToolInstallation? Installation { get; set; }
         internal List<(ToolInstallation Installation, string Version)> Installed { get; } = [];
         internal int Prompts { get; private set; }
-        internal int InstallerExitCode { get; set; }
+        internal InstallOutcome Outcome { get; set; } = InstallOutcome.Installed;
         internal bool Offline { get; set; }
         internal bool InvalidMetadata { get; set; }
         internal bool Block { get; set; }
@@ -234,7 +259,7 @@ public sealed class UpdateTests
         internal StringWriter Error { get; } = new();
         internal UpdateCommands Commands(bool interactive, bool accept = false) => new(Check, Installation, interactive,
             (_, _) => { Prompts++; return Task.FromResult(accept); },
-            (installation, version, _) => { Installed.Add((installation, version)); return Task.FromResult(InstallerExitCode); },
+            (installation, version, _) => { Installed.Add((installation, version)); return Task.FromResult(Outcome); },
             Output, Error, Current);
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
