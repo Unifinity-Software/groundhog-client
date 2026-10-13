@@ -5,25 +5,25 @@ using Spectre.Console;
 
 namespace Groundhog.Cli;
 
-/// <summary>A visitor token as the management API lists it: never the token or its hash.</summary>
-internal sealed record VisitorTokenInfo(string Id, string Name, DateTimeOffset Created);
+/// <summary>An API key as the management API lists it: never the key or its hash.</summary>
+internal sealed record ApiKeyInfo(string Id, string Name, DateTimeOffset Created);
 
 /// <summary>The stored visitor access policy, as <c>GET …/visitor-access</c> returns it.</summary>
 internal sealed record VisitorAccessInfo(
     VisitorAccessRule? Default,
     VisitorAccessPathRule[]? Rules,
     string[]? IpRanges,
-    VisitorTokenInfo[]? Tokens,
+    ApiKeyInfo[]? ApiKeys,
     string? ManagedBy);
 
-/// <summary>A new visitor token; <see cref="Token"/> is shown once.</summary>
-internal sealed record VisitorTokenCreated(string Id, string Name, DateTimeOffset Created, string Token)
+/// <summary>A new API key; <see cref="Key"/> is shown once.</summary>
+internal sealed record ApiKeyCreated(string Id, string Name, DateTimeOffset Created, string Key)
 {
-    public override string ToString() => $"Visitor token {Name} ({Id}, value hidden)";
+    public override string ToString() => $"API key {Name} ({Id}, value hidden)";
 }
 
 /// <summary>
-/// <c>groundhog access</c> and <c>groundhog token</c>: a tunnel's visitor access rules and visitor tokens through the
+/// <c>groundhog access</c> and <c>groundhog api-key</c>: a tunnel's visitor access rules and API keys through the
 /// management API.
 /// </summary>
 internal static class VisitorAccessCommands
@@ -49,9 +49,9 @@ internal static class VisitorAccessCommands
                         throw new UsageException("Give --allow, --path, --ip or --access-file.");
                     }
 
-                    if (flags.TokenVariables.Length > 0)
+                    if (flags.ApiKeyVariables.Length > 0)
                     {
-                        throw new UsageException("Visitor tokens for saved rules are created with: groundhog token create <name> <label>.");
+                        throw new UsageException("API keys for saved rules are created with: groundhog api-key create <name> <label>.");
                     }
 
                     return name;
@@ -63,7 +63,7 @@ internal static class VisitorAccessCommands
         return positional switch
         {
             ["create", _, _] or ["list", _] or ["revoke", _, _] => positional[1],
-            _ => throw new UsageException("Use token create <name> <label>, token list <name> or token revoke <name> <id>."),
+            _ => throw new UsageException("Use api-key create <name> <label>, api-key list <name> or api-key revoke <name> <id>."),
         };
     }
 
@@ -87,7 +87,7 @@ internal static class VisitorAccessCommands
             switch (positional[0])
             {
                 case "create":
-                    var created = await client.SendAsync<VisitorTokenCreated>(HttpMethod.Post, path + "/visitor-tokens",
+                    var created = await client.SendAsync<ApiKeyCreated>(HttpMethod.Post, path + "/api-keys",
                         new { Name = positional[2] }, cancellation);
                     if (json)
                     {
@@ -95,29 +95,29 @@ internal static class VisitorAccessCommands
                     }
                     else
                     {
-                        output.WriteLine($"Visitor token {Plain(created.Name)} created (id {Plain(created.Id)}). Copy it now; it isn't shown again:");
-                        output.WriteLine(Plain(created.Token));
-                        output.WriteLine($"Visitors send it in the {GroundhogHeaders.VisitorToken} header to paths that allow tokens.");
+                        output.WriteLine($"API key {Plain(created.Name)} created (id {Plain(created.Id)}). Copy it now; it isn't shown again:");
+                        output.WriteLine(Plain(created.Key));
+                        output.WriteLine($"Callers send it in the {GroundhogHeaders.ApiKey} header to paths that allow apikeys.");
                     }
 
                     return 0;
                 case "list":
                     var access = await client.SendAsync<VisitorAccessInfo>(HttpMethod.Get, path + "/visitor-access", null, cancellation);
-                    var tokens = access.Tokens ?? [];
+                    var apiKeys = access.ApiKeys ?? [];
                     if (json)
                     {
-                        output.WriteLine(JsonSerializer.Serialize(tokens, JsonSerializerOptions.Web));
+                        output.WriteLine(JsonSerializer.Serialize(apiKeys, JsonSerializerOptions.Web));
                     }
                     else
                     {
-                        UtilityCommands.Render(output, Tokens(tokens));
+                        UtilityCommands.Render(output, ApiKeys(apiKeys));
                     }
 
                     return 0;
                 default:
                     await client.SendAsync<object>(HttpMethod.Delete,
-                        $"{path}/visitor-tokens/{Uri.EscapeDataString(positional[2])}", null, cancellation);
-                    output.WriteLine("Visitor token revoked.");
+                        $"{path}/api-keys/{Uri.EscapeDataString(positional[2])}", null, cancellation);
+                    output.WriteLine("API key revoked.");
                     return 0;
             }
         }
@@ -155,13 +155,13 @@ internal static class VisitorAccessCommands
             throw new UsageException(error);
         }
 
-        if (rules.TokenHashes.Count > 0)
+        if (rules.ApiKeyHashes.Count > 0)
         {
-            throw new UsageException("Saved rules can't list token hashes; create tokens with: groundhog token create <name> <label>.");
+            throw new UsageException("Saved rules can't list API key hashes; create API keys with: groundhog api-key create <name> <label>.");
         }
 
-        // The relay holds the tokens, so the token checks are left to it.
-        if (!VisitorAccessValidator.TryValidate(rules.Default, rules.Rules, rules.IpRanges, tokenCount: null, out error))
+        // The relay holds the API keys, so the API key checks are left to it.
+        if (!VisitorAccessValidator.TryValidate(rules.Default, rules.Rules, rules.IpRanges, apiKeyCount: null, out error))
         {
             throw new UsageException(error);
         }
@@ -199,8 +199,8 @@ internal static class VisitorAccessCommands
         }
 
         table.AddRow("IP ranges", TerminalViews.Safe(access.IpRanges is { Length: > 0 } ranges ? string.Join(", ", ranges) : "None"));
-        table.AddRow("Tokens", TerminalViews.Safe(access.Tokens is { Length: > 0 } tokens
-            ? string.Join(", ", tokens.Select(token => token.Name))
+        table.AddRow("API keys", TerminalViews.Safe(access.ApiKeys is { Length: > 0 } apiKeys
+            ? string.Join(", ", apiKeys.Select(apiKey => apiKey.Name))
             : "None"));
         return table;
     }
@@ -212,12 +212,12 @@ internal static class VisitorAccessCommands
         return rules == 0 ? Methods(access.Default?.Allow) : $"{Methods(access.Default?.Allow)} · {rules} path rule{(rules == 1 ? "" : "s")}";
     }
 
-    private static Table Tokens(VisitorTokenInfo[] tokens)
+    private static Table ApiKeys(ApiKeyInfo[] apiKeys)
     {
-        var table = new Table().RoundedBorder().AddColumn("Token").AddColumn("ID").AddColumn("Created");
-        foreach (var token in tokens)
+        var table = new Table().RoundedBorder().AddColumn("API key").AddColumn("ID").AddColumn("Created");
+        foreach (var apiKey in apiKeys)
         {
-            table.AddRow(TerminalViews.Safe(token.Name), TerminalViews.Safe(token.Id), token.Created.ToString("u"));
+            table.AddRow(TerminalViews.Safe(apiKey.Name), TerminalViews.Safe(apiKey.Id), apiKey.Created.ToString("u"));
         }
 
         return table;

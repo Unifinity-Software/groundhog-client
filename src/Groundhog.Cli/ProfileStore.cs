@@ -3,7 +3,7 @@ using Groundhog.Protocol;
 
 namespace Groundhog.Cli;
 
-/// <summary>A saved <c>host</c> setup. <paramref name="Access"/> keeps visitor access options, never token values.</summary>
+/// <summary>A saved <c>host</c> setup. <paramref name="Access"/> keeps visitor access options, never key values.</summary>
 internal sealed record TunnelProfile(string Name, string Target, string? Relay = null, VisitorAccessFlags? Access = null)
 {
     /// <summary>The <c>host</c> arguments this profile stands for.</summary>
@@ -51,7 +51,7 @@ internal sealed class ProfileStore(string directory)
 
     internal static void Validate(TunnelProfile profile)
     {
-        // Reuse argument validation with generated placeholder credentials (the key and any visitor tokens);
+        // Reuse argument validation with generated placeholder credentials (the connection key and any API keys);
         // never persist a credential.
         var (parsed, error, _) = HostArguments.Parse(profile.ToHostArguments(), _ => ConnectionKey.Generate());
         if (parsed is null)

@@ -37,8 +37,9 @@ builder.Services.AddGroundhogAgent(options =>
   is built in.
 - `LocalTarget` accepts HTTP or HTTPS. TLS uses the target hostname while the app receives the public `Host`.
   HTTPS uses platform trust; optional `LocalCaFile` or `InsecureLocal` controls apply only to loopback HTTPS.
-- Optional `VisitorAccess` declares who may visit the tunnel (anyone, workspace members, visitor tokens, IP
-  ranges, per path). Visitor tokens are passed as plaintext from your secrets; only their SHA-256 hashes are sent.
+- Optional `VisitorAccess` declares who may visit the tunnel (anyone, workspace members, API keys, IP ranges, per
+  path). API keys, which callers send to reach a path, are separate from the tunnel's connection key. Pass them as
+  plaintext from your secrets; only their SHA-256 hashes are sent.
 - `Status` is the current state; `WatchStatusAsync` streams it and every change: connecting, connected (with the
   public address), reconnecting (with the reason and the wait) and stopped. Each stream is buffered separately and
   never holds up the agent.

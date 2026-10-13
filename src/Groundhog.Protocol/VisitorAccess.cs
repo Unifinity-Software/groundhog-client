@@ -18,17 +18,17 @@ public static class VisitorAccessMethods
     /// <summary>Members of the tunnel's workspace, signed in through the relay.</summary>
     public const string Members = "members";
 
-    /// <summary>Requests carrying one of the tunnel's visitor tokens in <see cref="GroundhogHeaders.VisitorToken"/>.</summary>
-    public const string Tokens = "tokens";
+    /// <summary>Requests carrying one of the tunnel's API keys in <see cref="GroundhogHeaders.ApiKey"/>.</summary>
+    public const string ApiKeys = "apikeys";
 
     /// <summary>Requests from one of the tunnel's IP ranges.</summary>
     public const string Ips = "ips";
 
     /// <summary>Every method, in the order the documentation lists them.</summary>
-    public static IReadOnlyList<string> All { get; } = [Anyone, Members, Tokens, Ips];
+    public static IReadOnlyList<string> All { get; } = [Anyone, Members, ApiKeys, Ips];
 
     /// <summary>Whether <paramref name="value"/> is one of the methods. Values are lowercase and compared exactly.</summary>
-    public static bool IsKnown(string? value) => value is Anyone or Members or Tokens or Ips;
+    public static bool IsKnown(string? value) => value is Anyone or Members or ApiKeys or Ips;
 }
 
 /// <summary>Who may visit: <c>{ "allow": [ ... ] }</c>, the tunnel's default rule.</summary>
@@ -51,10 +51,10 @@ public sealed record VisitorAccessPathRule(
 
 /// <summary>
 /// A tunnel's visitor access rules as an agent declares them in <see cref="GroundhogHeaders.VisitorAccess"/>:
-/// <c>{ "default": { "allow": [...] }, "rules": [...], "ipRanges": [...], "tokenHashes": [...] }</c>.
+/// <c>{ "default": { "allow": [...] }, "rules": [...], "ipRanges": [...], "apiKeyHashes": [...] }</c>.
 /// </summary>
 /// <remarks>
-/// Visitor tokens never travel in a declaration, only their hashes (<see cref="VisitorToken.Hash"/>).
+/// API keys never travel in a declaration, only their hashes (<see cref="ApiKey.Hash"/>).
 /// </remarks>
 public sealed class VisitorAccessDeclaration
 {
@@ -81,25 +81,25 @@ public sealed class VisitorAccessDeclaration
     public IReadOnlyList<string> IpRanges { get; init; } = [];
 
     /// <summary>
-    /// SHA-256 hashes of the accepted visitor tokens as 64 lowercase hexadecimal characters, at most
-    /// <see cref="VisitorAccessValidator.MaxTokens"/>.
+    /// SHA-256 hashes of the accepted API keys as 64 lowercase hexadecimal characters, at most
+    /// <see cref="VisitorAccessValidator.MaxApiKeys"/>.
     /// </summary>
-    [JsonPropertyName("tokenHashes")]
-    public IReadOnlyList<string> TokenHashes { get; init; } = [];
+    [JsonPropertyName("apiKeyHashes")]
+    public IReadOnlyList<string> ApiKeyHashes { get; init; } = [];
 
     /// <summary>
-    /// Checks the declaration against the shared rules (<see cref="VisitorAccessValidator"/>) and that every token
-    /// hash is 64 lowercase hexadecimal characters.
+    /// Checks the declaration against the shared rules (<see cref="VisitorAccessValidator"/>) and that every API
+    /// key hash is 64 lowercase hexadecimal characters.
     /// </summary>
-    /// <param name="error">A message naming the first problem; never repeats a token hash.</param>
+    /// <param name="error">A message naming the first problem; never repeats an API key hash.</param>
     public bool TryValidate([NotNullWhen(false)] out string? error)
     {
-        var hashes = TokenHashes ?? [];
+        var hashes = ApiKeyHashes ?? [];
         foreach (var hash in hashes)
         {
             if (!IsLowercaseHash(hash))
             {
-                error = "Token hashes must be 64 lowercase hexadecimal characters (SHA-256).";
+                error = "API key hashes must be 64 lowercase hexadecimal characters (SHA-256).";
                 return false;
             }
         }
@@ -161,10 +161,10 @@ public sealed class VisitorAccessDeclaration
         return true;
     }
 
-    /// <summary>Lists the rules without token hashes.</summary>
+    /// <summary>Lists the rules without API key hashes.</summary>
     public override string ToString() =>
         $"default: {string.Join(",", Default?.Allow ?? [])}; {Rules?.Count ?? 0} path rule(s), "
-        + $"{IpRanges?.Count ?? 0} IP range(s), {TokenHashes?.Count ?? 0} token(s)";
+        + $"{IpRanges?.Count ?? 0} IP range(s), {ApiKeyHashes?.Count ?? 0} API key(s)";
 
     private static bool IsLowercaseHash(string? hash)
     {
@@ -193,14 +193,14 @@ public sealed class VisitorAccessDeclaration
 /// <list type="bullet">
 /// <item><description>Every <c>allow</c> list has at least one of <see cref="VisitorAccessMethods"/>, without repeats;
 /// <c>anyone</c> stands alone.</description></item>
-/// <item><description><c>tokens</c> needs at least one token and <c>ips</c> at least one IP range.</description></item>
+/// <item><description><c>apikeys</c> needs at least one API key and <c>ips</c> at least one IP range.</description></item>
 /// <item><description>Paths start with <c>/</c>, have no <c>?</c>, <c>#</c>, <c>%</c>, <c>\</c>, whitespace, control
 /// characters or <c>.</c>/<c>..</c> segments, aren't <c>/</c> itself, are at most <see cref="MaxPathLength"/>
 /// characters, and appear once (ignoring case and trailing or repeated <c>/</c>).</description></item>
 /// <item><description>IP ranges are CIDR as <see cref="IPNetwork.TryParse(string, out IPNetwork)"/> reads them, for
 /// example <c>203.0.113.0/24</c> or <c>2001:db8::/32</c>.</description></item>
 /// <item><description>At most <see cref="MaxRules"/> rules, <see cref="MaxIpRanges"/> IP ranges and
-/// <see cref="MaxTokens"/> tokens.</description></item>
+/// <see cref="MaxApiKeys"/> API keys.</description></item>
 /// </list>
 /// </remarks>
 public static class VisitorAccessValidator
@@ -211,8 +211,8 @@ public static class VisitorAccessValidator
     /// <summary>Most IP ranges a tunnel can have.</summary>
     public const int MaxIpRanges = 64;
 
-    /// <summary>Most visitor tokens a tunnel can have.</summary>
-    public const int MaxTokens = 10;
+    /// <summary>Most API keys a tunnel can have.</summary>
+    public const int MaxApiKeys = 10;
 
     /// <summary>Longest path in a rule, in characters.</summary>
     public const int MaxPathLength = 256;
@@ -221,16 +221,16 @@ public static class VisitorAccessValidator
     /// <param name="defaultRule">The default rule. Required.</param>
     /// <param name="rules">Path rules; <see langword="null"/> means none.</param>
     /// <param name="ipRanges">IP ranges; <see langword="null"/> means none.</param>
-    /// <param name="tokenCount">
-    /// How many visitor tokens the tunnel has, or <see langword="null"/> when unknown (a management client that doesn't
-    /// hold the token list), which skips the token checks.
+    /// <param name="apiKeyCount">
+    /// How many API keys the tunnel has, or <see langword="null"/> when unknown (a management client that doesn't
+    /// hold the API key list), which skips the API key checks.
     /// </param>
     /// <param name="error">A message naming the first problem.</param>
     public static bool TryValidate(
         VisitorAccessRule? defaultRule,
         IReadOnlyList<VisitorAccessPathRule>? rules,
         IReadOnlyList<string>? ipRanges,
-        int? tokenCount,
+        int? apiKeyCount,
         [NotNullWhen(false)] out string? error)
     {
         rules ??= [];
@@ -247,9 +247,9 @@ public static class VisitorAccessValidator
             return false;
         }
 
-        if (tokenCount > MaxTokens)
+        if (apiKeyCount > MaxApiKeys)
         {
-            error = $"A tunnel can have at most {MaxTokens} visitor tokens.";
+            error = $"A tunnel can have at most {MaxApiKeys} API keys.";
             return false;
         }
 
@@ -268,7 +268,7 @@ public static class VisitorAccessValidator
             return false;
         }
 
-        if (!TryValidateAllow(defaultRule.Allow, ipRanges.Count, tokenCount, out var allowError))
+        if (!TryValidateAllow(defaultRule.Allow, ipRanges.Count, apiKeyCount, out var allowError))
         {
             error = $"Default rule: {allowError}";
             return false;
@@ -295,7 +295,7 @@ public static class VisitorAccessValidator
                 return false;
             }
 
-            if (!TryValidateAllow(rule.Allow, ipRanges.Count, tokenCount, out allowError))
+            if (!TryValidateAllow(rule.Allow, ipRanges.Count, apiKeyCount, out allowError))
             {
                 error = $"Rule for {rule.Path}: {allowError}";
                 return false;
@@ -376,12 +376,12 @@ public static class VisitorAccessValidator
     private static bool TryValidateAllow(
         IReadOnlyList<string>? allow,
         int ipRangeCount,
-        int? tokenCount,
+        int? apiKeyCount,
         [NotNullWhen(false)] out string? error)
     {
         if (allow is null || allow.Count == 0)
         {
-            error = "allow needs at least one of anyone, members, tokens or ips.";
+            error = "allow needs at least one of anyone, members, apikeys or ips.";
             return false;
         }
 
@@ -390,7 +390,7 @@ public static class VisitorAccessValidator
         {
             if (!VisitorAccessMethods.IsKnown(method))
             {
-                error = "allow values must be anyone, members, tokens or ips.";
+                error = "allow values must be anyone, members, apikeys or ips.";
                 return false;
             }
 
@@ -407,9 +407,9 @@ public static class VisitorAccessValidator
             return false;
         }
 
-        if (seen.Contains(VisitorAccessMethods.Tokens) && tokenCount == 0)
+        if (seen.Contains(VisitorAccessMethods.ApiKeys) && apiKeyCount == 0)
         {
-            error = "tokens needs at least one visitor token.";
+            error = "apikeys needs at least one API key.";
             return false;
         }
 
@@ -426,22 +426,22 @@ public static class VisitorAccessValidator
 }
 
 /// <summary>
-/// Visitor tokens: secrets a visitor presents in <see cref="GroundhogHeaders.VisitorToken"/> to pass a rule that
-/// allows <see cref="VisitorAccessMethods.Tokens"/>. They have the same shape as connection keys (32 random bytes
-/// as 43 base64url characters), and only their SHA-256 hash (64 lowercase hexadecimal characters) is ever stored or
-/// declared.
+/// API keys: secrets a caller presents in <see cref="GroundhogHeaders.ApiKey"/> to reach a path whose rule allows
+/// <see cref="VisitorAccessMethods.ApiKeys"/>. They're separate from the tunnel's connection key (the agent's own
+/// credential) but have the same shape (32 random bytes as 43 base64url characters), and only their SHA-256 hash
+/// (64 lowercase hexadecimal characters) is ever stored or declared.
 /// </summary>
-public static class VisitorToken
+public static class ApiKey
 {
-    /// <summary>Characters in a token.</summary>
+    /// <summary>Characters in an API key.</summary>
     public const int Length = ConnectionKey.Length;
 
-    /// <summary>Creates a new token from a cryptographically secure random source.</summary>
+    /// <summary>Creates a new API key from a cryptographically secure random source.</summary>
     public static string Generate() => ConnectionKey.Generate();
 
-    /// <summary>Whether <paramref name="token"/> is 43 base64url characters that decode to 32 bytes.</summary>
-    public static bool IsWellFormed(string? token) => ConnectionKey.IsWellFormed(token);
+    /// <summary>Whether <paramref name="apiKey"/> is 43 base64url characters that decode to 32 bytes.</summary>
+    public static bool IsWellFormed(string? apiKey) => ConnectionKey.IsWellFormed(apiKey);
 
-    /// <summary>Lowercase hex SHA-256 of the token's UTF-8 text: the value sent in a declaration.</summary>
-    public static string Hash(string token) => ConnectionKey.Hash(token);
+    /// <summary>Lowercase hex SHA-256 of the API key's UTF-8 text: the value sent in a declaration.</summary>
+    public static string Hash(string apiKey) => ConnectionKey.Hash(apiKey);
 }

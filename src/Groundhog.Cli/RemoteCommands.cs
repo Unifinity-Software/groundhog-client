@@ -8,7 +8,7 @@ namespace Groundhog.Cli;
 
 internal static class RemoteCommands
 {
-    internal static readonly string[] Names = ["login", "logout", "whoami", "list", "ls", "describe", "show", "create", "rename", "delete", "workspace", "key", "open", "access", "token"];
+    internal static readonly string[] Names = ["login", "logout", "whoami", "list", "ls", "describe", "show", "create", "rename", "delete", "workspace", "key", "open", "access", "api-key"];
 
     internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, CancellationToken cancellation,
         CredentialStore? credentialStore = null, Func<string, string?, ManagementClient>? createClient = null)
@@ -121,10 +121,10 @@ internal static class RemoteCommands
             workspaceSlug = account.Workspaces[0].Slug;
         }
         var collection = $"/api/w/{Uri.EscapeDataString(workspaceSlug)}/tunnels";
-        if (args[0] is "access" or "token")
+        if (args[0] is "access" or "api-key")
         {
-            if (args[0] == "token" && options.Positional is ["revoke", ..] && !options.Has("--yes") && (!InteractiveCli.Available
-                || !await AnsiConsole.PromptAsync(new ConfirmationPrompt("Visitors using this token lose access. Continue?") { DefaultValue = false }, cancellation)))
+            if (args[0] == "api-key" && options.Positional is ["revoke", ..] && !options.Has("--yes") && (!InteractiveCli.Available
+                || !await AnsiConsole.PromptAsync(new ConfirmationPrompt("Callers using this API key lose access. Continue?") { DefaultValue = false }, cancellation)))
             {
                 throw new ManagementException("Operation cancelled. Scripts must explicitly pass --yes.");
             }

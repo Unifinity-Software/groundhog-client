@@ -44,10 +44,11 @@ public static class GroundhogHeaders
     public const string VisitorAccessApplied = "applied";
 
     /// <summary>
-    /// Sent by a visitor to a tunnel whose rules allow <see cref="VisitorAccessMethods.Tokens"/>: one visitor token (see
-    /// <see cref="Protocol.VisitorToken"/>). The relay removes it before forwarding the request.
+    /// Sent by a caller to a tunnel path whose rule allows <see cref="VisitorAccessMethods.ApiKeys"/>: one of the
+    /// tunnel's API keys (see <see cref="Protocol.ApiKey"/>), not its connection key. The relay removes it before
+    /// forwarding the request.
     /// </summary>
-    public const string VisitorToken = "X-Groundhog-Visitor-Token";
+    public const string ApiKey = "X-Groundhog-Api-Key";
 }
 
 /// <summary>Values of the <see cref="GroundhogHeaders.Error"/> header.</summary>

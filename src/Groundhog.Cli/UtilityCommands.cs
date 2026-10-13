@@ -50,7 +50,7 @@ internal static class UtilityCommands
                 // A background host runs elsewhere, so the access file is saved as a full path.
                 access = access?.AccessFile is { } file ? access with { AccessFile = Path.GetFullPath(file) } : access;
                 store.Save(new(name, options.Get("--target") ?? throw new ArgumentException("Target required."), options.Get("--relay"), access));
-                output.WriteLine($"Profile saved (keys and visitor tokens are never stored). Host it with: groundhog host {name}"); return 0;
+                output.WriteLine($"Profile saved (connection keys and API keys are never stored). Host it with: groundhog host {name}"); return 0;
             }
             if (options.Positional is ["delete", var removed])
             {

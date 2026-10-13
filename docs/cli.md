@@ -207,12 +207,15 @@ By default anyone with the address can reach a tunnel. Visitor access rules deci
 | --- | --- |
 | `anyone` | Everyone (webhook senders, OAuth providers). Can't be combined with other methods. |
 | `members` | Members of the tunnel's workspace, after signing in to Groundhog in the browser. |
-| `tokens` | Requests with a visitor token in the `X-Groundhog-Visitor-Token` header. |
+| `apikeys` | Requests with one of the tunnel's API keys in the `X-Groundhog-Api-Key` header. |
 | `ips` | Requests from one of the tunnel's IP ranges. |
 
 A request passes when any listed method passes. The longest matching path prefix wins (on segment boundaries,
 ignoring case); the default rule applies elsewhere. Visitor access is enabled per workspace; where it isn't, the
 commands below print "Visitor access rules aren't enabled for this workspace."
+
+An API key is what a caller (a script, a test runner, another service) sends to reach a path. It is not the tunnel's
+connection key, which only the hosting agent uses.
 
 ### Declare them when hosting
 
@@ -220,32 +223,32 @@ Rules given to `host` are sent with the tunnel's connection and replace the tunn
 the command or profile that hosts the app:
 
 ```sh
-export MYAPP_VISITOR_TOKEN=...                # from groundhog token create, or your secret store
+export MYAPP_API_KEY=...                      # from groundhog api-key create, or your secret store
 groundhog host myapp --port 5173 \
   --allow members \
   --path /webhooks=anyone \
-  --path /api=tokens,ips \
+  --path /api=apikeys,ips \
   --ip 203.0.113.0/24 \
-  --visitor-token-env MYAPP_VISITOR_TOKEN
+  --api-key-env MYAPP_API_KEY
 ```
 
 | Option | Meaning |
 | --- | --- |
-| `--allow <methods>` | The default rule: `anyone`, or any of `members`, `tokens`, `ips` joined by commas. Defaults to `anyone`. |
+| `--allow <methods>` | The default rule: `anyone`, or any of `members`, `apikeys`, `ips` joined by commas. Defaults to `anyone`. |
 | `--path <prefix>=<methods>` | A rule for one path prefix, for example `--path /webhooks=anyone`. Repeatable, up to 32. |
 | `--ip <cidr>` | An IPv4 or IPv6 range for `ips`, for example `203.0.113.0/24`. Repeatable, up to 64. |
-| `--visitor-token-env <VAR>` | An environment variable holding a visitor token for `tokens`. Repeatable, up to 10. Only the token's SHA-256 hash is sent; tokens never go on the command line. |
+| `--api-key-env <VAR>` | An environment variable holding an API key for `apikeys`. Repeatable, up to 10. Only the key's SHA-256 hash is sent; API keys never go on the command line. |
 | `--access-file <file>` | The rules as JSON instead of `--allow`, `--path` and `--ip` (not together with them). |
 
 The access file uses the service's shape, so the output of `groundhog access <name> --output json` can be edited into
-one (its `tokens` and `managedBy` are ignored):
+one (its `apiKeys` and `managedBy` are ignored):
 
 ```json
 {
   "default": { "allow": ["members"] },
   "rules": [
     { "path": "/webhooks", "allow": ["anyone"] },
-    { "path": "/api", "allow": ["tokens", "ips"] }
+    { "path": "/api", "allow": ["apikeys", "ips"] }
   ],
   "ipRanges": ["203.0.113.0/24"]
 }
@@ -260,19 +263,19 @@ exposing the app without them.
 ### Manage them while signed in
 
 ```sh
-groundhog access myapp                                   # Show the rules, tokens and who manages them.
+groundhog access myapp                                   # Show the rules, API keys and who manages them.
 groundhog access myapp --output json                     # The same, as JSON (a starting point for --access-file).
 groundhog access set myapp --allow members --path /webhooks=anyone --ip 203.0.113.0/24
 groundhog access set myapp --access-file rules.json
 groundhog access myapp --agent-managed                   # Let hosting agents declare the rules again.
-groundhog token create myapp ci                          # Prints the new token once.
-groundhog token list myapp
-groundhog token revoke myapp <token-id>
+groundhog api-key create myapp ci                        # Prints the new API key once.
+groundhog api-key list myapp
+groundhog api-key revoke myapp <api-key-id>
 ```
 
 `access set` saves the rules as managed in the dashboard: agents that declare rules are then refused until you run
-`access <name> --agent-managed`. Tokens live on the service, so `access set` takes no `--visitor-token-env`; create
-them with `token create` and copy the printed token, which isn't shown again. `token revoke` asks for confirmation;
+`access <name> --agent-managed`. API keys live on the service, so `access set` takes no `--api-key-env`; create
+them with `api-key create` and copy the printed key, which isn't shown again. `api-key revoke` asks for confirmation;
 scripts pass `--yes`. The app's tunnel screen shows the current rules on a **Visitors** line.
 
 ## Saved profiles
@@ -302,7 +305,7 @@ Create and manage profiles:
 groundhog init                                       # Asks for the tunnel name and local target, then saves them.
 groundhog profile save myapp --target http://localhost:5173
 groundhog profile save myapp --target http://localhost:5173 --allow members --path /webhooks=anyone \
-  --visitor-token-env MYAPP_VISITOR_TOKEN               # Saves the variable's name, never the token.
+  --api-key-env MYAPP_API_KEY                           # Saves the variable's name, never the API key.
 groundhog profile list
 groundhog host myapp                                 # Foreground, with the live view.
 groundhog start myapp                                # Background; returns once connected.
@@ -318,7 +321,7 @@ on the service or a running agent.
 
 A profile's name must be an existing tunnel's name. Saving checks that the target is an `http://` or `https://`
 address without a path or credentials, and checks any visitor access options; it does not contact the service.
-Profiles save the name, target and visitor access options (an `--access-file` as a full path, `--visitor-token-env` as
+Profiles save the name, target and visitor access options (an `--access-file` as a full path, `--api-key-env` as
 the variable's name; the variable must be set wherever the profile is hosted, including for `start`). Use foreground
 `host` with options for a custom CA, connection pool size or `--insecure-local`. After renaming a tunnel,
 delete the old profile and save a new one under the new name.
