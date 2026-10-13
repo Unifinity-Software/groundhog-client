@@ -32,6 +32,22 @@ public static class GroundhogHeaders
     /// Values are in <see cref="GroundhogErrors"/>.
     /// </summary>
     public const string Error = "X-Groundhog-Error";
+
+    /// <summary>
+    /// Optional, sent by the agent when connecting: the tunnel's visitor access rules as declared by the developer,
+    /// encoded with <see cref="VisitorAccessDeclaration.Encode"/>. A relay that applied them answers its
+    /// <c>101 Switching Protocols</c> with this header set to <see cref="VisitorAccessApplied"/>.
+    /// </summary>
+    public const string VisitorAccess = "X-Groundhog-Visitor-Access";
+
+    /// <summary>The value of <see cref="VisitorAccess"/> on the relay's <c>101</c> once it applied a declaration.</summary>
+    public const string VisitorAccessApplied = "applied";
+
+    /// <summary>
+    /// Sent by a visitor to a tunnel whose rules allow <see cref="VisitorAccessMethods.Tokens"/>: one visitor token (see
+    /// <see cref="Protocol.VisitorToken"/>). The relay removes it before forwarding the request.
+    /// </summary>
+    public const string VisitorToken = "X-Groundhog-Visitor-Token";
 }
 
 /// <summary>Values of the <see cref="GroundhogHeaders.Error"/> header.</summary>

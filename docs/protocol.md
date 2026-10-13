@@ -38,6 +38,8 @@ local target (downgrading to HTTP/1.1 where the local server needs it).
     refusing the connection. Existing clients reporting only an agent version are identified only as the Agent
     library; their Aspire/CLI package version must never be inferred from it.
   - `X-Groundhog-Session: <GUID>`: one value per agent run; all of a run's connections share it.
+  - Optional `X-Groundhog-Visitor-Access: <declaration>`: the tunnel's visitor access rules, declared by the
+    developer. See [Visitor access declarations](#visitor-access-declarations).
 - On success the relay answers `101 Switching Protocols` with `Sec-WebSocket-Protocol: groundhog.v1` and
   `X-Groundhog-Public-Address: <the tunnel's public address>`, for example
   `https://myapp.groundhog.unifinity.com`, so the agent can show it. An agent that doesn't get this header shows
@@ -46,7 +48,8 @@ local target (downgrading to HTTP/1.1 where the local server needs it).
   - `401` credential missing, invalid, or of an unsupported scheme (`WWW-Authenticate` lists the accepted
     schemes)
   - `403` valid credential, but not allowed to host this tunnel (for example a key for a different tunnel, or
-    a user outside the tunnel's workspace)
+    a user outside the tunnel's workspace), or a refused visitor access declaration. The `text/plain` body says
+    why; the agent shows its first line (at most 200 characters, control characters removed).
   - `404` unknown tunnel
   - `426` unsupported protocol version (the body names the supported versions)
   - `429` too many connection attempts (`Retry-After` header in seconds). Refusals with `401`, `403` and
@@ -56,6 +59,49 @@ local target (downgrading to HTTP/1.1 where the local server needs it).
   is asked for a fresh token once before giving up on a `401`.) It treats `429`, `5xx`, any other status
   (such as `400`) and network errors as temporary: back off and retry. After a `429` it waits at least `Retry-After` seconds (at most
   5 minutes), even when the backoff schedule's wait is shorter.
+
+### Visitor access declarations
+
+An agent may declare who can visit its tunnel, as configuration in code (CLI flags, an Aspire AppHost). This is
+additive: the protocol version stays 1, and an agent that declares nothing never changes the tunnel's stored
+rules.
+
+- The header value is the unpadded base64url encoding of UTF-8 JSON, at most 16,384 characters
+  (`VisitorAccessDeclaration.MaxEncodedLength`):
+
+  ```json
+  {
+    "default": { "allow": ["members"] },
+    "rules": [
+      { "path": "/webhooks", "allow": ["anyone"] },
+      { "path": "/api", "allow": ["tokens", "ips"] }
+    ],
+    "ipRanges": ["203.0.113.0/24", "2001:db8::/32"],
+    "tokenHashes": ["<64 lowercase hexadecimal characters>"]
+  }
+  ```
+
+- `allow` values: `anyone`, `members` (workspace members signed in through the relay), `tokens` (a visitor
+  token in `X-Groundhog-Visitor-Token`), `ips` (the visitor's address is in `ipRanges`). A request passes when
+  any listed method passes. `anyone` can't be combined with other methods in one list. `tokens` needs at least
+  one token hash and `ips` at least one IP range. Missing `default` means `{ "allow": ["anyone"] }`; missing
+  lists are empty.
+- The longest matching `path` prefix wins, on segment boundaries and ignoring case; `default` applies when none
+  matches. Paths start with `/`, have no `?` or `#` (or control characters), are at most 256 characters, and
+  appear once, ignoring case and a trailing `/`.
+- `ipRanges` are IPv4 or IPv6 CIDR ranges as .NET's `IPNetwork.TryParse` reads them.
+- Limits: 32 rules, 64 IP ranges, 10 token hashes.
+- `tokenHashes` are SHA-256 of each visitor token's UTF-8 text, as 64 lowercase hexadecimal characters. Visitor
+  tokens have the same shape as connection keys (43 base64url characters); the plaintext never leaves the
+  developer's machine.
+- `Groundhog.Protocol` holds the model (`VisitorAccessDeclaration`), the shared validator
+  (`VisitorAccessValidator`) and the encoding, so the relay, the agent and the CLI apply the same rules.
+- The agent sends the same declaration on every pooled connection. A relay that applied it (validated, and
+  stored if it changed) adds `X-Groundhog-Visitor-Access: applied` to its `101`. An agent that declared rules
+  and gets a `101` without that header (a relay that predates visitor access) closes the WebSocket and stops
+  for good, so a declared policy is never silently ignored.
+- The relay refuses a declaration with `403` and a message when it's invalid, when the tunnel's visitor access
+  is managed in the dashboard, or when visitor access isn't enabled for the workspace.
 
 ### Connection pool
 
@@ -158,6 +204,8 @@ The CLI uses these existing workspace endpoints (JSON is camelCase):
 | Stored usage window | `GET /api/w/<slug>/tunnels/<name>/usage` |
 | Persisted request metadata | `GET /api/w/<slug>/requests?tunnel=<name>&status=<class-or-code>&limit=200` |
 | Live requests (server-sent events) | `GET /api/w/<slug>/tunnels/<name>/requests/stream` |
+| Visitor access rules | `GET`, `PUT /api/w/<slug>/tunnels/<name>/visitor-access` |
+| Visitor tokens | `POST /api/w/<slug>/tunnels/<name>/visitor-tokens` with `{"name":"<label>"}`, `DELETE …/visitor-tokens/<id>` |
 
 Request search returns `{ "entries": [...], "truncated": true|false }`; entries contain completion time,
 method, path, status code and duration plus relay metadata. The CLI does not retrieve request detail bodies/headers.
@@ -169,3 +217,17 @@ the gap, reporting each `requestId` once.
 Create and rotate return `{ "tunnel": {...}, "connectionKey": "<one-time-key>" }`. The CLI stores this key securely
 and never prints it in normal output. Other management errors use HTTP status codes and problem details;
 the CLI does not echo arbitrary response bodies.
+
+Visitor access (behind a per-workspace feature; without it these endpoints answer 404, which the CLI reports as
+"Visitor access rules aren't enabled for this workspace."):
+
+- `GET …/visitor-access` returns the stored policy in the declaration's shape, with `tokens`
+  (`[{"id","name","created"}]`, never hashes or plaintext) instead of `tokenHashes`, plus `managedBy`:
+  `agent` (the default; an agent's declaration replaces the rules) or `dashboard` (the relay refuses agent
+  declarations with 403).
+- `PUT …/visitor-access` with `{ "default", "rules", "ipRanges", "managedBy" }` replaces the rules. The CLI
+  validates them with `VisitorAccessValidator` first (without the token checks, since tokens live on the relay),
+  sends `managedBy: "dashboard"` when setting rules, and `managedBy: "agent"` with the stored rules to hand
+  control back to agents.
+- `POST …/visitor-tokens` with `{"name":"<label>"}` returns `{"id","name","created","token"}`; the plaintext
+  `token` is shown once. `DELETE …/visitor-tokens/<id>` revokes one.
