@@ -39,7 +39,7 @@ internal sealed class LocalServer : IAsyncDisposable
     public static async Task<LocalServer> StartAsync(
         TunnelConnectionListener listener,
         GroundhogAgentOptions options,
-        Action<GroundhogRequestEventArgs> onRequest,
+        Action<GroundhogCompletedRequest> onRequest,
         CancellationToken cancellationToken)
     {
         // The empty builder reads no configuration or environment variables, so settings such as ASPNETCORE_URLS

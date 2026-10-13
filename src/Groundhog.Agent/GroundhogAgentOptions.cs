@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.Metrics;
 using Groundhog.Protocol;
 using Microsoft.Extensions.Logging;
 
@@ -70,6 +71,21 @@ public sealed class GroundhogAgentOptions
 
     /// <summary>Where the agent writes its diagnostic logs. Defaults to none.</summary>
     public ILoggerFactory? LoggerFactory { get; set; }
+
+    /// <summary>
+    /// Creates the <see cref="GroundhogAgent.MeterName"/> meter the agent records its metrics on, for example the
+    /// app's <see cref="IMeterFactory"/> from dependency injection. Defaults to a meter shared by all agents.
+    /// </summary>
+    public IMeterFactory? MeterFactory { get; set; }
+
+    /// <summary>
+    /// Called when a request that came through the tunnel finishes, for example to log it. Defaults to none.
+    /// </summary>
+    /// <remarks>
+    /// Called on the request's own thread as part of finishing it, so keep it quick. Exceptions it throws are logged
+    /// and ignored. For counts and durations, use the agent's metrics instead (see <see cref="GroundhogAgent.MeterName"/>).
+    /// </remarks>
+    public Action<GroundhogCompletedRequest>? OnRequestCompleted { get; set; }
 
     /// <summary>Checks every setting and throws a descriptive <see cref="ArgumentException"/> for the first bad one.</summary>
     /// <exception cref="ArgumentException">A setting is missing or invalid.</exception>

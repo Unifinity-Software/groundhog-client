@@ -11,8 +11,9 @@ namespace Groundhog.Agent.Internal;
 internal sealed class AgentRun
 {
     private readonly GroundhogAgentOptions _options;
-    private readonly Action<GroundhogAgentStatusEventArgs> _onStatus;
-    private readonly Action<GroundhogRequestEventArgs> _onRequest;
+    private readonly Action<GroundhogAgentStatus> _onStatus;
+    private readonly Action<GroundhogCompletedRequest> _onRequest;
+    private readonly AgentMetrics _metrics;
     private readonly ILogger _logger;
     private readonly TimeProvider _time;
     private readonly RelayConnector _connector;
@@ -26,13 +27,15 @@ internal sealed class AgentRun
 
     public AgentRun(
         GroundhogAgentOptions options,
-        Action<GroundhogAgentStatusEventArgs> onStatus,
-        Action<GroundhogRequestEventArgs> onRequest,
+        Action<GroundhogAgentStatus> onStatus,
+        Action<GroundhogCompletedRequest> onRequest,
+        AgentMetrics metrics,
         CancellationToken cancellationToken)
     {
         _options = options;
         _onStatus = onStatus;
         _onRequest = onRequest;
+        _metrics = metrics;
         _time = options.TimeProvider;
         _logger = (options.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger("Groundhog.Agent");
         SessionId = Guid.NewGuid();
@@ -46,7 +49,7 @@ internal sealed class AgentRun
     {
         try
         {
-            _onStatus(new GroundhogAgentStatusEventArgs(GroundhogAgentState.Connecting));
+            _onStatus(new GroundhogAgentStatus(GroundhogAgentState.Connecting));
             var server = await LocalServer.StartAsync(_listener, _options, _onRequest, _stopping.Token)
                 .ConfigureAwait(false);
             await using (server.ConfigureAwait(false))
@@ -78,8 +81,8 @@ internal sealed class AgentRun
             message = _stopMessage ?? "Stopped.";
         }
 
-        _onStatus(new GroundhogAgentStatusEventArgs(
-            GroundhogAgentState.Stopped, reason: message, stopReason: reason));
+        _onStatus(new GroundhogAgentStatus(
+            GroundhogAgentState.Stopped, Reason: message, StopReason: reason));
         return reason;
     }
 
@@ -227,6 +230,7 @@ internal sealed class AgentRun
                 _openConnections--;
             }
 
+            _metrics.ConnectionClosed(_options.TunnelName!);
             return null;
         }
 
@@ -236,6 +240,7 @@ internal sealed class AgentRun
             wasLast = --_openConnections == 0;
         }
 
+        _metrics.ConnectionClosed(_options.TunnelName!);
         return (end, _time.GetElapsedTime(openedAt) >= ReconnectBackoff.MaxDelay, wasLast);
     }
 
@@ -247,10 +252,11 @@ internal sealed class AgentRun
             first = ++_openConnections == 1;
         }
 
+        _metrics.ConnectionOpened(_options.TunnelName!);
         _logger.LogDebug("Tunnel connection opened.");
         if (first && !_stopping.IsCancellationRequested)
         {
-            _onStatus(new GroundhogAgentStatusEventArgs(GroundhogAgentState.Connected, publicAddress: publicAddress));
+            _onStatus(new GroundhogAgentStatus(GroundhogAgentState.Connected, PublicAddress: publicAddress));
         }
     }
 
@@ -268,8 +274,8 @@ internal sealed class AgentRun
         _logger.LogDebug("Tunnel connection {Slot}: {Reason} Retrying in {Delay}.", slot, reason, delay);
         if (report && !_stopping.IsCancellationRequested)
         {
-            _onStatus(new GroundhogAgentStatusEventArgs(
-                GroundhogAgentState.Reconnecting, reason: reason, retryDelay: delay));
+            _onStatus(new GroundhogAgentStatus(
+                GroundhogAgentState.Reconnecting, Reason: reason, RetryDelay: delay));
         }
     }
 

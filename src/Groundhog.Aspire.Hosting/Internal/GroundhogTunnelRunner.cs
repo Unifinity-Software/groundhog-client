@@ -160,6 +160,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                     ? await access.ResolveAsync(cancellationToken).ConfigureAwait(false)
                     : null,
                 Client = GroundhogClientInfo.FromAssembly("Groundhog.Aspire.Hosting", typeof(GroundhogTunnelRunner).Assembly),
+                OnRequestCompleted = resource.RequestLoggingEnabled ? request => LogRequest(logger, request) : null,
             };
 
             // Validates every setting; messages never repeat the credential.
@@ -191,23 +192,17 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
             return;
         }
 
-        if (resource.RequestLoggingEnabled)
-        {
-            agent.RequestCompleted += (_, request) => logger.LogInformation(
-                "{Method} {Path} {StatusCode} {Duration} ms",
-                request.IsWebSocket ? "WS" : request.Method,
-                EscapeLogPath(request.Path),
-                request.StatusCode,
-                request.Duration.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture));
-        }
-
+        // Watch before running so every change is seen. Each update is published before the next is read, so the
+        // dashboard shows them in order.
+        var statuses = agent.WatchStatusAsync(CancellationToken.None);
+        var running = agent.RunAsync(cancellationToken);
         var connectedOnce = false;
-        agent.StatusChanged += (_, status) =>
+        await foreach (var status in statuses.ConfigureAwait(false))
         {
             switch (status.State)
             {
                 case GroundhogAgentState.Connecting:
-                    Publish(notifications, resource, s => s with { State = s_connecting });
+                    await notifications.PublishUpdateAsync(resource, s => s with { State = s_connecting }).ConfigureAwait(false);
                     break;
 
                 case GroundhogAgentState.Connected:
@@ -215,39 +210,40 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                     var address = status.PublicAddress!;
                     resource.ReportFirstOutcome(address);
                     logger.LogInformation("Connected: {PublicAddress} → {Target}", address, target);
-                    Publish(notifications, resource, s => s with
+                    await notifications.PublishUpdateAsync(resource, s => s with
                     {
                         State = KnownResourceStates.Running,
                         Urls = [new UrlSnapshot("public", address.ToString(), IsInternal: false)],
-                    });
+                    }).ConfigureAwait(false);
                     break;
 
                 case GroundhogAgentState.Reconnecting:
                     resource.ReportFirstOutcome(null);
                     logger.LogWarning("Disconnected: {Reason} Reconnecting in {Delay}.", status.Reason, Describe(status.RetryDelay));
-                    Publish(notifications, resource, s => s with
+                    await notifications.PublishUpdateAsync(resource, s => s with
                     {
                         State = s_reconnecting,
                         Urls = [.. s.Urls.Select(url => url with { IsInactive = true })],
-                    });
+                    }).ConfigureAwait(false);
                     break;
 
                 case GroundhogAgentState.Stopped:
                     resource.ReportFirstOutcome(null);
-                    if (status.StopReason == GroundhogAgentStopReason.Cancelled)
+
+                    // Cancelled is the AppHost stopping; without a stop reason the agent failed and RunAsync says how.
+                    if (status.StopReason is { } stopReason && stopReason != GroundhogAgentStopReason.Cancelled)
                     {
-                        break;
+                        logger.LogError("Stopped: {Reason}", status.Reason);
                     }
 
-                    logger.LogError("Stopped: {Reason}", status.Reason);
                     break;
             }
-        };
+        }
 
         var cancelled = false;
         try
         {
-            cancelled = await agent.RunAsync(cancellationToken).ConfigureAwait(false) == GroundhogAgentStopReason.Cancelled;
+            cancelled = await running.ConfigureAwait(false) == GroundhogAgentStopReason.Cancelled;
         }
         catch (Exception ex)
         {
@@ -282,13 +278,12 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
         });
     }
 
-    // Status events are raised on the agent's threads and must return quickly. PublishUpdateAsync applies the update
-    // before its first await, so updates keep the order the events were raised in.
-    private static void Publish(
-        ResourceNotificationService notifications,
-        GroundhogTunnelResource resource,
-        Func<CustomResourceSnapshot, CustomResourceSnapshot> update) =>
-        _ = notifications.PublishUpdateAsync(resource, update);
+    private static void LogRequest(ILogger logger, GroundhogCompletedRequest request) => logger.LogInformation(
+        "{Method} {Path} {StatusCode} {Duration} ms",
+        request.IsWebSocket ? "WS" : request.Method,
+        EscapeLogPath(request.Path),
+        request.StatusCode,
+        request.Duration.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture));
 
     private static ImmutableArray<ResourcePropertySnapshot> WithProperties(
         ImmutableArray<ResourcePropertySnapshot> existing,

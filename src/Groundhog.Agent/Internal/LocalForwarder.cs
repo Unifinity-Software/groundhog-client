@@ -29,13 +29,13 @@ internal sealed class LocalForwarder : IDisposable
     private readonly HttpMessageInvoker _client;
     private readonly string _destinationPrefix;
     private readonly TimeProvider _timeProvider;
-    private readonly Action<GroundhogRequestEventArgs> _onRequest;
+    private readonly Action<GroundhogCompletedRequest> _onRequest;
     private readonly X509Certificate2? _localCa;
 
     public LocalForwarder(
         IHttpForwarder forwarder,
         GroundhogAgentOptions options,
-        Action<GroundhogRequestEventArgs> onRequest)
+        Action<GroundhogCompletedRequest> onRequest)
     {
         _forwarder = forwarder;
         var localTarget = options.LocalTarget!;
@@ -123,7 +123,7 @@ internal sealed class LocalForwarder : IDisposable
             status = StatusCodes.Status101SwitchingProtocols;
         }
 
-        _onRequest(new GroundhogRequestEventArgs(
+        _onRequest(new GroundhogCompletedRequest(
             isWebSocket ? HttpMethods.Get : context.Request.Method,
             context.Request.Path.HasValue ? context.Request.Path.Value! : "/",
             status,
