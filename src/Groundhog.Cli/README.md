@@ -3,6 +3,11 @@
 The `groundhog` command of Groundhog, the hosted HTTPS tunnel service for local development: give a dev server on
 your machine a public HTTPS address through the Groundhog service.
 
+Before hosting, [create your free workspace](https://groundhog.unifinity.com/docs/workspace) and
+[create a tunnel](https://groundhog.unifinity.com/docs/create-tunnel). Use its name in place of `myapp` below
+and supply its connection key through `GROUNDHOG_KEY`. Keep the key out of source files and shell history.
+The example expects your local app to be running on port 5173.
+
 ```
 dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.7
 groundhog host myapp --port 5173
