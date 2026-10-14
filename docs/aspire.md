@@ -106,7 +106,11 @@ A tunnel serves one computer at a time, so on a team each developer creates thei
 for everyone:
 
 ```csharp
+// Each developer sets these 2 values in their own user secrets.
+// tunnelName holds their tunnel's name, read from Parameters:groundhog-tunnel-name.
 var tunnelName = builder.AddParameter("groundhog-tunnel-name");
+// tunnelKey holds that tunnel's connection key. secret: true makes it a secret parameter:
+// Aspire masks it in the dashboard and reads it from Parameters:groundhog-tunnel-key.
 var tunnelKey = builder.AddParameter("groundhog-tunnel-key", secret: true);
 
 var web = builder.AddProject<Projects.Web>("web");
@@ -136,6 +140,8 @@ same shape as Aspire's dev tunnels (available from 0.4.0-preview.6). Here `api-g
 `service-b`, and the tunnel is named `my-tunnel`:
 
 ```csharp
+// tunnelKey holds my-tunnel's connection key. secret: true makes it a secret parameter:
+// Aspire masks it in the dashboard and reads it from Parameters:groundhog-tunnel-key in user secrets.
 var tunnelKey = builder.AddParameter("groundhog-tunnel-key", secret: true);
 
 var serviceA = builder.AddProject<Projects.ServiceA>("service-a");
