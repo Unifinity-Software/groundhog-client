@@ -115,12 +115,12 @@ address change is delivered in a client update.
 ### One tunnel per developer
 
 A tunnel serves one computer at a time, so on a team each developer creates their own tunnel, for example
-`my-tunnel-dev1` and `my-tunnel-dev2`. Keep the tunnel name and key out of the AppHost code so the code is the same
-for everyone, and have each developer save their own 2 values first.
+`my-tunnel-dev1` and `my-tunnel-dev2`. `WithGroundhogTunnel()` without a tunnel name reads the tunnel's name and key
+from each developer's user secrets instead of the AppHost code, so the code is the same for everyone and nobody's
+tunnel name is committed. Each developer saves their own 2 values first.
 
-Each developer saves their tunnel's name and key in the AppHost's user secrets. The quickest way is the
-[Groundhog CLI](cli.md#put-a-tunnel-in-an-aspire-apphosts-user-secrets): signed in with `groundhog login`, create the
-tunnel with `--project` set to the AppHost's project file:
+The quickest way to save them is the [Groundhog CLI](cli.md#put-a-tunnel-in-an-aspire-apphosts-user-secrets): signed
+in with `groundhog login`, create the tunnel with `--project` set to the AppHost's project file:
 
 ```sh
 groundhog create my-tunnel-dev1 --project AppHost/AppHost.csproj
@@ -148,15 +148,52 @@ dotnet user-secrets set "Parameters:groundhog-tunnel-key" $tunnelKey
 Remove-Variable tunnelKey
 ```
 
-The AppHost reads those 2 values as parameters:
+In the AppHost, add the tunnel without a name:
 
 ```csharp
-// Each developer sets these 2 values in their own user secrets.
-// tunnelName holds their tunnel's name, read from Parameters:groundhog-tunnel-name.
-var tunnelName = builder.AddParameter("groundhog-tunnel-name");
-// tunnelKey holds that tunnel's connection key. secret: true makes it a secret parameter:
-// Aspire masks it in the dashboard and reads it from Parameters:groundhog-tunnel-key.
-var tunnelKey = builder.AddParameter("groundhog-tunnel-key", secret: true);
+var web = builder.AddProject<Projects.Web>("web").WithGroundhogTunnel();
+```
+
+`WithGroundhogTunnel()` adds:
+
+- a tunnel resource named `web-tunnel`, as `WithGroundhogTunnel("my-tunnel")` does;
+- a parameter named `groundhog-tunnel-name`, read from `Parameters:groundhog-tunnel-name`;
+- a secret parameter named `groundhog-tunnel-key`, read from `Parameters:groundhog-tunnel-key`.
+
+It forwards to the same endpoint as `WithGroundhogTunnel("my-tunnel")` would. Pass `endpointName` by name, for
+example `WithGroundhogTunnel(endpointName: "http")`: a string in the first position is a tunnel name. If you declare
+parameters with these 2 names yourself (for example to add a description), they're reused; the key parameter must be
+secret.
+
+To give `web` its public address as well, pass `configure`:
+
+```csharp
+var web = builder.AddProject<Projects.Web>("web");
+
+web.WithGroundhogTunnel(configure: webTunnel =>
+    web.WithEnvironment("PublicOrigin", webTunnel.Resource.PublicAddress));
+```
+
+On the computer of the developer who saved `my-tunnel-dev1`, the tunnel connects as `my-tunnel-dev1`,
+`webTunnel.Resource.PublicAddress` is `https://my-tunnel-dev1.groundhog.unifinity.com`, and `web` gets that value as
+`PublicOrigin`. On the computer of the developer who saved `my-tunnel-dev2`, the same code gives
+`https://my-tunnel-dev2.groundhog.unifinity.com`.
+
+![Each developer's AppHost reads its own tunnel name and key from user secrets, so each web-tunnel has its own public address](images/aspire-team.svg)
+
+Instead of saving the values with the CLI or `dotnet user-secrets`, a developer can leave them unset and enter both
+when the Aspire dashboard asks, with **Save to user secrets** on. Keep both out of committed settings files: a shared tunnel
+name makes every developer take the same tunnel over from each other.
+
+To use other parameter names, declare the parameters and pass them to `AddGroundhogTunnel`. The CLI writes them with
+`--name-parameter web-tunnel-name --key-parameter web-tunnel-key`:
+
+```csharp
+// tunnelName holds the developer's tunnel name, read from Parameters:web-tunnel-name.
+var tunnelName = builder.AddParameter("web-tunnel-name");
+// tunnelKey holds that tunnel's connection key, read from Parameters:web-tunnel-key.
+// secret: true makes it a secret parameter, which Aspire masks in the dashboard.
+var tunnelKey = builder.AddParameter("web-tunnel-key", secret: true);
 
 var web = builder.AddProject<Projects.Web>("web");
 
@@ -164,14 +201,8 @@ var webTunnel = builder.AddGroundhogTunnel("web-tunnel", tunnelName, tunnelKey)
     .WithReference(web.GetEndpoint("https"));
 ```
 
-On the computer of the developer who saved `my-tunnel-dev1`, `tunnelName` is `my-tunnel-dev1` and
-`webTunnel.Resource.PublicAddress` is `https://my-tunnel-dev1.groundhog.unifinity.com`.
-
-![Each developer's AppHost reads its own tunnel name and key from user secrets, so each web-tunnel has its own public address](images/aspire-team.svg)
-
-Instead of saving the values with the CLI or `dotnet user-secrets`, a developer can leave them unset and enter both
-when the Aspire dashboard asks, with **Save to user secrets** on. Keep both out of committed settings files: a shared tunnel
-name makes every developer take the same tunnel over from each other.
+On the same developer's computer, `tunnelName` is `my-tunnel-dev1` and `webTunnel.Resource.PublicAddress` is
+`https://my-tunnel-dev1.groundhog.unifinity.com`.
 
 ### Service discovery through the tunnel
 

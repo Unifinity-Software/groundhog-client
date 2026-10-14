@@ -30,9 +30,12 @@ retrying; it cannot start a second overlapping agent. Other resources' environme
 `PublicAddress` or `PublicHost` retain their values. Restart an affected resource if those values changed.
 
 For a rotated key, update the key parameter through Manage User Secrets or your secret configuration:
-`Parameters:groundhog-<tunnel name>-key` for `WithGroundhogTunnel`, or the parameter you passed to
-`AddGroundhogTunnel`. After renaming a tunnel, change the name in `Program.cs` (or its name parameter); with
-`WithGroundhogTunnel` the key parameter's name changes with it, so enter the key again. A quickstart sample that asks
+`Parameters:groundhog-<tunnel name>-key` for `WithGroundhogTunnel("<tunnel name>")`,
+`Parameters:groundhog-tunnel-key` for `WithGroundhogTunnel()`, or the parameter you passed to `AddGroundhogTunnel`.
+`groundhog key rotate <tunnel name> --project <AppHost.csproj>` writes the rotated key to
+`Parameters:groundhog-tunnel-key`. After renaming a tunnel, change the name in `Program.cs`,
+`Parameters:groundhog-tunnel-name` or its name parameter; with `WithGroundhogTunnel("<tunnel name>")` the key
+parameter's name changes with it, so enter the key again. A quickstart sample that asks
 for `groundhog-name` or `groundhog-relay` is older source; installing a newer package does not rewrite `Program.cs`.
 Download the current sample into a fresh folder and follow its walkthrough.
 

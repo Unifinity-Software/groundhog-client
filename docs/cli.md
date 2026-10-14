@@ -418,9 +418,9 @@ Revocation removes all live keys for the tunnel. Rotation saves a replacement ke
 
 ### Put a tunnel in an Aspire AppHost's user secrets
 
-On a team, each developer hosts the same Aspire AppHost through their own tunnel, and the AppHost reads the tunnel's
-name and connection key from the parameters `groundhog-tunnel-name` and `groundhog-tunnel-key` (see
-[one tunnel per developer](aspire.md#one-tunnel-per-developer)). Add `--project` with the AppHost's project file to
+On a team, each developer hosts the same Aspire AppHost through their own tunnel. In the AppHost,
+`WithGroundhogTunnel()` without a tunnel name reads the tunnel's name and connection key from the parameters
+`groundhog-tunnel-name` and `groundhog-tunnel-key` (see [one tunnel per developer](aspire.md#one-tunnel-per-developer)). Add `--project` with the AppHost's project file to
 `create` or `key rotate`, and the CLI writes both values into that project's .NET user secrets:
 
 ```sh
@@ -450,7 +450,8 @@ groundhog key rotate my-tunnel-dev1 --project AppHost/AppHost.csproj
 `Parameters:groundhog-tunnel-key` is then the rotated key. `create` without `--project` prints the `key copy` command
 for the tunnel it created.
 
-If the AppHost declares its parameters under other names, pass them with `--name-parameter` and `--key-parameter`.
+If the AppHost declares its own parameters under other names and passes them to `AddGroundhogTunnel`, pass those
+names with `--name-parameter` and `--key-parameter`.
 These two options only work together with `--project`:
 
 ```sh

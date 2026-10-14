@@ -36,6 +36,19 @@ web.WithGroundhogTunnel("my-tunnel", configure: tunnel =>
     web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress));
 ```
 
+On a team, each developer creates their own tunnel, for example `my-tunnel-dev1`. Without a tunnel name,
+`WithGroundhogTunnel()` reads the name from the parameter `groundhog-tunnel-name` and the key from the secret parameter
+`groundhog-tunnel-key`, so the AppHost code is the same for everyone:
+
+```csharp
+builder.AddProject<Projects.Web>("web").WithGroundhogTunnel();
+```
+
+Each developer sets `Parameters:groundhog-tunnel-name` and `Parameters:groundhog-tunnel-key` in the AppHost's user
+secrets; the Groundhog CLI's `groundhog create my-tunnel-dev1 --project AppHost/AppHost.csproj` writes both. On that
+developer's computer the `web-tunnel` resource's public address is `https://my-tunnel-dev1.groundhog.unifinity.com`.
+Pass `endpointName` by name, for example `WithGroundhogTunnel(endpointName: "http")`.
+
 When a gateway proxies to internal services, give those services the gateway's public address through service
 discovery, as with Aspire dev tunnels:
 
