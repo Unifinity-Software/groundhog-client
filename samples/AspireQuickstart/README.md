@@ -139,7 +139,7 @@ To correct the saved key, stop the sample, open **Manage User Secrets** on `AppH
 Add the package and one line to your AppHost:
 
 ```csharp
-builder.AddProject<Projects.MyApp_Web>("web").WithGroundhogTunnel("myapp");
+builder.AddProject<Projects.Web>("web").WithGroundhogTunnel("my-tunnel");
 ```
 
 See the [Aspire integration guide](../../docs/aspire.md). The tunnel forwards to the resource's `https` endpoint, or its `http` endpoint when it has no `https` one; pass `endpointName` to choose another. No fixed local port is necessary. This sample's web app has only an HTTP endpoint on loopback and is HTTPS publicly. Local HTTPS endpoints need a certificate trusted by your computer.

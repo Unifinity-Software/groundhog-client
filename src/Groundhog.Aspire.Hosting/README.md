@@ -20,19 +20,19 @@ Follow the [illustrated first-tunnel walkthrough](https://github.com/Unifinity-S
 for the website steps, exact fields, and the response that confirms success.
 
 ```csharp
-builder.AddProject<Projects.MyApp_Web>("web").WithGroundhogTunnel("myapp");
+builder.AddProject<Projects.Web>("web").WithGroundhogTunnel("my-tunnel");
 ```
 
 This adds a `web-tunnel` resource that forwards to the project's `https` endpoint (or `http` if it has none; pass
-`endpointName` to choose), and a secret parameter `groundhog-myapp-key`. Enter the key when the Aspire dashboard
-asks for it and enable **Save to user secrets** to remember it, or set `Parameters:groundhog-myapp-key` in the
+`endpointName` to choose), and a secret parameter `groundhog-my-tunnel-key`. Enter the key when the Aspire dashboard
+asks for it and enable **Save to user secrets** to remember it, or set `Parameters:groundhog-my-tunnel-key` in the
 AppHost's **Manage User Secrets** editor. Keep the key out of source control and shell history.
 
 Use `configure` to pass the public address to your app:
 
 ```csharp
-var web = builder.AddProject<Projects.MyApp_Web>("web");
-web.WithGroundhogTunnel("myapp", configure: tunnel =>
+var web = builder.AddProject<Projects.Web>("web");
+web.WithGroundhogTunnel("my-tunnel", configure: tunnel =>
     web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress));
 ```
 
@@ -50,8 +50,10 @@ serviceA.WithReference(apiGateway, apiGateway.GetGroundhogTunnel());
 
 When `service-a` starts, `services__api-gateway__https__0` is set to `https://my-tunnel.groundhog.unifinity.com` (HTTPS only).
 
-`AddGroundhogTunnel("tunnel", "myapp", key).WithReference(endpoint)` is the explicit form, for choosing the resource
-name or key parameter yourself; its tunnel name can also be a parameter.
+`AddGroundhogTunnel("web-tunnel", "my-tunnel", tunnelKey).WithReference(endpoint)` is the explicit form, for choosing
+the resource name or key parameter yourself. `"web-tunnel"` is the resource name in the Aspire dashboard, `"my-tunnel"`
+is the tunnel's name in Groundhog (its public host is `my-tunnel.groundhog.unifinity.com`), and `tunnelKey` is a secret
+parameter holding the connection key copied when the tunnel was created. The tunnel name can also be a parameter.
 
 - The key must be a secret parameter; it's handed to the agent in memory and never shown on a command line, in the
   dashboard or in a log.
@@ -59,7 +61,7 @@ name or key parameter yourself; its tunnel name can also be a parameter.
   the reason.
 - A stopped tunnel has a **Reconnect** command in the dashboard. It resolves the current settings again and starts
   a new agent without restarting the AppHost. Active tunnels cannot be restarted with this command.
-- `PublicAddress` (for example `https://myapp.groundhog.unifinity.com`) and `PublicHost` (`myapp.groundhog.unifinity.com`)
+- `PublicAddress` (for example `https://my-tunnel.groundhog.unifinity.com`) and `PublicHost` (`my-tunnel.groundhog.unifinity.com`)
   can be passed to `WithEnvironment` or used in a `ReferenceExpression`.
 - Nothing waits for the tunnel unless it opts in with `WaitFor`, so an unreachable service never stops your app from
   starting locally.
@@ -69,12 +71,12 @@ name or key parameter yourself; its tunnel name can also be a parameter.
 Declare who may visit the tunnel (anyone, workspace members, API keys, IP ranges, per path) in the AppHost:
 
 ```csharp
-builder.AddProject<Projects.MyApp_Web>("web")
-    .WithGroundhogTunnel("myapp", access => access
+builder.AddProject<Projects.Web>("web")
+    .WithGroundhogTunnel("my-tunnel", access => access
         .Allow(VisitorAllow.Members)
         .Path("/webhooks", VisitorAllow.Anyone)
         .IpRange("203.0.113.0/24")
-        .ApiKey(builder.AddParameter("myapp-api-key", secret: true)));
+        .ApiKey(builder.AddParameter("my-tunnel-api-key", secret: true)));
 ```
 
 Rules are checked when the AppHost is built and sent on every connection. API keys are what callers send to reach a
@@ -86,7 +88,7 @@ sent. The explicit form uses `tunnel.WithVisitorAccess(access => ...)`.
 Add `.WithRequestLogging()` to the tunnel builder to write completed requests to its Aspire console:
 
 ```csharp
-web.WithGroundhogTunnel("myapp", configure: tunnel => tunnel.WithRequestLogging());
+web.WithGroundhogTunnel("my-tunnel", configure: tunnel => tunnel.WithRequestLogging());
 ```
 
 Lines look like `GET /api/health 200 12 ms` or `WS /socket 101 850 ms`. WebSockets are reported when they close.

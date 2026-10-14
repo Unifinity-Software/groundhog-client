@@ -25,18 +25,18 @@ dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.3
 ```
 
 ```csharp
-builder.AddProject<Projects.MyApp_Web>("web").WithGroundhogTunnel("myapp");
+builder.AddProject<Projects.Web>("web").WithGroundhogTunnel("my-tunnel");
 ```
 
-`myapp` is the tunnel name you created. This adds a `web-tunnel` resource and a secret parameter,
-`groundhog-myapp-key`. Enter the connection key when the Aspire dashboard asks for it, or set
-`Parameters:groundhog-myapp-key` in the AppHost's user secrets. Turn on **Save to user secrets** in the prompt if you
+`my-tunnel` is the tunnel name you created. This adds a `web-tunnel` resource and a secret parameter,
+`groundhog-my-tunnel-key`. Enter the connection key when the Aspire dashboard asks for it, or set
+`Parameters:groundhog-my-tunnel-key` in the AppHost's user secrets. Turn on **Save to user secrets** in the prompt if you
 want Aspire to remember it on this computer; user secrets are outside the repository and are not encrypted.
 To pass the public address to your app:
 
 ```csharp
-var web = builder.AddProject<Projects.MyApp_Web>("web");
-web.WithGroundhogTunnel("myapp", configure: tunnel =>
+var web = builder.AddProject<Projects.Web>("web");
+web.WithGroundhogTunnel("my-tunnel", configure: tunnel =>
     web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress));
 ```
 
@@ -48,7 +48,7 @@ does not discover this package.
 
 ```text
 dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.3
-groundhog host myapp --port 5173
+groundhog host my-tunnel --port 5173
 ```
 
 Run `groundhog` for a full-screen terminal app: a menu with live previews, tunnel and local-agent dashboards, in-frame
