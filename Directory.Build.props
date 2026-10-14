@@ -21,7 +21,7 @@
   -->
   <PropertyGroup>
     <VersionPrefix>0.4.0</VersionPrefix>
-    <VersionSuffix>preview.3</VersionSuffix>
+    <VersionSuffix>preview.6</VersionSuffix>
     <Authors>Unifinity Software Corporation</Authors>
     <Company>Unifinity Software Corporation</Company>
     <Copyright>Copyright (c) Unifinity Software Corporation</Copyright>

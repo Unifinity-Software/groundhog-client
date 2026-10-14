@@ -4,7 +4,7 @@ Groundhog provides a full-screen terminal app, live tunnel dashboards and comman
 Requires .NET 10 and the ASP.NET Core runtime (both are included with the SDK).
 
 ```sh
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.3
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.6
 groundhog
 ```
 

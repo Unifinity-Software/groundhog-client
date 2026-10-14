@@ -11,7 +11,7 @@ This repository owns the MIT-licensed developer clients: the Aspire integration,
 
 ## Aspire
 
-The setup below uses **0.4.0-preview.3**.
+The setup below uses **0.4.0-preview.6**.
 
 Before running a client, [sign in to Groundhog](https://groundhog.unifinity.com) and create your free workspace.
 Follow [Create your free workspace](https://groundhog.unifinity.com/docs/workspace), then
@@ -21,7 +21,7 @@ key private while you configure your app. Your workspace address is a dashboard 
 Requires .NET 10 and Aspire 13.6.1 or later. In your AppHost directory:
 
 ```text
-dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.3
+dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.6
 ```
 
 ```csharp
@@ -47,7 +47,7 @@ does not discover this package.
 ## CLI
 
 ```text
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.3
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.6
 groundhog host my-tunnel --port 5173
 ```
 

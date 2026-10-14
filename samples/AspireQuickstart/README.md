@@ -2,8 +2,8 @@
 
 Run a small web app on your computer and open it through a public HTTPS address. Groundhog runs inside the Aspire AppHost: you do not need to install the Groundhog CLI or host a backend.
 
-This walkthrough targets **0.4.0-preview.3**. If that version has not appeared on NuGet yet, use the
-[previous release's walkthrough](https://github.com/Unifinity-Software/groundhog-client/tree/agent-v0.3.0-preview.3/samples/AspireQuickstart) until publication completes.
+This walkthrough targets **0.4.0-preview.6**. If that version has not appeared on NuGet yet, use the
+[previous release's walkthrough](https://github.com/Unifinity-Software/groundhog-client/tree/agent-v0.4.0-preview.5/samples/AspireQuickstart) until publication completes.
 
 ## 1. Check your tools
 
@@ -35,11 +35,11 @@ Clone this repository, or download its ZIP from GitHub's **Code** menu and extra
 ```text
 git clone https://github.com/Unifinity-Software/groundhog-client.git
 cd groundhog-client
-git switch --detach agent-v0.4.0-preview.3
+git switch --detach agent-v0.4.0-preview.6
 cd samples/AspireQuickstart
 ```
 
-For a ZIP, download the **[0.4.0-preview.3 ZIP](https://github.com/Unifinity-Software/groundhog-client/archive/refs/tags/agent-v0.4.0-preview.3.zip)** rather than the default branch, extract it, and open a terminal in its `samples/AspireQuickstart` folder. You should see the `AppHost` and `Web` folders. This sample installs the integration from NuGet; its only project reference is the example web app.
+For a ZIP, download the **[0.4.0-preview.6 ZIP](https://github.com/Unifinity-Software/groundhog-client/archive/refs/tags/agent-v0.4.0-preview.6.zip)** rather than the default branch, extract it, and open a terminal in its `samples/AspireQuickstart` folder. You should see the `AppHost` and `Web` folders. This sample installs the integration from NuGet; its only project reference is the example web app.
 
 ## 4. Put your tunnel name in the AppHost
 
@@ -107,8 +107,8 @@ The app will stop serving through the public address. Starting the sample again 
 
 | What you see | What to do |
 | --- | --- |
-| `NU1102`, or NuGet only finds an older preview | Check that 0.4.0-preview.3 is published. If it is still being released, use the previous release's walkthrough linked above. Otherwise refresh the cached response with the restore command below. |
-| Aspire asks for `groundhog-name`, `groundhog-key` or `groundhog-relay` | You are running an older sample. Stop it and switch to the 0.4.0-preview.3 checkout from step 3. Updating a NuGet cache alone does not update your sample's AppHost source. |
+| `NU1102`, or NuGet only finds an older preview | Check that 0.4.0-preview.6 is published. If it is still being released, use the previous release's walkthrough linked above. Otherwise refresh the cached response with the restore command below. |
+| Aspire asks for `groundhog-name`, `groundhog-key` or `groundhog-relay` | You are running an older sample. Stop it and switch to the 0.4.0-preview.6 checkout from step 3. Updating a NuGet cache alone does not update your sample's AppHost source. |
 | The tunnel rejects the credentials | Check that the name in `AppHost/Program.cs` matches the website and the key belongs to that tunnel. A regenerated key replaces the previous key. Correct the saved key and restart the sample. |
 | The tunnel stays Connecting or Reconnecting | Check your internet connection and the tunnel's console logs in Aspire. The local app can run while Groundhog is unreachable. |
 | The public URL does not return the JSON | Confirm both `web` and `web-tunnel` are Running, that you opened this tunnel's public address, and that the AppHost is still running. Check the tunnel console for the request and any forwarding error. |
@@ -117,16 +117,16 @@ To run this version alongside an existing Git checkout, first stop the running s
 
 ```text
 git fetch origin --tags
-git worktree add ../groundhog-quickstart-0.4 agent-v0.4.0-preview.3
+git worktree add ../groundhog-quickstart-0.4 agent-v0.4.0-preview.6
 cd ../groundhog-quickstart-0.4/samples/AspireQuickstart
 aspire start --apphost AppHost/AppHost.csproj
 ```
 
 This leaves your old branch, local edits, and `aspire.config.json` untouched. The sample uses the same AppHost user-secrets ID, so a key you saved stays on your computer. Use the explicit `--apphost` path above rather than copying the old Aspire configuration. If the new folder already exists, open it or choose a different unused folder name.
 
-For a ZIP checkout, extract a fresh copy from the 0.4.0-preview.3 tag. Confirm you start the AppHost in that new folder; an old terminal or shortcut can still point at an earlier copy. Do not copy connection keys into the new source folder.
+For a ZIP checkout, extract a fresh copy from the 0.4.0-preview.6 tag. Confirm you start the AppHost in that new folder; an old terminal or shortcut can still point at an earlier copy. Do not copy connection keys into the new source folder.
 
-If 0.4.0-preview.3 is published but NuGet returns an older cached result, run:
+If 0.4.0-preview.6 is published but NuGet returns an older cached result, run:
 
 ```powershell
 dotnet restore AppHost/AppHost.csproj --source https://api.nuget.org/v3/index.json --no-http-cache

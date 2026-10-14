@@ -15,12 +15,12 @@ once it's connected (reconnecting, what your app sees).
 
 ## Install
 
-This guide uses **0.4.0-preview.3**.
+This guide uses **0.4.0-preview.6**.
 
 Add the `Groundhog.Aspire.Hosting` package to the AppHost project from nuget.org:
 
 ```
-dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.3
+dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.6
 ```
 
 It needs Aspire 13.6.1 or later and .NET 10. The complete runnable package consumer is
@@ -208,7 +208,7 @@ On the same developer's computer, `tunnelName` is `my-tunnel-dev1` and `webTunne
 
 When a gateway (for example YARP) proxies to internal services and only the gateway has a tunnel, the internal
 services can get the gateway's public address through service discovery with `WithReference(target, tunnel)`, the
-same shape as Aspire's dev tunnels (available from 0.4.0-preview.6). Here `api-gateway` sits in front of `service-a` and
+same shape as Aspire's dev tunnels. Here `api-gateway` sits in front of `service-a` and
 `service-b`, and the tunnel is named `my-tunnel`:
 
 ```csharp
