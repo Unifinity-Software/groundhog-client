@@ -40,15 +40,15 @@ When a gateway proxies to internal services, give those services the gateway's p
 discovery, as with Aspire dev tunnels:
 
 ```csharp
-var media = builder.AddProject<Projects.Media>("media");
+var serviceA = builder.AddProject<Projects.ServiceA>("service-a");
 var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway")
-    .WithReference(media)
+    .WithReference(serviceA)
     .WithGroundhogTunnel("my-tunnel");
 
-media.WithReference(apiGateway, apiGateway.GetGroundhogTunnel());
+serviceA.WithReference(apiGateway, apiGateway.GetGroundhogTunnel());
 ```
 
-When `media` starts, `services__api-gateway__https__0` is set to `https://my-tunnel.groundhog.unifinity.com` (HTTPS only).
+When `service-a` starts, `services__api-gateway__https__0` is set to `https://my-tunnel.groundhog.unifinity.com` (HTTPS only).
 
 `AddGroundhogTunnel("tunnel", "myapp", key).WithReference(endpoint)` is the explicit form, for choosing the resource
 name or key parameter yourself; its tunnel name can also be a parameter.

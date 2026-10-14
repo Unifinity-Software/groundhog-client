@@ -132,27 +132,27 @@ committed settings files: a shared tunnel name makes every developer take the sa
 
 When a gateway (for example YARP) proxies to internal services and only the gateway has a tunnel, the internal
 services can get the gateway's public address through service discovery with `WithReference(target, tunnel)`, the
-same shape as Aspire's dev tunnels (available from 0.4.0-preview.6). Here `api-gateway` sits in front of `media` and
-`provisioning`, and the tunnel is named `my-tunnel`:
+same shape as Aspire's dev tunnels (available from 0.4.0-preview.6). Here `api-gateway` sits in front of `service-a` and
+`service-b`, and the tunnel is named `my-tunnel`:
 
 ```csharp
 var tunnelKey = builder.AddParameter("groundhog-tunnel-key", secret: true);
 
-var media = builder.AddProject<Projects.Media>("media");
-var provisioning = builder.AddProject<Projects.Provisioning>("provisioning");
+var serviceA = builder.AddProject<Projects.ServiceA>("service-a");
+var serviceB = builder.AddProject<Projects.ServiceB>("service-b");
 
 var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway")
-    .WithReference(media)
-    .WithReference(provisioning);
+    .WithReference(serviceA)
+    .WithReference(serviceB);
 
 var apiGatewayTunnel = builder.AddGroundhogTunnel("api-gateway-tunnel", "my-tunnel", tunnelKey)
     .WithReference(apiGateway.GetEndpoint("https"));
 
-media.WithReference(apiGateway, apiGatewayTunnel);
-provisioning.WithReference(apiGateway, apiGatewayTunnel);
+serviceA.WithReference(apiGateway, apiGatewayTunnel);
+serviceB.WithReference(apiGateway, apiGatewayTunnel);
 ```
 
-`media` and `provisioning` each get `services__api-gateway__https__0=https://my-tunnel.groundhog.unifinity.com`, so
+`service-a` and `service-b` each get `services__api-gateway__https__0=https://my-tunnel.groundhog.unifinity.com`, so
 `https://api-gateway` and `https+http://api-gateway` resolve to the public address. Only an `https` entry is set: the
 public address is always HTTPS. The value is resolved when each service starts, as described below, and neither
 waits for the tunnel. The tunnel must forward to the referenced resource; another target is refused when the AppHost
@@ -162,14 +162,14 @@ With `WithGroundhogTunnel`, get the tunnel it added with `GetGroundhogTunnel()`:
 
 ```csharp
 var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway")
-    .WithReference(media)
-    .WithReference(provisioning)
+    .WithReference(serviceA)
+    .WithReference(serviceB)
     .WithGroundhogTunnel("my-tunnel");
 
 var apiGatewayTunnel = apiGateway.GetGroundhogTunnel();
 
-media.WithReference(apiGateway, apiGatewayTunnel);
-provisioning.WithReference(apiGateway, apiGatewayTunnel);
+serviceA.WithReference(apiGateway, apiGatewayTunnel);
+serviceB.WithReference(apiGateway, apiGatewayTunnel);
 ```
 
 `GetGroundhogTunnel()` fails if no tunnel, or more than one, forwards to the resource.
