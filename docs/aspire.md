@@ -15,12 +15,12 @@ once it's connected (reconnecting, what your app sees).
 
 ## Install
 
-This guide uses **0.4.0-preview.6**.
+This guide uses **0.4.0-preview.7**.
 
 Add the `Groundhog.Aspire.Hosting` package to the AppHost project from nuget.org:
 
 ```
-dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.6
+dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.7
 ```
 
 It needs Aspire 13.6.1 or later and .NET 10. The complete runnable package consumer is
@@ -136,7 +136,9 @@ groundhog key copy my-tunnel-dev1 --project AppHost/AppHost.csproj
 
 A tunnel created in the Groundhog dashboard or on another computer has no saved key here.
 `groundhog key rotate my-tunnel-dev1 --project AppHost/AppHost.csproj` makes a new key and writes both values; anything
-still using the old key disconnects.
+still using the old key disconnects. To replace a key that other computers or deployments still use without
+disconnecting them, run `groundhog key add my-tunnel-dev1 --project AppHost/AppHost.csproj` instead: the old key keeps
+working until you revoke it (see [Rotate a connection key without downtime](cli.md#rotate-a-connection-key-without-downtime)).
 
 Or save them with `dotnet user-secrets`, from the AppHost project folder. In PowerShell, the key is read at a hidden
 prompt so it stays out of shell history:

@@ -6,8 +6,23 @@ namespace Groundhog.Cli;
 
 internal sealed record WorkspaceInfo(string Slug, string Name, string Role);
 internal sealed record AccountInfo(string DisplayName, string Email, WorkspaceInfo[] Workspaces);
+/// <summary>
+/// A remote tunnel as the relay describes it. <c>Keys</c> lists its live connection keys, oldest first; it's null from a
+/// relay that doesn't report them, which is unknown rather than none.
+/// </summary>
 internal sealed record TunnelInfo(string Name, string Url, string State, DateTimeOffset Since,
-    long RequestsLastMinute, long RequestsLastHour, long BytesInToday, long BytesOutToday, string[] Actions);
+    long RequestsLastMinute, long RequestsLastHour, long BytesInToday, long BytesOutToday, string[] Actions,
+    ConnectionKeyInfo[]? Keys = null);
+
+/// <summary>
+/// One live connection key of a tunnel. The relay never returns the key itself, and the ID can't be worked out from the
+/// key, so the CLI can't tell which of these is the key saved on this computer.
+/// </summary>
+/// <param name="Id">The key's ID: 32 lowercase hexadecimal characters.</param>
+/// <param name="CreatedAt">When the key was made.</param>
+/// <param name="LastUsedAt">When an agent last connected with the key; null if none has.</param>
+/// <param name="Connected">Whether an agent is connected with the key now.</param>
+internal sealed record ConnectionKeyInfo(string Id, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt, bool Connected);
 internal sealed record TunnelCreated(TunnelInfo Tunnel, string ConnectionKey)
 {
     public override string ToString() => "Tunnel created (key hidden)";

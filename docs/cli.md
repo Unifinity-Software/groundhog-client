@@ -4,7 +4,7 @@ Groundhog provides a full-screen terminal app, live tunnel dashboards and comman
 Requires .NET 10 and the ASP.NET Core runtime (both are included with the SDK).
 
 ```sh
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.6
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.7
 groundhog
 ```
 
@@ -81,12 +81,13 @@ The tunnel dashboard lists the actions your role permits:
 | C | Copy the public URL through your terminal's clipboard support (OSC 52); the address is shown either way |
 | H | Host the tunnel from this machine: enter the local target, then the live view opens |
 | N | Rename (asks for the new name) |
+| A | Add a second connection key and save it on this machine; agents using the old key stay connected |
 | K | Rotate the connection key and save the new one on this machine |
 | X | Revoke every key |
 | D | Delete |
 
-Rotate, revoke and delete ask for confirmation inside the frame; Y confirms and N or Esc cancels. Each action runs the
-same code as its command (`open`, `rename`, `key rotate`, `key revoke`, `delete`), so permissions, saved keys and
+Add key, rotate, revoke and delete ask for confirmation inside the frame; Y confirms and N or Esc cancels. Each action
+runs the same code as its command (`open`, `rename`, `key add`, `key rotate`, `key revoke`, `delete`), so permissions, saved keys and
 messages are identical.
 
 ![Deleting a tunnel asks first](images/cli-confirm.png)
@@ -181,7 +182,7 @@ groundhog host myapp --target https://localhost:7132
 ```
 
 Supply an existing tunnel's key through `GROUNDHOG_KEY`. Login does not retrieve existing one-time connection keys.
-Keys created or rotated through this CLI are saved securely and are used when the selected workspace matches.
+Keys created, added or rotated through this CLI are saved securely and are used when the selected workspace matches.
 An explicit `--key` or `GROUNDHOG_KEY` takes precedence. A saved key is never sent to a different service address.
 
 ![Live hosting dashboard with requests, status classes and connection events](images/cli-session.png)
@@ -405,23 +406,84 @@ Use `--output json` for read commands, `--no-interactive` to disable the app and
 ```sh
 groundhog create myapp
 groundhog rename myapp demo
+groundhog key add demo
+groundhog key list demo
 groundhog key rotate demo
 groundhog key revoke demo
 groundhog delete demo
 groundhog open demo
 ```
 
-Mutations use the same workspace permissions as the website. Create and rotate save their one-time key locally without
-printing it. Rename moves a CLI-saved key to the new name, but you must update [saved profiles](#saved-profiles) and app callback URLs.
+Mutations use the same workspace permissions as the website. `create`, `key add` and `key rotate` save their one-time
+key locally without printing it. Rename moves a CLI-saved key to the new name, but you must update [saved profiles](#saved-profiles) and app callback URLs.
 Rename, deletion, rotation and revocation can disconnect agents; the CLI asks for confirmation. Scripts must pass `--yes`.
-Revocation removes all live keys for the tunnel. Rotation saves a replacement key; restart hosting to use it.
+`key add` and `key list` disconnect nothing and don't ask. `key revoke <name>` removes all live keys for the tunnel, and
+`key revoke <name> <key-id>` removes one. Rotation replaces every key with a new one; restart hosting to use it.
+
+### Rotate a connection key without downtime
+
+A tunnel can have two live connection keys at once. `key rotate` replaces every key and disconnects agents immediately,
+so the public address stops answering until hosting restarts. To replace a key while the app stays reachable, add a
+second key, move hosting to it, and then revoke the old key. Run these steps on the computer that hosts the tunnel:
+the new key is saved there and never printed.
+
+First, add a key. Agents already connected keep using the old key, which keeps working until you revoke it:
+
+```sh
+groundhog key add my-tunnel
+```
+
+The new key is saved on this computer for `groundhog host my-tunnel`, replacing the key saved there before. If
+`my-tunnel` already has two live keys, the command stops with
+`A tunnel has at most 2 connection keys. Revoke one first` and changes nothing. If the AppHost reads the tunnel from
+[user secrets](#put-a-tunnel-in-an-aspire-apphosts-user-secrets), add `--project` so the new key is written there too:
+
+```sh
+groundhog key add my-tunnel --project AppHost/AppHost.csproj
+```
+
+`Parameters:groundhog-tunnel-name` is `my-tunnel` and `Parameters:groundhog-tunnel-key` is the new key.
+
+Next, restart hosting so the agent connects with the new key: stop `groundhog host my-tunnel` and run it again, run
+`groundhog restart <saved-profile>` for a background agent, or restart the AppHost. Hosting that passes the old key
+through `GROUNDHOG_KEY` or `--key` keeps using it, because those take precedence over the saved key.
+
+Then check which key each agent uses. Revoking a key disconnects every agent that still uses it, so make sure none do:
+
+```sh
+groundhog key list my-tunnel
+```
+
+```text
+ID                                Created (UTC)     Last used (UTC)   Connected
+0123456789abcdef0123456789abcdef  2026-10-01 09:00  2026-10-14 08:55  No
+fedcba9876543210fedcba9876543210  2026-10-14 09:00  2026-10-14 09:02  Yes
+```
+
+Keys are listed oldest first, so the first row is the old key. Its `Connected` column is `No`: no agent uses it any
+more. The new key, `fedcba9876543210fedcba9876543210`, is `Yes`. A key no agent has used shows `Never` under
+`Last used (UTC)`. `--output json` prints the same keys as JSON.
+
+Finally, revoke the old key by its ID. The CLI asks for confirmation; scripts pass `--yes`:
+
+```sh
+groundhog key revoke my-tunnel 0123456789abcdef0123456789abcdef
+```
+
+The CLI prints `Key 01234567 revoked. Agents that used it were disconnected.` The new key keeps working and stays
+saved on this computer. A key's ID can't be worked out from the key itself, so revoking one key never removes the key
+saved here.
+
+If a key may be compromised, use `groundhog key rotate my-tunnel` instead: it revokes every key and disconnects all
+agents at once, so nobody can keep using the old key while you switch. A relay that doesn't support two keys yet
+answers `key add` with `This relay doesn't support adding keys yet`; use `key rotate` there.
 
 ### Put a tunnel in an Aspire AppHost's user secrets
 
 On a team, each developer hosts the same Aspire AppHost through their own tunnel. In the AppHost,
 `WithGroundhogTunnel()` without a tunnel name reads the tunnel's name and connection key from the parameters
 `groundhog-tunnel-name` and `groundhog-tunnel-key` (see [one tunnel per developer](aspire.md#one-tunnel-per-developer)). Add `--project` with the AppHost's project file to
-`create` or `key rotate`, and the CLI writes both values into that project's .NET user secrets:
+`create`, `key add` or `key rotate`, and the CLI writes both values into that project's .NET user secrets:
 
 ```sh
 groundhog create my-tunnel-dev1 --project AppHost/AppHost.csproj
@@ -441,7 +503,8 @@ groundhog key copy my-tunnel-dev1 --project AppHost/AppHost.csproj
 
 `key copy` sets the same two values as `create --project`. A tunnel created in the Groundhog dashboard or on another
 computer has no saved key here, and the service never returns an existing key. For that tunnel, rotate the key; anything
-still using the old key disconnects:
+still using the old key disconnects. To keep the old key working while you switch, use `key add` instead, as in
+[rotate a connection key without downtime](#rotate-a-connection-key-without-downtime):
 
 ```sh
 groundhog key rotate my-tunnel-dev1 --project AppHost/AppHost.csproj

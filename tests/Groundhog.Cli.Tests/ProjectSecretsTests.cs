@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace Groundhog.Cli.Tests;
 
 /// <summary>
-/// <c>create</c>, <c>key rotate</c> and <c>key copy</c> with <c>--project</c>: the tunnel name and connection key go into
+/// <c>create</c>, <c>key add</c>, <c>key rotate</c> and <c>key copy</c> with <c>--project</c>: the tunnel name and connection key go into
 /// an AppHost's user secrets, under a temporary folder instead of the real user profile.
 /// </summary>
 public sealed class ProjectSecretsTests : IDisposable
@@ -113,6 +113,20 @@ public sealed class ProjectSecretsTests : IDisposable
     }
 
     [Fact]
+    public async Task Key_add_with_project_writes_the_added_key()
+    {
+        var output = new StringWriter();
+        Assert.Equal(0, await RunAsync(output, "key", "add", "my-tunnel-dev1", "--project", ProjectFile));
+
+        var secrets = ReadSecrets();
+        Assert.Equal("added-key", secrets["Parameters:groundhog-tunnel-key"].GetString());
+        Assert.Equal("my-tunnel-dev1", secrets["Parameters:groundhog-tunnel-name"].GetString());
+        Assert.Equal("added-key", _store.Read()!.TunnelKeys["example/my-tunnel-dev1"]);
+        Assert.Equal(["POST /api/w/example/tunnels/my-tunnel-dev1/keys"], _requests);
+        Assert.DoesNotContain("added-key", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Parameter_options_without_project_are_rejected()
     {
         var keyOnly = await Assert.ThrowsAsync<UsageException>(() =>
@@ -175,7 +189,7 @@ public sealed class ProjectSecretsTests : IDisposable
     private Dictionary<string, JsonElement> ReadSecrets() =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllText(SecretsFile))!;
 
-    /// <summary>Answers create and rotate-key; every request is recorded as "METHOD /path".</summary>
+    /// <summary>Answers create, key add and rotate-key; every request is recorded as "METHOD /path".</summary>
     private sealed class Transport(List<string> requests) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -194,7 +208,9 @@ public sealed class ProjectSecretsTests : IDisposable
                 bytesOutToday = 0,
                 actions = Array.Empty<string>(),
             };
-            var connectionKey = path.EndsWith("/rotate-key", StringComparison.Ordinal) ? "rotated-key" : "created-key";
+            var connectionKey = path.EndsWith("/rotate-key", StringComparison.Ordinal) ? "rotated-key"
+                : path.EndsWith("/keys", StringComparison.Ordinal) ? "added-key"
+                : "created-key";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(new { tunnel, connectionKey }) });
         }
 

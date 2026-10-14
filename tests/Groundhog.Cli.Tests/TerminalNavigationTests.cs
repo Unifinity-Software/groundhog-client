@@ -143,6 +143,19 @@ public sealed class TerminalNavigationTests
     }
 
     [Fact]
+    public async Task Adding_a_key_confirms_in_the_frame_and_runs_key_add_without_yes()
+    {
+        var services = new FakeServices();
+        var keys = new ScriptedKeys().Press(ConsoleKey.D2, ConsoleKey.Enter, ConsoleKey.A, ConsoleKey.Y, ConsoleKey.Q);
+        var (app, frames) = await RunAsync(keys, services);
+
+        Assert.Equal(["key", "add", "myapp", "--workspace", "web-team"], Assert.Single(services.Commands));
+        var confirm = Harness.Text(frames.Last(f => f.Screen == "Confirm").Frame, 120, 36);
+        Assert.Contains("Add a key for myapp?", confirm, StringComparison.Ordinal);
+        Assert.Contains("Agents already connected stay connected", confirm, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Declining_a_confirmation_runs_nothing()
     {
         var services = new FakeServices();
