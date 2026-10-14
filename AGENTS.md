@@ -20,3 +20,6 @@ These apply to docs, code comments, commit messages, pull request descriptions a
   "Variable name reference", not "Names used in every example".
 - Keep names continuous across examples. Once an example names something (`my-tunnel`, `apiGateway`), every later
   snippet on that page uses the same name, and no snippet uses a variable it hasn't declared.
+- Write a code example in this order: why the reader needs it, then the code, then the values it produces. Readers
+  can't hover over a variable the way they would in an IDE, so after the code say what each variable the reader
+  will use holds, for example "`webhookCallback` is `https://my-tunnel.groundhog.unifinity.com/webhooks`."
