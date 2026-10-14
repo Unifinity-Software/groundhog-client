@@ -15,7 +15,9 @@ dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.7
 Use `dotnet add package` for this integration. Aspire CLI integration discovery currently accepts the
 `Aspire.Hosting.*` and `CommunityToolkit.Aspire.Hosting.*` prefixes, so `aspire add` does not discover this package.
 
-Create a tunnel in the Groundhog website and copy its connection key. The hosted service address is automatic.
+Before connecting, [create your free workspace](https://groundhog.unifinity.com/docs/workspace) and
+[create a tunnel](https://groundhog.unifinity.com/docs/create-tunnel). Keep its name and connection key ready;
+use the name in place of `my-tunnel` below. The hosted service address is automatic.
 Follow the [illustrated first-tunnel walkthrough](https://github.com/Unifinity-Software/groundhog-client/blob/master/samples/AspireQuickstart/README.md)
 for the website steps, exact fields, and the response that confirms success.
 

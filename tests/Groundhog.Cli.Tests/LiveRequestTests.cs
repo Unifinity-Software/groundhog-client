@@ -116,7 +116,7 @@ public sealed class LiveRequestTests
                 ["requests", "myapp", "--remote", "--follow", "--status", "5xx"], output, new StringWriter(), stop.Token, store,
                 (relay, token) => new(relay, token, handler)));
 
-            var text = output.ToString();
+            var text = output.ToString().ReplaceLineEndings("\n");
             Assert.Contains("Following live requests", text, StringComparison.Ordinal);
             // After the snapshot, only new matching requests are printed: not the logged one again, not a 200.
             var followed = text[text.IndexOf("Following live requests", StringComparison.Ordinal)..].Split('\n')[1..]
