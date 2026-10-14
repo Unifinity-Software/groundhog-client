@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using Groundhog.Agent;
 using Groundhog.Cli.Interactive;
@@ -39,10 +41,11 @@ internal static class RemoteCommands
             throw new ArgumentException("Unsupported output format.");
         }
 
-        // Checked before anything changes on the service: a project without user secrets fails before create or rotate.
+        // Checked before anything changes on the service: a project without user secrets fails before create, key add or
+        // key rotate.
         var keyCopy = args[0] == "key" && options.Positional is ["copy", ..];
         var projectSecrets = ProjectSecrets.FromOptions(
-            args[0] == "create" || (args[0] == "key" && options.Positional is ["rotate" or "copy", ..]),
+            args[0] == "create" || (args[0] == "key" && options.Positional is ["add" or "rotate" or "copy", ..]),
             options, userSecretsPath ?? ProjectSecrets.DefaultSecretsPath);
         if (keyCopy && projectSecrets is null)
         {
@@ -182,9 +185,14 @@ internal static class RemoteCommands
         var positional = options.Positional;
         if (args[0] == "key")
         {
-            if (positional is not ["rotate" or "revoke" or "copy", _])
+            if (positional is not (["add" or "list" or "rotate" or "revoke" or "copy", _] or ["revoke", _, _]))
             {
-                throw new UsageException("Use key rotate|revoke|copy <name>.");
+                throw new UsageException("Use key add|list|rotate|revoke|copy <name>, or key revoke <name> <key-id>.");
+            }
+
+            if (positional is ["revoke", _, var keyId] && !IsKeyId(keyId))
+            {
+                throw new UsageException($"A key ID is 32 lowercase hexadecimal characters. Run groundhog key list {Plain(positional[1])} to see them.");
             }
         }
         else if (args[0] == "rename")
@@ -246,7 +254,8 @@ internal static class RemoteCommands
             return CopyKey(session, workspaceSlug, name, projectSecrets!, output);
         }
 
-        if (args[0] is "delete" or "rename" or "key")
+        // Adding and listing keys disconnect nothing, so only the other key commands ask first.
+        if (args[0] is "delete" or "rename" || (args[0] == "key" && positional[0] is not ("add" or "list")))
         {
             if (!options.Has("--yes") && (!InteractiveCli.Available || !await AnsiConsole.PromptAsync(
                 new ConfirmationPrompt("This operation changes the remote tunnel and may disconnect its agent. Continue?") { DefaultValue = false }, cancellation)))
@@ -297,6 +306,39 @@ internal static class RemoteCommands
                 await client.SendAsync<object>(HttpMethod.Delete, path, null, cancellation);
                 session.TunnelKeys.Remove(KeyId(workspaceSlug, name)); store.Save(session);
                 output.WriteLine("Tunnel deleted."); break;
+            case "key" when positional[0] == "add":
+                var added = await AddKeyAsync(client, path, name, cancellation);
+                SaveKey(store, session, workspaceSlug, name, added.ConnectionKey);
+                output.WriteLine("Key added and saved securely on this computer, replacing the key saved here before.");
+                output.WriteLine("Agents already connected stay connected, and the old key keeps working until you revoke it.");
+                output.WriteLine($"Restart hosting with the new key, then run groundhog key list {Plain(name)} to find the old key's ID and " +
+                    $"groundhog key revoke {Plain(name)} <old key ID> to revoke it.");
+                projectSecrets?.Write(name, added.ConnectionKey, output);
+                break;
+            case "key" when positional[0] == "list":
+                var keys = (await client.SendAsync<TunnelInfo>(HttpMethod.Get, path, null, cancellation)).Keys
+                    ?? throw new ManagementException("This relay doesn't list connection keys yet.");
+                if (options.Get("--output") == "json")
+                {
+                    output.WriteLine(JsonSerializer.Serialize(keys));
+                }
+                else
+                {
+                    // Plain columns rather than a table, which shrinks to the terminal's width: key revoke takes the full ID, so
+                    // it's never truncated or wrapped.
+                    output.WriteLine($"{"ID",-34}{"Created (UTC)",-18}{"Last used (UTC)",-18}Connected");
+                    foreach (var key in keys)
+                    {
+                        output.WriteLine($"{Plain(key.Id),-34}{Minute(key.CreatedAt),-18}{(key.LastUsedAt is { } used ? Minute(used) : "Never"),-18}" +
+                            (key.Connected ? "Yes" : "No"));
+                    }
+                }
+                break;
+            case "key" when positional is ["revoke", _, var revokedId]:
+                await RevokeKeyAsync(client, path, name, revokedId, cancellation);
+                // The saved key stays: its ID can't be worked out from the key, so it may be the key that's still live.
+                output.WriteLine($"Key {revokedId[..8]} revoked. Agents that used it were disconnected.");
+                break;
             case "key":
                 if (positional[0] == "rotate")
                 {
@@ -328,8 +370,57 @@ internal static class RemoteCommands
 
     internal static string KeyId(string workspace, string name) => workspace + "/" + name;
 
+    private static string Minute(DateTimeOffset time) => time.UtcDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+
+    /// <summary>Whether <paramref name="value"/> has the form of a connection key ID: 32 lowercase hexadecimal characters.</summary>
+    private static bool IsKeyId(string value) => value.Length == 32 && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+
     /// <summary>
-    /// <c>key copy &lt;name&gt; --project</c>: writes the key that <c>create</c> or <c>key rotate</c> saved on this computer
+    /// <c>key add &lt;name&gt;</c>: makes a second live key. A relay without the keys route answers 404 or 405 for it, the
+    /// same 404 as for a tunnel that doesn't exist, so the tunnel is read to tell the two apart.
+    /// </summary>
+    private static async Task<TunnelCreated> AddKeyAsync(ManagementClient client, string path, string name, CancellationToken cancellation)
+    {
+        try
+        {
+            return await client.SendAsync<TunnelCreated>(HttpMethod.Post, path + "/keys", null, cancellation);
+        }
+        // Almost always the key limit; the relay also answers 409 when the tunnel changed during the request.
+        catch (ManagementException ex) when (ex.Status == HttpStatusCode.Conflict)
+        {
+            throw new ManagementException($"A tunnel has at most 2 connection keys. Revoke one first: groundhog key list {Plain(name)} " +
+                "shows their IDs.", ex.Status);
+        }
+        catch (ManagementException ex) when (ex.Status is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
+        {
+            _ = await client.SendAsync<TunnelInfo>(HttpMethod.Get, path, null, cancellation);
+            throw new ManagementException($"This relay doesn't support adding keys yet. groundhog key rotate {Plain(name)} makes a new key, " +
+                "but disconnects agents using the old key.", ex.Status);
+        }
+    }
+
+    /// <summary>
+    /// <c>key revoke &lt;name&gt; &lt;key-id&gt;</c>: revokes one key. A 404 means no such live key, or a relay without the
+    /// keys route; a tunnel without <c>keys</c> in its JSON comes from the older relay.
+    /// </summary>
+    private static async Task RevokeKeyAsync(ManagementClient client, string path, string name, string keyId, CancellationToken cancellation)
+    {
+        try
+        {
+            await client.SendAsync<TunnelInfo>(HttpMethod.Delete, path + "/keys/" + keyId, null, cancellation);
+        }
+        catch (ManagementException ex) when (ex.Status is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
+        {
+            var tunnel = await client.SendAsync<TunnelInfo>(HttpMethod.Get, path, null, cancellation);
+            throw tunnel.Keys is null || ex.Status == HttpStatusCode.MethodNotAllowed
+                ? new ManagementException($"This relay doesn't support revoking a single key yet. groundhog key revoke {Plain(name)} " +
+                    "revokes every key of the tunnel.", ex.Status)
+                : new ManagementException($"{Plain(name)} has no live key {keyId}. Run groundhog key list {Plain(name)} to see its keys.", ex.Status);
+        }
+    }
+
+    /// <summary>
+    /// <c>key copy &lt;name&gt; --project</c>: writes the key that <c>create</c>, <c>key add</c> or <c>key rotate</c> saved on this computer
     /// into the project's user secrets. Keys can't be read back from the service.
     /// </summary>
     private static int CopyKey(LoginSession? session, string workspace, string name, ProjectSecrets projectSecrets, TextWriter output)

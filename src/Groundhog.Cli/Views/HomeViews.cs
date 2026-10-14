@@ -215,7 +215,7 @@ internal static class HomeViews
         Group("Tunnel detail");
         Key("O  C", "Open the public URL · copy it");
         Key("H", "Host the tunnel from this machine");
-        Key("N  K  X  D", "Rename · rotate key · revoke keys · delete");
+        Key("N  A  K  X  D", "Rename · add key · rotate key · revoke keys · delete");
         Group("Live session");
         Key("1  2  3", "Overview · requests · statistics");
         Key("Esc  Q", "Stop hosting and return");

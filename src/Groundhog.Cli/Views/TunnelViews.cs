@@ -119,6 +119,7 @@ internal static class TunnelViews
 
         if (permitted.Contains("rotateKey"))
         {
+            keys.Add(Key("A", "add key"));
             keys.Add(Key("K", "rotate"));
         }
 

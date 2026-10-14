@@ -33,7 +33,8 @@ For a rotated key, update the key parameter through Manage User Secrets or your 
 `Parameters:groundhog-<tunnel name>-key` for `WithGroundhogTunnel("<tunnel name>")`,
 `Parameters:groundhog-tunnel-key` for `WithGroundhogTunnel()`, or the parameter you passed to `AddGroundhogTunnel`.
 `groundhog key rotate <tunnel name> --project <AppHost.csproj>` writes the rotated key to
-`Parameters:groundhog-tunnel-key`. After renaming a tunnel, change the name in `Program.cs`,
+`Parameters:groundhog-tunnel-key`; `groundhog key add` writes a second key there the same way and leaves the old
+key working until you revoke it with `groundhog key revoke <tunnel name> <key ID>`. After renaming a tunnel, change the name in `Program.cs`,
 `Parameters:groundhog-tunnel-name` or its name parameter; with `WithGroundhogTunnel("<tunnel name>")` the key
 parameter's name changes with it, so enter the key again. A quickstart sample that asks
 for `groundhog-name` or `groundhog-relay` is older source; installing a newer package does not rewrite `Program.cs`.
@@ -53,14 +54,14 @@ to the public host with `wss` and port 443; the local dev server still listens o
 
 ## Package restore and upgrades
 
-These guides use `0.4.0-preview.6`, published for CLI, Agent, Protocol and Aspire. For a stale feed response, run:
+These guides use `0.4.0-preview.7`, published for CLI, Agent, Protocol and Aspire. For a stale feed response, run:
 
 ```text
 dotnet restore --source https://api.nuget.org/v3/index.json --no-http-cache
 ```
 
 Run in the relevant project/sample directory and verify the selected version in its package reference or central
-versions file. For the tool, use `dotnet tool update --global Groundhog.Cli --version 0.4.0-preview.6`. Restart the
+versions file. For the tool, use `dotnet tool update --global Groundhog.Cli --version 0.4.0-preview.7`. Restart the
 client after updating and verify the public response again. Dashboard last-seen metadata is not proof of a current
 running version, and cached update hints may lag the feed.
 

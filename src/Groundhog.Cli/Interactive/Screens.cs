@@ -453,7 +453,7 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
             return Task.FromResult<Nav?>(Nav.Stay);
         }
 
-        if (_insight?.Tunnel is not { } tunnel || letter is not ('O' or 'C' or 'H' or 'N' or 'K' or 'X' or 'D'))
+        if (_insight?.Tunnel is not { } tunnel || letter is not ('O' or 'C' or 'H' or 'N' or 'A' or 'K' or 'X' or 'D'))
         {
             return Task.FromResult<Nav?>(null);
         }
@@ -485,6 +485,8 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
         var (action, verb) = letter switch
         {
             'N' => ("rename", "rename"),
+            // Adding a key needs the same role as rotating one.
+            'A' => ("rotateKey", "add keys for"),
             'K' => ("rotateKey", "rotate keys for"),
             'X' => ("revokeKey", "revoke keys for"),
             _ => ("delete", "delete"),
@@ -502,6 +504,11 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
                 newName => Task.FromResult(Nav.Replace(new BusyScreen($"Renaming {name} to {newName}…",
                     token => app.Services.RunAsync(["rename", name, newName, "--workspace", workspace, "--yes"], token),
                     result => result.Succeeded ? new Nav(2, new TunnelDetailScreen(workspace, newName), false) : Nav.Back)))),
+            'A' => new ConfirmScreen($"Add a key for {name}?",
+                "A second connection key is created and saved securely on this machine. Agents already connected stay connected and the old key keeps working until you revoke it; restart hosting to use the new key.",
+                "Add key", danger: false,
+                () => Task.FromResult(Nav.Replace(new BusyScreen($"Adding a key for {name}…",
+                    token => app.Services.RunAsync(["key", "add", name, "--workspace", workspace], token))))),
             'K' => new ConfirmScreen($"Rotate the key for {name}?",
                 "A new connection key is created and saved securely on this machine. Agents using the old key are disconnected; restart hosting to use the new key.",
                 "Rotate key", danger: false,

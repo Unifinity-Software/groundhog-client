@@ -8,7 +8,7 @@ using Microsoft.Extensions.Configuration.UserSecrets;
 namespace Groundhog.Cli;
 
 /// <summary>
-/// The <c>--project</c> option of <c>create</c>, <c>key rotate</c> and <c>key copy</c>: writes the tunnel's name and
+/// The <c>--project</c> option of <c>create</c>, <c>key add</c>, <c>key rotate</c> and <c>key copy</c>: writes the tunnel's name and
 /// connection key into a .NET project's user secrets, where an Aspire AppHost reads them as the parameters
 /// <c>groundhog-tunnel-name</c> and <c>groundhog-tunnel-key</c>. The key is written to <c>secrets.json</c> directly, so it
 /// never appears on a command line.
@@ -62,7 +62,7 @@ internal sealed class ProjectSecrets
     /// Checks the project's <c>UserSecretsId</c> and its existing <c>secrets.json</c> now, so a problem stops the command
     /// before it changes the tunnel.
     /// </summary>
-    /// <param name="supported">Whether the command takes <c>--project</c> (create, key rotate and key copy).</param>
+    /// <param name="supported">Whether the command takes <c>--project</c> (create, key add, key rotate and key copy).</param>
     /// <param name="options">The command's options.</param>
     /// <param name="secretsPath">Maps a <c>UserSecretsId</c> to its <c>secrets.json</c>; tests point it at a temporary folder.</param>
     internal static ProjectSecrets? FromOptions(bool supported, Options options, Func<string, string> secretsPath)
@@ -82,7 +82,7 @@ internal sealed class ProjectSecrets
 
         if (!supported)
         {
-            throw new UsageException("--project only works with create, key rotate and key copy.");
+            throw new UsageException("--project only works with create, key add, key rotate and key copy.");
         }
 
         nameParameter ??= DefaultNameParameter;
