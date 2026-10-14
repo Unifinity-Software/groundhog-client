@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.Publishing;
 using Groundhog.Agent;
 using Groundhog.Aspire.Hosting;
 using Groundhog.Aspire.Hosting.Internal;
@@ -12,6 +13,13 @@ namespace Aspire.Hosting;
 /// <summary>Adds Groundhog tunnels to a .NET Aspire AppHost.</summary>
 public static class GroundhogTunnelBuilderExtensions
 {
+    // A Fluent UI icon name; override it with WithIconName on the tunnel builder.
+    internal const string TunnelIconName = "AnimalPawPrint";
+
+    // The parameters the parameterless WithGroundhogTunnel reads, and the CLI's --project option writes.
+    internal const string TunnelNameParameterName = "groundhog-tunnel-name";
+    internal const string TunnelKeyParameterName = "groundhog-tunnel-key";
+
     /// <summary>
     /// Gives this resource a public HTTPS address through the hosted Groundhog service: adds a tunnel named
     /// <c>&lt;resource name&gt;-tunnel</c> that forwards to one of its endpoints, and a secret parameter
@@ -95,6 +103,108 @@ public static class GroundhogTunnelBuilderExtensions
             tunnel.WithVisitorAccess(access);
             configure?.Invoke(tunnel);
         });
+    }
+
+    /// <summary>
+    /// Gives this resource a public HTTPS address through the hosted Groundhog service, reading the tunnel's name and
+    /// connection key from parameters, so every developer on a team runs the same AppHost code through their own
+    /// tunnel. Adds a tunnel named <c>&lt;resource name&gt;-tunnel</c> that forwards to one of the resource's
+    /// endpoints, a parameter <c>groundhog-tunnel-name</c> for the tunnel name and a secret parameter
+    /// <c>groundhog-tunnel-key</c> for the connection key.
+    /// </summary>
+    /// <typeparam name="T">The resource type.</typeparam>
+    /// <param name="resource">The resource to expose, for example a project.</param>
+    /// <param name="configure">
+    /// Configures the tunnel, for example to pass <see cref="GroundhogTunnelResource.PublicAddress"/> to a resource
+    /// or to turn on <see cref="WithRequestLogging"/>.
+    /// </param>
+    /// <param name="endpointName">
+    /// The endpoint to forward to. Defaults to the resource's <c>https</c> endpoint, or its <c>http</c> endpoint when
+    /// it has no <c>https</c> one. An <c>https</c> endpoint needs a certificate this machine trusts.
+    /// </param>
+    /// <returns>The resource builder, for chaining.</returns>
+    /// <exception cref="ArgumentException">
+    /// The resource has no endpoint named <paramref name="endpointName"/>, or, without an endpoint name, no
+    /// <c>https</c> or <c>http</c> endpoint; or an existing <c>groundhog-tunnel-key</c> parameter isn't secret.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// Each developer sets <c>Parameters:groundhog-tunnel-name</c> (for example <c>my-tunnel-dev1</c>) and
+    /// <c>Parameters:groundhog-tunnel-key</c> in the AppHost's user secrets, for example with
+    /// <c>groundhog create my-tunnel-dev1 --project AppHost/AppHost.csproj</c>, or enters both when the Aspire
+    /// dashboard asks for the unresolved parameters. Parameters with those names that already exist are reused, so
+    /// they can be declared first, for example to add a description.
+    /// </para>
+    /// <para>
+    /// <paramref name="configure"/> comes first so that <c>WithGroundhogTunnel("my-tunnel")</c> still names the
+    /// tunnel; pass <paramref name="endpointName"/> by name, for example <c>WithGroundhogTunnel(endpointName: "http")</c>.
+    /// </para>
+    /// <para>
+    /// This is the same tunnel as <see cref="AddGroundhogTunnel(IDistributedApplicationBuilder, string, IResourceBuilder{ParameterResource}, IResourceBuilder{ParameterResource})"/>
+    /// with <see cref="WithReference"/>; use those for other resource or parameter names.
+    /// </para>
+    /// </remarks>
+    public static IResourceBuilder<T> WithGroundhogTunnel<T>(
+        this IResourceBuilder<T> resource,
+        Action<IResourceBuilder<GroundhogTunnelResource>>? configure = null,
+        string? endpointName = null)
+        where T : IResourceWithEndpoints
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        var endpoint = resource.GetEndpoint(SelectEndpoint(resource.Resource, endpointName));
+        var builder = resource.ApplicationBuilder;
+        var key = Parameter(
+            builder,
+            TunnelKeyParameterName,
+            secret: true,
+            "Paste the connection key shown when you created your Groundhog tunnel, the one named in "
+            + $"{TunnelNameParameterName}. It is not your account password.");
+        RequireSecret(key);
+        var tunnelName = Parameter(
+            builder,
+            TunnelNameParameterName,
+            secret: false,
+            "The name of your Groundhog tunnel, for example my-tunnel-dev1. Each developer uses their own.");
+        var tunnel = builder.AddGroundhogTunnel($"{resource.Resource.Name}-tunnel", tunnelName, key)
+            .WithReference(endpoint);
+        configure?.Invoke(tunnel);
+        return resource;
+    }
+
+    /// <summary>
+    /// Gives this resource a public HTTPS address through the hosted Groundhog service, reading the tunnel's name and
+    /// connection key from parameters like
+    /// <see cref="WithGroundhogTunnel{T}(IResourceBuilder{T}, Action{IResourceBuilder{GroundhogTunnelResource}}?, string?)"/>,
+    /// and declares who may visit it.
+    /// </summary>
+    /// <typeparam name="T">The resource type.</typeparam>
+    /// <param name="resource">The resource to expose, for example a project.</param>
+    /// <param name="access">
+    /// The tunnel's visitor access rules, for example
+    /// <c>access =&gt; access.Allow(VisitorAllow.Members).Path("/webhooks", VisitorAllow.Anyone)</c>.
+    /// </param>
+    /// <param name="endpointName">The endpoint to forward to; see the other overload.</param>
+    /// <param name="configure">Configures the tunnel resource, for example to turn on <see cref="WithRequestLogging"/>.</param>
+    /// <returns>The resource builder, for chaining.</returns>
+    /// <exception cref="ArgumentException">
+    /// The rules are invalid (the message says why), or the endpoint or key parameter can't be used.
+    /// </exception>
+    /// <remarks>See <see cref="WithVisitorAccess"/> for how the rules are applied.</remarks>
+    public static IResourceBuilder<T> WithGroundhogTunnel<T>(
+        this IResourceBuilder<T> resource,
+        Action<GroundhogVisitorAccessBuilder> access,
+        string? endpointName = null,
+        Action<IResourceBuilder<GroundhogTunnelResource>>? configure = null)
+        where T : IResourceWithEndpoints
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        return resource.WithGroundhogTunnel(
+            tunnel =>
+            {
+                tunnel.WithVisitorAccess(access);
+                configure?.Invoke(tunnel);
+            },
+            endpointName);
     }
 
     /// <summary>
@@ -308,6 +418,85 @@ public static class GroundhogTunnelBuilderExtensions
     }
 
     /// <summary>
+    /// Points this resource's service discovery for <paramref name="target"/> at the tunnel's public address, the
+    /// same way <c>WithReference(target, tunnel)</c> does for an Aspire dev tunnel: sets
+    /// <c>services__&lt;target name&gt;__https__0</c> to <see cref="GroundhogTunnelResource.PublicAddress"/>, so
+    /// <c>https://&lt;target name&gt;</c> and <c>https+http://&lt;target name&gt;</c> resolve to the tunnel.
+    /// </summary>
+    /// <typeparam name="TDestination">The resource type.</typeparam>
+    /// <param name="builder">The resource that calls the target, for example a downstream service.</param>
+    /// <param name="target">The resource the tunnel forwards to.</param>
+    /// <param name="tunnel">
+    /// The tunnel, from <see cref="AddGroundhogTunnel(IDistributedApplicationBuilder, string, string, IResourceBuilder{ParameterResource})"/>,
+    /// <c>configure</c>, or <see cref="GetGroundhogTunnel{T}"/> after <c>WithGroundhogTunnel</c>.
+    /// </param>
+    /// <returns>The resource builder, for chaining.</returns>
+    /// <exception cref="ArgumentException">The tunnel already forwards to a different resource.</exception>
+    /// <remarks>
+    /// <para>
+    /// Only an <c>https</c> entry is set: the public address is always an HTTPS origin. The value is resolved when the
+    /// resource starts, waiting at most a few seconds for the tunnel's first connection attempt (see
+    /// <see cref="GroundhogTunnelResource.PublicAddress"/>); nothing waits for the tunnel unless it asks to with
+    /// <c>WaitFor</c>.
+    /// </para>
+    /// <para>
+    /// In publish mode nothing is set: tunnels are left out of the manifest, so deployed resources keep their own
+    /// service discovery.
+    /// </para>
+    /// </remarks>
+    public static IResourceBuilder<TDestination> WithReference<TDestination>(
+        this IResourceBuilder<TDestination> builder,
+        IResourceBuilder<IResourceWithEndpoints> target,
+        IResourceBuilder<GroundhogTunnelResource> tunnel)
+        where TDestination : IResourceWithEnvironment
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(tunnel);
+        if (tunnel.Resource.Target is { } forwarded && !ReferenceEquals(forwarded.Resource, target.Resource))
+        {
+            throw new ArgumentException(
+                $"The tunnel '{tunnel.Resource.Name}' forwards to '{forwarded.Resource.Name}', not '{target.Resource.Name}'.",
+                nameof(tunnel));
+        }
+
+        builder.WithReferenceRelationship(tunnel);
+        if (builder.ApplicationBuilder.ExecutionContext.IsPublishMode)
+        {
+            return builder;
+        }
+
+        return builder.WithEnvironment($"services__{target.Resource.Name}__https__0", tunnel.Resource.PublicAddress);
+    }
+
+    /// <summary>
+    /// Gets the tunnel that forwards to this resource, for example the one <c>WithGroundhogTunnel</c> added, so it
+    /// can be passed to <see cref="WithReference{TDestination}(IResourceBuilder{TDestination}, IResourceBuilder{IResourceWithEndpoints}, IResourceBuilder{GroundhogTunnelResource})"/>.
+    /// </summary>
+    /// <typeparam name="T">The resource type.</typeparam>
+    /// <param name="resource">The resource the tunnel forwards to.</param>
+    /// <returns>The tunnel.</returns>
+    /// <exception cref="InvalidOperationException">No tunnel, or more than one, forwards to the resource.</exception>
+    public static IResourceBuilder<GroundhogTunnelResource> GetGroundhogTunnel<T>(this IResourceBuilder<T> resource)
+        where T : IResourceWithEndpoints
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        var tunnels = resource.ApplicationBuilder.Resources.OfType<GroundhogTunnelResource>()
+            .Where(tunnel => ReferenceEquals(tunnel.Target?.Resource, resource.Resource))
+            .ToArray();
+        return tunnels.Length switch
+        {
+            1 => resource.ApplicationBuilder.CreateResourceBuilder(tunnels[0]),
+            0 => throw new InvalidOperationException(
+                $"No Groundhog tunnel forwards to '{resource.Resource.Name}'. Add one with WithGroundhogTunnel first."),
+            _ => throw new InvalidOperationException(
+                $"More than one Groundhog tunnel forwards to '{resource.Resource.Name}' "
+                + $"({string.Join(", ", tunnels.Select(tunnel => tunnel.Name))}). Use the tunnel builder from "
+                + "AddGroundhogTunnel or configure instead."),
+        };
+    }
+
+    /// <summary>
     /// Writes each completed request's method, path, status and duration to the tunnel's console log.
     /// Query strings, headers and bodies are omitted. Request logging is off by default.
     /// </summary>
@@ -331,8 +520,20 @@ public static class GroundhogTunnelBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrEmpty(name);
 
+        // The first tunnel subscribes for all of them; only this method creates tunnels.
+        if (builder.ExecutionContext.IsPublishMode && !builder.Resources.OfType<GroundhogTunnelResource>().Any())
+        {
+            builder.Eventing.Subscribe<BeforePublishEvent>((e, _) =>
+            {
+                LeaveTunnelAddressesOutOfPublishedEnvironments(e.Model);
+                return Task.CompletedTask;
+            });
+        }
+
         var tunnel = builder.AddResource(new GroundhogTunnelResource(name, relayAddress, tunnelName, credential))
             .WithInitialState(GroundhogTunnelRunner.InitialSnapshot())
+            // The dashboard can only draw Fluent UI icons, which have no groundhog; a paw print stands in for the brand.
+            .WithIconName(TunnelIconName)
             // A tunnel is for local development; deployments get their public address from their own configuration.
             .ExcludeFromManifest();
 
@@ -365,6 +566,49 @@ public static class GroundhogTunnelBuilderExtensions
         return tunnel;
     }
 
+    /// <summary>
+    /// Leaves environment variables whose value uses a tunnel, such as <see cref="GroundhogTunnelResource.PublicAddress"/>,
+    /// out of what is published. Tunnels are left out of the manifest, so those values would refer to a resource
+    /// the deployment doesn't have.
+    /// </summary>
+    /// <remarks>
+    /// Runs before publishing starts, once the model is complete, so the callback it adds to each resource runs after
+    /// the resource's own environment callbacks.
+    /// </remarks>
+    private static void LeaveTunnelAddressesOutOfPublishedEnvironments(DistributedApplicationModel model)
+    {
+        foreach (var resource in model.Resources)
+        {
+            if (resource is GroundhogTunnelResource || !resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Any())
+            {
+                continue;
+            }
+
+            resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
+            {
+                foreach (var (variable, value) in context.EnvironmentVariables.ToArray())
+                {
+                    if (UsesTunnel(value, new HashSet<object>(ReferenceEqualityComparer.Instance)))
+                    {
+                        context.EnvironmentVariables.Remove(variable);
+                    }
+                }
+            }));
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="value"/> is a tunnel or refers to one, for example a tunnel's address or a
+    /// <see cref="ReferenceExpression"/> containing it.
+    /// </summary>
+    private static bool UsesTunnel(object? value, HashSet<object> visited) => value switch
+    {
+        GroundhogTunnelResource => true,
+        IValueWithReferences withReferences when visited.Add(withReferences) =>
+            withReferences.References.Any(reference => UsesTunnel(reference, visited)),
+        _ => false,
+    };
+
     private static void AddRunner(IServiceCollection services)
     {
         if (services.Any(service => service.ServiceType == typeof(GroundhogTunnelRunner)))
@@ -379,13 +623,7 @@ public static class GroundhogTunnelBuilderExtensions
     private static Func<CancellationToken, ValueTask<GroundhogCredential>> KeyCredential(
         IResourceBuilder<ParameterResource> key)
     {
-        ArgumentNullException.ThrowIfNull(key);
-        if (!key.Resource.Secret)
-        {
-            throw new ArgumentException(
-                "The connection key must be a secret parameter, for example builder.AddParameter(\"groundhog-key\", secret: true).",
-                nameof(key));
-        }
+        RequireSecret(key);
 
         // A malformed key throws an ArgumentException whose message never contains the key.
         return async cancellationToken =>
@@ -417,20 +655,41 @@ public static class GroundhogTunnelBuilderExtensions
     private static string DescribeEndpoints(string[] names) =>
         names.Length == 0 ? " It has no endpoints." : $" Its endpoints are: {string.Join(", ", names)}.";
 
-    /// <summary>The secret <c>groundhog-&lt;tunnel name&gt;-key</c> parameter, reusing one that already exists.</summary>
-    private static IResourceBuilder<ParameterResource> KeyParameter(IDistributedApplicationBuilder builder, string tunnelName)
+    private static void RequireSecret(IResourceBuilder<ParameterResource> key)
     {
-        var name = $"groundhog-{tunnelName}-key";
+        ArgumentNullException.ThrowIfNull(key);
+        if (!key.Resource.Secret)
+        {
+            throw new ArgumentException(
+                "The connection key must be a secret parameter, for example builder.AddParameter(\"groundhog-key\", secret: true).",
+                nameof(key));
+        }
+    }
+
+    /// <summary>The secret <c>groundhog-&lt;tunnel name&gt;-key</c> parameter, reusing one that already exists.</summary>
+    private static IResourceBuilder<ParameterResource> KeyParameter(IDistributedApplicationBuilder builder, string tunnelName) =>
+        Parameter(
+            builder,
+            $"groundhog-{tunnelName}-key",
+            secret: true,
+            $"Paste the connection key shown when you created the Groundhog tunnel '{tunnelName}'. "
+            + "It is not your account password.");
+
+    /// <summary>
+    /// The parameter named <paramref name="name"/>: an existing one, unchanged, or a new one with the description,
+    /// left out of the manifest.
+    /// </summary>
+    private static IResourceBuilder<ParameterResource> Parameter(
+        IDistributedApplicationBuilder builder, string name, bool secret, string description)
+    {
         if (builder.Resources.OfType<ParameterResource>().FirstOrDefault(
                 parameter => string.Equals(parameter.Name, name, StringComparison.OrdinalIgnoreCase)) is { } existing)
         {
             return builder.CreateResourceBuilder(existing);
         }
 
-        return builder.AddParameter(name, secret: true)
-            .WithDescription(
-                $"Paste the connection key shown when you created the Groundhog tunnel '{tunnelName}'. "
-                + "It is not your account password.")
+        return builder.AddParameter(name, secret: secret)
+            .WithDescription(description)
             // Only the tunnel uses it, and tunnels are for local development.
             .ExcludeFromManifest();
     }

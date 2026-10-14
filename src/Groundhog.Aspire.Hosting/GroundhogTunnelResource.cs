@@ -57,6 +57,10 @@ public sealed class GroundhogTunnelResource : Resource
     /// fails, or hasn't finished within a few seconds, it's the address the tunnel normally has,
     /// <c>https://&lt;tunnel name&gt;.&lt;service host&gt;</c>, so resources that use it still start.
     /// </para>
+    /// <para>
+    /// In publish mode, environment variables whose value uses it are left out of the manifest, because the tunnel
+    /// is left out too.
+    /// </para>
     /// </remarks>
     public GroundhogTunnelAddress PublicAddress { get; }
 

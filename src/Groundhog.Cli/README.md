@@ -4,7 +4,7 @@ The `groundhog` command of Groundhog, the hosted HTTPS tunnel service for local 
 your machine a public HTTPS address through the Groundhog service.
 
 ```
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.3
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.6
 groundhog host myapp --port 5173
 ```
 
@@ -22,6 +22,11 @@ A saved profile remembers a tunnel name, your app's local address and its visito
 Visitor access rules decide who may reach the public address (anyone, workspace members, API keys, IP ranges,
 per path): declare them when hosting with `--allow`, `--path <prefix>=<methods>`, `--ip`, `--api-key-env <VAR>`
 or `--access-file`, or manage them with `access <name>`, `access set <name>` and `api-key create|list|revoke <name>`.
+For an Aspire AppHost that calls `WithGroundhogTunnel()` without a tunnel name, `create <name> --project <AppHost.csproj>` also writes
+`Parameters:groundhog-tunnel-name` (the tunnel name) and `Parameters:groundhog-tunnel-key` (the connection key) into
+that project's user secrets; `key copy <name> --project <AppHost.csproj>` writes a key this CLI saved earlier, and
+`key rotate <name> --project <AppHost.csproj>` writes a new one. `--name-parameter` and `--key-parameter` choose other
+parameter names.
 Read commands support `--output json`; `--no-interactive` selects script behavior and `--no-color` disables colors.
 See the [illustrated CLI guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/cli.md).
 
@@ -52,7 +57,7 @@ environment configuration; avoid a literal key in command history. Create a tunn
 and use its name and connection key. The hosted service address is automatic.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
-`dotnet tool install Groundhog.Cli --version 0.4.0-preview.3` and `dotnet tool run groundhog -- --help`.
+`dotnet tool install Groundhog.Cli --version 0.4.0-preview.6` and `dotnet tool run groundhog -- --help`.
 Source and the full guide are available in the public Groundhog client repository.
 
 MIT licensed.

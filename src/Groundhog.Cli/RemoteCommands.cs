@@ -11,7 +11,8 @@ internal static class RemoteCommands
     internal static readonly string[] Names = ["login", "logout", "whoami", "list", "ls", "describe", "show", "create", "rename", "delete", "workspace", "key", "open", "access", "api-key"];
 
     internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, CancellationToken cancellation,
-        CredentialStore? credentialStore = null, Func<string, string?, ManagementClient>? createClient = null)
+        CredentialStore? credentialStore = null, Func<string, string?, ManagementClient>? createClient = null,
+        Func<string, string>? userSecretsPath = null)
     {
         if (args.Contains("--help", StringComparer.Ordinal)) { output.Write(GroundhogCommand.Usage); return 0; }
         var rest = args[1..];
@@ -32,10 +33,20 @@ internal static class RemoteCommands
         }
         else if (args[0] == "stats") { options.RequireKnown("--remote", "--workspace", "--output"); }
         else if (args[0] == "access") { options.RequireKnown("--relay", "--workspace", "--output", "--agent-managed"); }
-        else { options.RequireKnown("--relay", "--workspace", "--output", "--yes", "--status"); }
+        else { options.RequireKnown("--relay", "--workspace", "--output", "--yes", "--status", "--project", "--name-parameter", "--key-parameter"); }
         if (options.Get("--output") is { } format && format != "json")
         {
             throw new ArgumentException("Unsupported output format.");
+        }
+
+        // Checked before anything changes on the service: a project without user secrets fails before create or rotate.
+        var keyCopy = args[0] == "key" && options.Positional is ["copy", ..];
+        var projectSecrets = ProjectSecrets.FromOptions(
+            args[0] == "create" || (args[0] == "key" && options.Positional is ["rotate" or "copy", ..]),
+            options, userSecretsPath ?? ProjectSecrets.DefaultSecretsPath);
+        if (keyCopy && projectSecrets is null)
+        {
+            throw new UsageException("key copy needs --project <path to AppHost.csproj>.");
         }
 
         var store = credentialStore ?? new CredentialStore(ProfileStore.DefaultDirectory);
@@ -63,6 +74,13 @@ internal static class RemoteCommands
             finally { store.Delete(); }
             output.WriteLine("Signed out; saved CLI credentials and tunnel keys removed."); return 0;
         }
+        // A saved key outlives the sign-in, so key copy needs neither a valid session nor the service when the
+        // workspace is known.
+        if (keyCopy && options.Positional is [_, var copyName] && (options.Get("--workspace") ?? session?.Workspace) is { } copyWorkspace)
+        {
+            return CopyKey(session, copyWorkspace, copyName, projectSecrets!, output);
+        }
+
         if (session is null || session.Expires <= DateTimeOffset.UtcNow)
         {
             throw new ManagementException("Run groundhog login to access remote tunnels.");
@@ -164,9 +182,9 @@ internal static class RemoteCommands
         var positional = options.Positional;
         if (args[0] == "key")
         {
-            if (positional is not ["rotate" or "revoke", _])
+            if (positional is not ["rotate" or "revoke" or "copy", _])
             {
-                throw new ArgumentException("Use key rotate|revoke <name>.");
+                throw new UsageException("Use key rotate|revoke|copy <name>.");
             }
         }
         else if (args[0] == "rename")
@@ -223,6 +241,11 @@ internal static class RemoteCommands
             }
             return 0;
         }
+        if (keyCopy)
+        {
+            return CopyKey(session, workspaceSlug, name, projectSecrets!, output);
+        }
+
         if (args[0] is "delete" or "rename" or "key")
         {
             if (!options.Has("--yes") && (!InteractiveCli.Available || !await AnsiConsole.PromptAsync(
@@ -253,6 +276,14 @@ internal static class RemoteCommands
                 var created = await client.SendAsync<TunnelCreated>(HttpMethod.Post, collection, new { Name = name }, cancellation);
                 SaveKey(store, session, workspaceSlug, created.Tunnel.Name, created.ConnectionKey);
                 output.WriteLine("Tunnel created. Its connection key was saved securely for hosting.");
+                if (projectSecrets is null)
+                {
+                    output.WriteLine($"To use this tunnel from an Aspire AppHost, run: groundhog key copy {Plain(created.Tunnel.Name)} --project <path to AppHost.csproj>");
+                }
+                else
+                {
+                    projectSecrets.Write(created.Tunnel.Name, created.ConnectionKey, output);
+                }
                 break;
             case "rename":
                 var renamed = await client.SendAsync<TunnelInfo>(HttpMethod.Patch, path, new { Name = positional[1] }, cancellation);
@@ -272,6 +303,7 @@ internal static class RemoteCommands
                     var rotated = await client.SendAsync<TunnelCreated>(HttpMethod.Post, path + "/rotate-key", null, cancellation);
                     SaveKey(store, session, workspaceSlug, name, rotated.ConnectionKey);
                     output.WriteLine("Key rotated and saved securely. Restart hosting to use the new key.");
+                    projectSecrets?.Write(name, rotated.ConnectionKey, output);
                 }
                 else
                 {
@@ -295,6 +327,24 @@ internal static class RemoteCommands
     }
 
     internal static string KeyId(string workspace, string name) => workspace + "/" + name;
+
+    /// <summary>
+    /// <c>key copy &lt;name&gt; --project</c>: writes the key that <c>create</c> or <c>key rotate</c> saved on this computer
+    /// into the project's user secrets. Keys can't be read back from the service.
+    /// </summary>
+    private static int CopyKey(LoginSession? session, string workspace, string name, ProjectSecrets projectSecrets, TextWriter output)
+    {
+        if (session is null || !session.TunnelKeys.TryGetValue(KeyId(workspace, name), out var key))
+        {
+            throw new ManagementException(
+                $"{Plain(name)}'s connection key isn't saved on this computer, for example because the tunnel was created in the " +
+                $"Groundhog dashboard or on another computer. Run groundhog key rotate {Plain(name)} --project {Plain(projectSecrets.Project)} " +
+                "to make a new key and write it; rotating disconnects anything still using the old key.");
+        }
+
+        projectSecrets.Write(name, key, output);
+        return 0;
+    }
     private static void SaveKey(CredentialStore store, LoginSession session, string workspace, string name, string key)
     {
         session.TunnelKeys[KeyId(workspace, name)] = key;

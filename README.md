@@ -11,7 +11,7 @@ This repository owns the MIT-licensed developer clients: the Aspire integration,
 
 ## Aspire
 
-The setup below uses **0.4.0-preview.3**.
+The setup below uses **0.4.0-preview.6**.
 
 Before running a client, [sign in to Groundhog](https://groundhog.unifinity.com) and create your free workspace.
 Follow [Create your free workspace](https://groundhog.unifinity.com/docs/workspace), then
@@ -21,22 +21,22 @@ key private while you configure your app. Your workspace address is a dashboard 
 Requires .NET 10 and Aspire 13.6.1 or later. In your AppHost directory:
 
 ```text
-dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.3
+dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.6
 ```
 
 ```csharp
-builder.AddProject<Projects.MyApp_Web>("web").WithGroundhogTunnel("myapp");
+builder.AddProject<Projects.Web>("web").WithGroundhogTunnel("my-tunnel");
 ```
 
-`myapp` is the tunnel name you created. This adds a `web-tunnel` resource and a secret parameter,
-`groundhog-myapp-key`. Enter the connection key when the Aspire dashboard asks for it, or set
-`Parameters:groundhog-myapp-key` in the AppHost's user secrets. Turn on **Save to user secrets** in the prompt if you
+`my-tunnel` is the tunnel name you created. This adds a `web-tunnel` resource and a secret parameter,
+`groundhog-my-tunnel-key`. Enter the connection key when the Aspire dashboard asks for it, or set
+`Parameters:groundhog-my-tunnel-key` in the AppHost's user secrets. Turn on **Save to user secrets** in the prompt if you
 want Aspire to remember it on this computer; user secrets are outside the repository and are not encrypted.
 To pass the public address to your app:
 
 ```csharp
-var web = builder.AddProject<Projects.MyApp_Web>("web");
-web.WithGroundhogTunnel("myapp", configure: tunnel =>
+var web = builder.AddProject<Projects.Web>("web");
+web.WithGroundhogTunnel("my-tunnel", configure: tunnel =>
     web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress));
 ```
 
@@ -47,8 +47,8 @@ does not discover this package.
 ## CLI
 
 ```text
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.3
-groundhog host myapp --port 5173
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.6
+groundhog host my-tunnel --port 5173
 ```
 
 Run `groundhog` for a full-screen terminal app: a menu with live previews, tunnel and local-agent dashboards, in-frame

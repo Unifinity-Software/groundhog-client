@@ -15,12 +15,12 @@ once it's connected (reconnecting, what your app sees).
 
 ## Install
 
-This guide uses **0.4.0-preview.3**.
+This guide uses **0.4.0-preview.6**.
 
 Add the `Groundhog.Aspire.Hosting` package to the AppHost project from nuget.org:
 
 ```
-dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.3
+dotnet add package Groundhog.Aspire.Hosting --version 0.4.0-preview.6
 ```
 
 It needs Aspire 13.6.1 or later and .NET 10. The complete runnable package consumer is
@@ -40,7 +40,7 @@ In the AppHost, add a tunnel to the resource you want to share:
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
 
-builder.AddProject<Projects.MyApp_Web>("web").WithGroundhogTunnel("myapp");
+builder.AddProject<Projects.Web>("web").WithGroundhogTunnel("my-tunnel");
 
 builder.Build().Run();
 ```
@@ -49,15 +49,15 @@ builder.Build().Run();
 website, without a URL or domain. It adds:
 
 - a tunnel resource named `<resource name>-tunnel` (`web-tunnel` above), shown in the dashboard;
-- a secret parameter named `groundhog-<tunnel name>-key` (`groundhog-myapp-key` above) for the connection key.
+- a secret parameter named `groundhog-<tunnel name>-key` (`groundhog-my-tunnel-key` above) for the connection key.
 
 Enter the key when the Aspire dashboard asks for the unresolved parameter, and enable **Save to user secrets** to
-remember it on this computer. Or store `Parameters:groundhog-myapp-key` in the AppHost's **Manage User Secrets**
+remember it on this computer. Or store `Parameters:groundhog-my-tunnel-key` in the AppHost's **Manage User Secrets**
 editor. Keep the key out of `appsettings.json`, source control and shell history. If you declare a secret parameter
 with that name yourself (for example to add a description), it's reused.
 
 The tunnel forwards to the resource's `https` endpoint, or to its `http` endpoint if it has no `https` one. Pass
-`endpointName` to choose another, for example `WithGroundhogTunnel("myapp", endpointName: "http")`. Building the
+`endpointName` to choose another, for example `WithGroundhogTunnel("my-tunnel", endpointName: "http")`. Building the
 AppHost fails with a message naming the resource if it has no such endpoint. An HTTPS endpoint needs a certificate
 this machine trusts (`dotnet dev-certs https --trust` for ASP.NET Core development certificates). TLS uses the
 endpoint hostname while your app receives the public `Host`. The tunnel starts once the endpoint has its port.
@@ -66,9 +66,9 @@ Use `configure` to work with the tunnel, for example to give your app its public
 logging:
 
 ```csharp
-var web = builder.AddProject<Projects.MyApp_Web>("web");
+var web = builder.AddProject<Projects.Web>("web");
 
-web.WithGroundhogTunnel("myapp", configure: tunnel =>
+web.WithGroundhogTunnel("my-tunnel", configure: tunnel =>
 {
     tunnel.WithRequestLogging();
     web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress)
@@ -82,35 +82,190 @@ web.WithGroundhogTunnel("myapp", configure: tunnel =>
 or take the tunnel name from a parameter:
 
 ```csharp
-var key = builder.AddParameter("groundhog-key", secret: true);
-var web = builder.AddProject<Projects.MyApp_Web>("web");
+// tunnelKey holds my-tunnel's connection key. secret: true makes it a secret parameter:
+// Aspire masks it in the dashboard and reads it from Parameters:groundhog-tunnel-key in user secrets.
+var tunnelKey = builder.AddParameter("groundhog-tunnel-key", secret: true);
 
-var tunnel = builder.AddGroundhogTunnel("tunnel", "myapp", key)
-    .WithReference(web.GetEndpoint("http"));
+var web = builder.AddProject<Projects.Web>("web");
 
-web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
+var webTunnel = builder.AddGroundhogTunnel("web-tunnel", "my-tunnel", tunnelKey)
+    .WithReference(web.GetEndpoint("https"));
+
+web.WithEnvironment("PublicOrigin", webTunnel.Resource.PublicAddress);
 ```
 
-- `AddGroundhogTunnel(name, tunnelName, key)`: `name` is the resource's name in the dashboard; `tunnelName` is the
-  name created on the website. The tunnel name can also be a parameter.
-- `key` must be a secret parameter (`secret: true`); anything else is refused when the AppHost is built.
-- `.WithReference(endpoint)` sets where requests go. HTTP and HTTPS endpoints work, as above.
+`AddGroundhogTunnel(name, tunnelName, key)` takes three values:
+
+| Parameter | In this example | What it is | Where it comes from |
+| --- | --- | --- | --- |
+| `name` | `"web-tunnel"` | The tunnel's resource name in the AppHost. It's the row in the Aspire dashboard; Groundhog never sees it. | You choose it. |
+| `tunnelName` | `"my-tunnel"` | The tunnel's name in Groundhog. It becomes the public host, `my-tunnel.groundhog.unifinity.com`. | The name you gave the tunnel when you created it in the Groundhog dashboard. It can also be a parameter. |
+| `key` | `tunnelKey` | The tunnel's connection key, as a secret parameter (`secret: true`). Anything else is refused when the AppHost is built. | **Copy key** when you create the tunnel in the Groundhog dashboard. |
+
+`.WithReference(endpoint)` sets where requests go. HTTP and HTTPS endpoints work.
+
+`webTunnel.Resource.PublicAddress` is `https://my-tunnel.groundhog.unifinity.com`, so `web` gets that value as
+`PublicOrigin`.
+
+![A visitor reaches web through the Groundhog service and the web-tunnel resource, which also gives web its public address as PublicOrigin](images/aspire-web-tunnel.svg)
 
 The hosted service address is defined once in `GroundhogService.DefaultRelayAddress` and shared with the CLI. A future
 address change is delivered in a client update.
+
+### One tunnel per developer
+
+A tunnel serves one computer at a time, so on a team each developer creates their own tunnel, for example
+`my-tunnel-dev1` and `my-tunnel-dev2`. `WithGroundhogTunnel()` without a tunnel name reads the tunnel's name and key
+from each developer's user secrets instead of the AppHost code, so the code is the same for everyone and nobody's
+tunnel name is committed. Each developer saves their own 2 values first.
+
+The quickest way to save them is the [Groundhog CLI](cli.md#put-a-tunnel-in-an-aspire-apphosts-user-secrets): signed
+in with `groundhog login`, create the tunnel with `--project` set to the AppHost's project file:
+
+```sh
+groundhog create my-tunnel-dev1 --project AppHost/AppHost.csproj
+```
+
+The CLI sets `Parameters:groundhog-tunnel-name` to `my-tunnel-dev1` and `Parameters:groundhog-tunnel-key` to the new
+tunnel's connection key in the AppHost's user secrets, without printing the key. For a tunnel created earlier from
+the CLI on this computer, `key copy` writes the same 2 values from the key the CLI saved then:
+
+```sh
+groundhog key copy my-tunnel-dev1 --project AppHost/AppHost.csproj
+```
+
+A tunnel created in the Groundhog dashboard or on another computer has no saved key here.
+`groundhog key rotate my-tunnel-dev1 --project AppHost/AppHost.csproj` makes a new key and writes both values; anything
+still using the old key disconnects.
+
+Or save them with `dotnet user-secrets`, from the AppHost project folder. In PowerShell, the key is read at a hidden
+prompt so it stays out of shell history:
+
+```powershell
+dotnet user-secrets set "Parameters:groundhog-tunnel-name" "my-tunnel-dev1"
+$tunnelKey = Read-Host "Groundhog connection key" -MaskInput
+dotnet user-secrets set "Parameters:groundhog-tunnel-key" $tunnelKey
+Remove-Variable tunnelKey
+```
+
+In the AppHost, add the tunnel without a name:
+
+```csharp
+var web = builder.AddProject<Projects.Web>("web").WithGroundhogTunnel();
+```
+
+`WithGroundhogTunnel()` adds:
+
+- a tunnel resource named `web-tunnel`, as `WithGroundhogTunnel("my-tunnel")` does;
+- a parameter named `groundhog-tunnel-name`, read from `Parameters:groundhog-tunnel-name`;
+- a secret parameter named `groundhog-tunnel-key`, read from `Parameters:groundhog-tunnel-key`.
+
+It forwards to the same endpoint as `WithGroundhogTunnel("my-tunnel")` would. Pass `endpointName` by name, for
+example `WithGroundhogTunnel(endpointName: "http")`: a string in the first position is a tunnel name. If you declare
+parameters with these 2 names yourself (for example to add a description), they're reused; the key parameter must be
+secret.
+
+To give `web` its public address as well, pass `configure`:
+
+```csharp
+var web = builder.AddProject<Projects.Web>("web");
+
+web.WithGroundhogTunnel(configure: webTunnel =>
+    web.WithEnvironment("PublicOrigin", webTunnel.Resource.PublicAddress));
+```
+
+On the computer of the developer who saved `my-tunnel-dev1`, the tunnel connects as `my-tunnel-dev1`,
+`webTunnel.Resource.PublicAddress` is `https://my-tunnel-dev1.groundhog.unifinity.com`, and `web` gets that value as
+`PublicOrigin`. On the computer of the developer who saved `my-tunnel-dev2`, the same code gives
+`https://my-tunnel-dev2.groundhog.unifinity.com`.
+
+![Each developer's AppHost reads its own tunnel name and key from user secrets, so each web-tunnel has its own public address](images/aspire-team.svg)
+
+Instead of saving the values with the CLI or `dotnet user-secrets`, a developer can leave them unset and enter both
+when the Aspire dashboard asks, with **Save to user secrets** on. Keep both out of committed settings files: a shared tunnel
+name makes every developer take the same tunnel over from each other.
+
+To use other parameter names, declare the parameters and pass them to `AddGroundhogTunnel`. The CLI writes them with
+`--name-parameter web-tunnel-name --key-parameter web-tunnel-key`:
+
+```csharp
+// tunnelName holds the developer's tunnel name, read from Parameters:web-tunnel-name.
+var tunnelName = builder.AddParameter("web-tunnel-name");
+// tunnelKey holds that tunnel's connection key, read from Parameters:web-tunnel-key.
+// secret: true makes it a secret parameter, which Aspire masks in the dashboard.
+var tunnelKey = builder.AddParameter("web-tunnel-key", secret: true);
+
+var web = builder.AddProject<Projects.Web>("web");
+
+var webTunnel = builder.AddGroundhogTunnel("web-tunnel", tunnelName, tunnelKey)
+    .WithReference(web.GetEndpoint("https"));
+```
+
+On the same developer's computer, `tunnelName` is `my-tunnel-dev1` and `webTunnel.Resource.PublicAddress` is
+`https://my-tunnel-dev1.groundhog.unifinity.com`.
+
+### Service discovery through the tunnel
+
+When a gateway (for example YARP) proxies to internal services and only the gateway has a tunnel, the internal
+services can get the gateway's public address through service discovery with `WithReference(target, tunnel)`, the
+same shape as Aspire's dev tunnels. Here `api-gateway` sits in front of `service-a` and
+`service-b`, and the tunnel is named `my-tunnel`:
+
+```csharp
+// tunnelKey holds my-tunnel's connection key. secret: true makes it a secret parameter:
+// Aspire masks it in the dashboard and reads it from Parameters:groundhog-tunnel-key in user secrets.
+var tunnelKey = builder.AddParameter("groundhog-tunnel-key", secret: true);
+
+var serviceA = builder.AddProject<Projects.ServiceA>("service-a");
+var serviceB = builder.AddProject<Projects.ServiceB>("service-b");
+
+var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway")
+    .WithReference(serviceA)
+    .WithReference(serviceB);
+
+var apiGatewayTunnel = builder.AddGroundhogTunnel("api-gateway-tunnel", "my-tunnel", tunnelKey)
+    .WithReference(apiGateway.GetEndpoint("https"));
+
+serviceA.WithReference(apiGateway, apiGatewayTunnel);
+serviceB.WithReference(apiGateway, apiGatewayTunnel);
+```
+
+`service-a` and `service-b` each get `services__api-gateway__https__0=https://my-tunnel.groundhog.unifinity.com`, so
+`https://api-gateway` and `https+http://api-gateway` resolve to the public address. Only an `https` entry is set: the
+public address is always HTTPS. The value is resolved when each service starts, as described below, and neither
+waits for the tunnel. The tunnel must forward to the referenced resource; another target is refused when the AppHost
+is built. In publish mode nothing is set. Calls through the public address pass the tunnel's visitor access rules.
+
+![A webhook sender reaches api-gateway through the Groundhog service and api-gateway-tunnel; service-a and service-b get api-gateway's public address](images/aspire-gateway.svg)
+
+With `WithGroundhogTunnel`, get the tunnel it added with `GetGroundhogTunnel()`:
+
+```csharp
+var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway")
+    .WithReference(serviceA)
+    .WithReference(serviceB)
+    .WithGroundhogTunnel("my-tunnel");
+
+var apiGatewayTunnel = apiGateway.GetGroundhogTunnel();
+
+serviceA.WithReference(apiGateway, apiGatewayTunnel);
+serviceB.WithReference(apiGateway, apiGatewayTunnel);
+```
+
+`GetGroundhogTunnel()` fails if no tunnel, or more than one, forwards to the resource.
 
 ## Visitor access rules
 
 By default anyone with the address can reach a tunnel. Declare who may visit, per path, as part of the AppHost:
 
 ```csharp
-builder.AddProject<Projects.MyApp_Web>("web")
-    .WithGroundhogTunnel("myapp", access => access
+builder.AddProject<Projects.Web>("web")
+    .WithGroundhogTunnel("my-tunnel", access => access
         .Allow(VisitorAllow.Members)
         .Path("/webhooks", VisitorAllow.Anyone)
         .Path("/api", VisitorAllow.ApiKeys, VisitorAllow.Ips)
         .IpRange("203.0.113.0/24")
-        .ApiKey(builder.AddParameter("myapp-api-key", secret: true)));
+        .ApiKey(builder.AddParameter("my-tunnel-api-key", secret: true)));
 ```
 
 - `Allow(...)` is the default rule for paths no `Path` rule matches; without it, anyone may visit. A request passes
@@ -121,7 +276,7 @@ builder.AddProject<Projects.MyApp_Web>("web")
 - `Path(prefix, ...)`: the longest matching prefix wins, on segment boundaries and ignoring case. Keep webhook and
   OAuth callback paths on `Anyone`: those senders can't sign in.
 - `ApiKey(parameter)` takes a secret parameter holding an API key, for example one printed by
-  `groundhog api-key create myapp <label>`, set in user secrets like the connection key. API keys are what callers
+  `groundhog api-key create my-tunnel <label>`, set in user secrets like the connection key. API keys are what callers
   send; the connection key is the agent's own credential. Only the API key's SHA-256 hash is sent.
 - The rules are checked when the AppHost is built, with the service's own validation (limits: 32 paths, 64 IP
   ranges, 10 API keys). The tunnel's dashboard properties show them, without API keys.
@@ -138,8 +293,8 @@ builder.AddProject<Projects.MyApp_Web>("web")
 
 | Value | Example | Use it for |
 | --- | --- | --- |
-| `tunnel.Resource.PublicAddress` | `https://myapp.groundhog.unifinity.com` | Public-origin settings, OAuth redirect bases, webhook URLs |
-| `tunnel.Resource.PublicHost` | `myapp.groundhog.unifinity.com` | A dev server's allowed hosts |
+| `tunnel.Resource.PublicAddress` | `https://my-tunnel.groundhog.unifinity.com` | Public-origin settings, OAuth redirect bases, webhook URLs |
+| `tunnel.Resource.PublicHost` | `my-tunnel.groundhog.unifinity.com` | A dev server's allowed hosts |
 
 Pass either to `WithEnvironment`, or use it inside `ReferenceExpression.Create($"...")` to build a longer address.
 `PublicAddress` is an origin: no path and no trailing slash.
@@ -148,7 +303,7 @@ For a Vite dev server, which refuses host names it doesn't know:
 
 ```csharp
 var frontend = builder.AddViteApp("frontend", "../frontend");
-frontend.WithGroundhogTunnel("myapp", configure: tunnel =>
+frontend.WithGroundhogTunnel("my-tunnel", configure: tunnel =>
     frontend.WithEnvironment("VITE_ALLOWED_HOST", tunnel.Resource.PublicHost));
 ```
 
@@ -161,7 +316,7 @@ server: { allowedHosts: process.env.VITE_ALLOWED_HOST ? [process.env.VITE_ALLOWE
 
 The address is the one the relay announces when the agent connects. A resource that uses it waits for the tunnel's
 first connection attempt, for at most 5 seconds. If that attempt fails or takes longer, the resource gets the address
-the tunnel normally has, `https://<tunnel name>.<service host>` (for example `https://myapp.groundhog.unifinity.com`),
+the tunnel normally has, `https://<tunnel name>.<service host>` (for example `https://my-tunnel.groundhog.unifinity.com`),
 and starts anyway.
 
 ## It never holds up your app
@@ -172,13 +327,18 @@ you're offline, the tunnel shows the problem in the dashboard and everything els
 If a resource really can't start without the tunnel, say so explicitly:
 
 ```csharp
-web.WithGroundhogTunnel("myapp", configure: tunnel => webhookWorker.WaitFor(tunnel));
+var webhookWorker = builder.AddProject<Projects.WebhookWorker>("webhook-worker");
+web.WithGroundhogTunnel("my-tunnel", configure: tunnel => webhookWorker.WaitFor(tunnel));
 ```
 
 `WaitFor` waits until the tunnel is connected, and fails the waiting resource if the tunnel stops for good (for
 example because the relay rejected the key).
 
 ## In the dashboard
+
+A tunnel shows with a paw print icon (Fluent UI `AnimalPawPrint`). The Aspire dashboard can only draw Fluent UI icons,
+which have no groundhog. To choose another Fluent UI icon, call `WithIconName` on the tunnel builder, for example
+`webTunnel.WithIconName("PlugConnected")`.
 
 | State | Meaning |
 | --- | --- |
@@ -195,7 +355,7 @@ The command is disabled while the tunnel is active, including automatic reconnec
 start overlapping agents. Environment variables already resolved for other resources retain their existing values.
 
 The tunnel's console log has one line per connection change, for example
-`Connected: https://myapp.groundhog.unifinity.com/ → http://localhost:5173/`, and the reason whenever it disconnects or
+`Connected: https://my-tunnel.groundhog.unifinity.com/ → http://localhost:5173/`, and the reason whenever it disconnects or
 stops. Its details show the relay, the tunnel name and where requests go; the key is never shown.
 
 ### Request logging
@@ -214,18 +374,23 @@ traffic and do not link to stored request details.
 
 ## Deploying
 
-A tunnel is for local development. It's left out of the deployment manifest, and in publish mode the agent never
-starts. A deployed app has its own public address: give it that through its own configuration rather than through
-`PublicAddress`, for example by adding the tunnel only when running locally:
+A tunnel is for local development. In publish mode the agent never starts, and the deployment manifest leaves out the
+tunnel, the parameters `WithGroundhogTunnel` adds, and every environment variable whose value uses the tunnel's
+`PublicAddress` or `PublicHost`. A deployed app has its own public address, so give it that through the deployment's
+own configuration. The same AppHost code works for both:
 
 ```csharp
-var web = builder.AddProject<Projects.MyApp_Web>("web");
+var web = builder.AddProject<Projects.Web>("web");
 
-if (builder.ExecutionContext.IsRunMode)
-{
-    web.WithGroundhogTunnel("myapp", configure: tunnel =>
-        web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress));
-}
+web.WithGroundhogTunnel("my-tunnel", configure: tunnel =>
+    web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress)
+       .WithEnvironment("Webhooks__BaseUrl", ReferenceExpression.Create($"{tunnel.Resource.PublicAddress}/webhooks")));
 ```
 
-The key parameter that `WithGroundhogTunnel` adds is also left out of the manifest.
+When the AppHost runs locally, `web` gets `PublicOrigin` set to `https://my-tunnel.groundhog.unifinity.com` and
+`Webhooks__BaseUrl` set to `https://my-tunnel.groundhog.unifinity.com/webhooks`. In the published manifest, `web` has
+neither variable. Without this, each would be an expression such as `{web-tunnel.outputs.publicAddress}` that refers to
+a resource the deployment doesn't have.
+
+Only environment variables are left out. A command-line argument that uses the address (with `WithArgs`) is published
+as such an expression, so add it only when `builder.ExecutionContext.IsRunMode` is `true`.

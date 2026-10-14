@@ -4,7 +4,7 @@ Groundhog provides a full-screen terminal app, live tunnel dashboards and comman
 Requires .NET 10 and the ASP.NET Core runtime (both are included with the SDK).
 
 ```sh
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.3
+dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.6
 groundhog
 ```
 
@@ -415,6 +415,58 @@ Mutations use the same workspace permissions as the website. Create and rotate s
 printing it. Rename moves a CLI-saved key to the new name, but you must update [saved profiles](#saved-profiles) and app callback URLs.
 Rename, deletion, rotation and revocation can disconnect agents; the CLI asks for confirmation. Scripts must pass `--yes`.
 Revocation removes all live keys for the tunnel. Rotation saves a replacement key; restart hosting to use it.
+
+### Put a tunnel in an Aspire AppHost's user secrets
+
+On a team, each developer hosts the same Aspire AppHost through their own tunnel. In the AppHost,
+`WithGroundhogTunnel()` without a tunnel name reads the tunnel's name and connection key from the parameters
+`groundhog-tunnel-name` and `groundhog-tunnel-key` (see [one tunnel per developer](aspire.md#one-tunnel-per-developer)). Add `--project` with the AppHost's project file to
+`create` or `key rotate`, and the CLI writes both values into that project's .NET user secrets:
+
+```sh
+groundhog create my-tunnel-dev1 --project AppHost/AppHost.csproj
+```
+
+The tunnel is created as without `--project`, its key is saved for `groundhog host` as usual, and the CLI prints
+`Set Parameters:groundhog-tunnel-name and Parameters:groundhog-tunnel-key in the user secrets of AppHost/AppHost.csproj.`
+In the AppHost's user secrets, `Parameters:groundhog-tunnel-name` is `my-tunnel-dev1` and
+`Parameters:groundhog-tunnel-key` is the new connection key. The key is never printed.
+
+A tunnel created earlier from this CLI already has its key saved on this computer. `key copy` writes that saved key,
+without changing the tunnel:
+
+```sh
+groundhog key copy my-tunnel-dev1 --project AppHost/AppHost.csproj
+```
+
+`key copy` sets the same two values as `create --project`. A tunnel created in the Groundhog dashboard or on another
+computer has no saved key here, and the service never returns an existing key. For that tunnel, rotate the key; anything
+still using the old key disconnects:
+
+```sh
+groundhog key rotate my-tunnel-dev1 --project AppHost/AppHost.csproj
+```
+
+`Parameters:groundhog-tunnel-key` is then the rotated key. `create` without `--project` prints the `key copy` command
+for the tunnel it created.
+
+If the AppHost declares its own parameters under other names and passes them to `AddGroundhogTunnel`, pass those
+names with `--name-parameter` and `--key-parameter`.
+These two options only work together with `--project`:
+
+```sh
+groundhog key copy my-tunnel-dev1 --project AppHost/AppHost.csproj \
+  --name-parameter web-tunnel-name --key-parameter web-tunnel-key
+```
+
+`Parameters:web-tunnel-name` is `my-tunnel-dev1` and `Parameters:web-tunnel-key` is the saved connection key.
+
+The project needs a `UserSecretsId`, which Aspire AppHost templates include. If it has none, the command stops before
+it creates or rotates anything and asks you to run `dotnet user-secrets init --project AppHost/AppHost.csproj`. The
+CLI reads a literal `<UserSecretsId>` from the project file, or else from the nearest `Directory.Build.props` above it.
+It writes `secrets.json` directly, in the folder `dotnet user-secrets` uses (`%APPDATA%\Microsoft\UserSecrets\<id>` on
+Windows, `~/.microsoft/usersecrets/<id>` on Linux and macOS), so the key never appears on a command line. Other
+secrets in the file are kept.
 
 ## Refresh the screenshots
 
