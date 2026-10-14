@@ -107,6 +107,8 @@ web.WithEnvironment("PublicOrigin", webTunnel.Resource.PublicAddress);
 `webTunnel.Resource.PublicAddress` is `https://my-tunnel.groundhog.unifinity.com`, so `web` gets that value as
 `PublicOrigin`.
 
+![A visitor reaches web through the Groundhog service and the web-tunnel resource, which also gives web its public address as PublicOrigin](images/aspire-web-tunnel.svg)
+
 The hosted service address is defined once in `GroundhogService.DefaultRelayAddress` and shared with the CLI. A future
 address change is delivered in a client update.
 
@@ -145,6 +147,8 @@ var webTunnel = builder.AddGroundhogTunnel("web-tunnel", tunnelName, tunnelKey)
 On the computer of the developer who saved `my-tunnel-dev1`, `tunnelName` is `my-tunnel-dev1` and
 `webTunnel.Resource.PublicAddress` is `https://my-tunnel-dev1.groundhog.unifinity.com`.
 
+![Each developer's AppHost reads its own tunnel name and key from user secrets, so each web-tunnel has its own public address](images/aspire-team.svg)
+
 Instead of saving the values with `dotnet user-secrets`, a developer can leave them unset and enter both when the
 Aspire dashboard asks, with **Save to user secrets** on. Keep both out of committed settings files: a shared tunnel
 name makes every developer take the same tunnel over from each other.
@@ -180,6 +184,8 @@ serviceB.WithReference(apiGateway, apiGatewayTunnel);
 public address is always HTTPS. The value is resolved when each service starts, as described below, and neither
 waits for the tunnel. The tunnel must forward to the referenced resource; another target is refused when the AppHost
 is built. In publish mode nothing is set. Calls through the public address pass the tunnel's visitor access rules.
+
+![A webhook sender reaches api-gateway through the Groundhog service and api-gateway-tunnel; service-a and service-b get api-gateway's public address](images/aspire-gateway.svg)
 
 With `WithGroundhogTunnel`, get the tunnel it added with `GetGroundhogTunnel()`:
 
