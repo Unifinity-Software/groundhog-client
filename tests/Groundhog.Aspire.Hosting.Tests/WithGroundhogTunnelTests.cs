@@ -125,4 +125,20 @@ public sealed partial class GroundhogTunnelTests
             () => ((IResourceBuilder<ExecutableResource>)null!).WithGroundhogTunnel("myapp")).ParamName);
         Assert.Empty(builder.Resources.OfType<GroundhogTunnelResource>());
     }
+
+    [Fact]
+    public void TunnelsShowTheAnimalIconInTheDashboardUnlessTheAppHostChoosesAnother()
+    {
+        var builder = CreateBuilder();
+        var web = builder.AddExecutable("web", "web", ".").WithHttpEndpoint(name: "http");
+
+        web.WithGroundhogTunnel("my-tunnel");
+
+        var tunnel = web.GetGroundhogTunnel();
+        Assert.Equal("AnimalRabbit", Assert.Single(tunnel.Resource.Annotations.OfType<ResourceIconAnnotation>()).IconName);
+
+        tunnel.WithIconName("PlugConnected");
+
+        Assert.Equal("PlugConnected", Assert.Single(tunnel.Resource.Annotations.OfType<ResourceIconAnnotation>()).IconName);
+    }
 }

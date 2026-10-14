@@ -273,6 +273,10 @@ example because the relay rejected the key).
 
 ## In the dashboard
 
+A tunnel shows with a rabbit icon (Fluent UI `AnimalRabbit`), the closest animal the Aspire dashboard can draw. To
+choose another Fluent UI icon, call `WithIconName` on the tunnel builder, for example
+`webTunnel.WithIconName("PlugConnected")`.
+
 | State | Meaning |
 | --- | --- |
 | Starting | Waiting for the target endpoint's port, or for a parameter that has no value yet. |

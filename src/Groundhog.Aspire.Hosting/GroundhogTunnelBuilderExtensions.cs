@@ -12,6 +12,9 @@ namespace Aspire.Hosting;
 /// <summary>Adds Groundhog tunnels to a .NET Aspire AppHost.</summary>
 public static class GroundhogTunnelBuilderExtensions
 {
+    // A Fluent UI icon name; override it with WithIconName on the tunnel builder.
+    internal const string TunnelIconName = "AnimalRabbit";
+
     /// <summary>
     /// Gives this resource a public HTTPS address through the hosted Groundhog service: adds a tunnel named
     /// <c>&lt;resource name&gt;-tunnel</c> that forwards to one of its endpoints, and a secret parameter
@@ -412,6 +415,8 @@ public static class GroundhogTunnelBuilderExtensions
 
         var tunnel = builder.AddResource(new GroundhogTunnelResource(name, relayAddress, tunnelName, credential))
             .WithInitialState(GroundhogTunnelRunner.InitialSnapshot())
+            // The dashboard can only draw Fluent UI icons; there's no groundhog, so use the closest animal.
+            .WithIconName(TunnelIconName)
             // A tunnel is for local development; deployments get their public address from their own configuration.
             .ExcludeFromManifest();
 
