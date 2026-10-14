@@ -99,6 +99,30 @@ web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress);
 The hosted service address is defined once in `GroundhogService.DefaultRelayAddress` and shared with the CLI. A future
 address change is delivered in a client update.
 
+### One tunnel per developer
+
+A tunnel serves one computer at a time, so on a team each developer creates their own tunnel. Read the tunnel name and
+key from parameters so the AppHost code is the same for everyone:
+
+```csharp
+var tunnelName = builder.AddParameter("groundhog-tunnel-name");
+var key = builder.AddParameter("groundhog-key", secret: true);
+var web = builder.AddProject<Projects.MyApp_Web>("web");
+
+var tunnel = builder.AddGroundhogTunnel("web-tunnel", tunnelName, key)
+    .WithReference(web.GetEndpoint("https"));
+```
+
+Each developer stores their own values in the AppHost's user secrets, from the AppHost project folder:
+
+```
+dotnet user-secrets set "Parameters:groundhog-tunnel-name" "myapp-dev1"
+dotnet user-secrets set "Parameters:groundhog-key" "<connection key>"
+```
+
+Or leave them unset and enter both when the Aspire dashboard asks, with **Save to user secrets** on. Keep both out of
+committed settings files: a shared tunnel name makes every developer take the same tunnel over from each other.
+
 ## Visitor access rules
 
 By default anyone with the address can reach a tunnel. Declare who may visit, per path, as part of the AppHost:
