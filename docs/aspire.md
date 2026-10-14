@@ -101,27 +101,78 @@ address change is delivered in a client update.
 
 ### One tunnel per developer
 
-A tunnel serves one computer at a time, so on a team each developer creates their own tunnel. Read the tunnel name and
-key from parameters so the AppHost code is the same for everyone:
+A tunnel serves one computer at a time, so on a team each developer creates their own tunnel, for example
+`my-tunnel-dev1` and `my-tunnel-dev2`. Read the tunnel name and key from parameters so the AppHost code is the same
+for everyone:
 
 ```csharp
 var tunnelName = builder.AddParameter("groundhog-tunnel-name");
-var key = builder.AddParameter("groundhog-key", secret: true);
-var web = builder.AddProject<Projects.MyApp_Web>("web");
+var tunnelKey = builder.AddParameter("groundhog-tunnel-key", secret: true);
 
-var tunnel = builder.AddGroundhogTunnel("web-tunnel", tunnelName, key)
+var web = builder.AddProject<Projects.Web>("web");
+
+var webTunnel = builder.AddGroundhogTunnel("web-tunnel", tunnelName, tunnelKey)
     .WithReference(web.GetEndpoint("https"));
 ```
 
-Each developer stores their own values in the AppHost's user secrets, from the AppHost project folder:
+Each developer stores their own values in the AppHost's user secrets, from the AppHost project folder. In
+PowerShell, the key is read at a hidden prompt so it stays out of shell history:
 
-```
-dotnet user-secrets set "Parameters:groundhog-tunnel-name" "myapp-dev1"
-dotnet user-secrets set "Parameters:groundhog-key" "<connection key>"
+```powershell
+dotnet user-secrets set "Parameters:groundhog-tunnel-name" "my-tunnel-dev1"
+$tunnelKey = Read-Host "Groundhog connection key" -MaskInput
+dotnet user-secrets set "Parameters:groundhog-tunnel-key" $tunnelKey
+Remove-Variable tunnelKey
 ```
 
 Or leave them unset and enter both when the Aspire dashboard asks, with **Save to user secrets** on. Keep both out of
 committed settings files: a shared tunnel name makes every developer take the same tunnel over from each other.
+
+### Service discovery through the tunnel
+
+When a gateway (for example YARP) proxies to internal services and only the gateway has a tunnel, the internal
+services can get the gateway's public address through service discovery with `WithReference(target, tunnel)`, the
+same shape as Aspire's dev tunnels (available from 0.4.0-preview.6). Here `api-gateway` sits in front of `media` and
+`provisioning`, and the tunnel is named `my-tunnel`:
+
+```csharp
+var tunnelKey = builder.AddParameter("groundhog-tunnel-key", secret: true);
+
+var media = builder.AddProject<Projects.Media>("media");
+var provisioning = builder.AddProject<Projects.Provisioning>("provisioning");
+
+var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway")
+    .WithReference(media)
+    .WithReference(provisioning);
+
+var apiGatewayTunnel = builder.AddGroundhogTunnel("api-gateway-tunnel", "my-tunnel", tunnelKey)
+    .WithReference(apiGateway.GetEndpoint("https"));
+
+media.WithReference(apiGateway, apiGatewayTunnel);
+provisioning.WithReference(apiGateway, apiGatewayTunnel);
+```
+
+`media` and `provisioning` each get `services__api-gateway__https__0=https://my-tunnel.groundhog.unifinity.com`, so
+`https://api-gateway` and `https+http://api-gateway` resolve to the public address. Only an `https` entry is set: the
+public address is always HTTPS. The value is resolved when each service starts, as described below, and neither
+waits for the tunnel. The tunnel must forward to the referenced resource; another target is refused when the AppHost
+is built. In publish mode nothing is set. Calls through the public address pass the tunnel's visitor access rules.
+
+With `WithGroundhogTunnel`, get the tunnel it added with `GetGroundhogTunnel()`:
+
+```csharp
+var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway")
+    .WithReference(media)
+    .WithReference(provisioning)
+    .WithGroundhogTunnel("my-tunnel");
+
+var apiGatewayTunnel = apiGateway.GetGroundhogTunnel();
+
+media.WithReference(apiGateway, apiGatewayTunnel);
+provisioning.WithReference(apiGateway, apiGatewayTunnel);
+```
+
+`GetGroundhogTunnel()` fails if no tunnel, or more than one, forwards to the resource.
 
 ## Visitor access rules
 
@@ -181,35 +232,6 @@ frontend.WithGroundhogTunnel("myapp", configure: tunnel =>
 server: { allowedHosts: process.env.VITE_ALLOWED_HOST ? [process.env.VITE_ALLOWED_HOST] : [] }
 ```
 
-### Service discovery through the tunnel
-
-To make other resources call a resource through its tunnel, reference both from each caller with
-`WithReference(target, tunnel)`, the same shape as Aspire's dev tunnels (available from 0.4.0-preview.6):
-
-```csharp
-var key = builder.AddParameter("groundhog-key", secret: true);
-var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway");
-var tunnel = builder.AddGroundhogTunnel("api-gateway-tunnel", "myapp", key)
-    .WithReference(apiGateway.GetEndpoint("https"));
-
-builder.AddProject<Projects.Worker>("worker").WithReference(apiGateway, tunnel);
-```
-
-The worker gets `services__api-gateway__https__0=https://myapp.groundhog.unifinity.com`, so `https://api-gateway`
-and `https+http://api-gateway` resolve to the public address. Only an `https` entry is set: the public address is
-always HTTPS. The value is resolved when the worker starts, as described below, and the worker doesn't wait for the
-tunnel. The tunnel must forward to the referenced resource; another target is refused when the AppHost is built. In
-publish mode nothing is set.
-
-With `WithGroundhogTunnel`, get the tunnel it added with `GetGroundhogTunnel()`:
-
-```csharp
-var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway").WithGroundhogTunnel("myapp");
-builder.AddProject<Projects.Worker>("worker").WithReference(apiGateway, apiGateway.GetGroundhogTunnel());
-```
-
-`GetGroundhogTunnel()` fails if no tunnel, or more than one, forwards to the resource.
-
 ### Where the value comes from
 
 The address is the one the relay announces when the agent connects. A resource that uses it waits for the tunnel's
@@ -225,6 +247,7 @@ you're offline, the tunnel shows the problem in the dashboard and everything els
 If a resource really can't start without the tunnel, say so explicitly:
 
 ```csharp
+var webhookWorker = builder.AddProject<Projects.MyApp_WebhookWorker>("webhook-worker");
 web.WithGroundhogTunnel("myapp", configure: tunnel => webhookWorker.WaitFor(tunnel));
 ```
 

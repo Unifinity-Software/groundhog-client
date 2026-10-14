@@ -36,15 +36,19 @@ web.WithGroundhogTunnel("myapp", configure: tunnel =>
     web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress));
 ```
 
-To make other resources reach it through the tunnel with service discovery, reference the resource and its tunnel,
-as with Aspire dev tunnels:
+When a gateway proxies to internal services, give those services the gateway's public address through service
+discovery, as with Aspire dev tunnels:
 
 ```csharp
-var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway").WithGroundhogTunnel("myapp");
-worker.WithReference(apiGateway, apiGateway.GetGroundhogTunnel());
+var media = builder.AddProject<Projects.Media>("media");
+var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway")
+    .WithReference(media)
+    .WithGroundhogTunnel("my-tunnel");
+
+media.WithReference(apiGateway, apiGateway.GetGroundhogTunnel());
 ```
 
-This sets `services__api-gateway__https__0` to the tunnel's public address when the worker starts (HTTPS only).
+When `media` starts, `services__api-gateway__https__0` is set to `https://my-tunnel.groundhog.unifinity.com` (HTTPS only).
 
 `AddGroundhogTunnel("tunnel", "myapp", key).WithReference(endpoint)` is the explicit form, for choosing the resource
 name or key parameter yourself; its tunnel name can also be a parameter.
