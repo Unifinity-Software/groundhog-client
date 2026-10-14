@@ -135,7 +135,7 @@ public sealed partial class GroundhogTunnelTests
         web.WithGroundhogTunnel("my-tunnel");
 
         var tunnel = web.GetGroundhogTunnel();
-        Assert.Equal("AnimalRabbit", Assert.Single(tunnel.Resource.Annotations.OfType<ResourceIconAnnotation>()).IconName);
+        Assert.Equal("AnimalPawPrint", Assert.Single(tunnel.Resource.Annotations.OfType<ResourceIconAnnotation>()).IconName);
 
         tunnel.WithIconName("PlugConnected");
 
