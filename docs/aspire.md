@@ -116,8 +116,28 @@ A tunnel serves one computer at a time, so on a team each developer creates thei
 `my-tunnel-dev1` and `my-tunnel-dev2`. Keep the tunnel name and key out of the AppHost code so the code is the same
 for everyone, and have each developer save their own 2 values first.
 
-Each developer saves their tunnel's name and key in the AppHost's user secrets, from the AppHost project folder. In
-PowerShell, the key is read at a hidden prompt so it stays out of shell history:
+Each developer saves their tunnel's name and key in the AppHost's user secrets. The quickest way is the
+[Groundhog CLI](cli.md#put-a-tunnel-in-an-aspire-apphosts-user-secrets): signed in with `groundhog login`, create the
+tunnel with `--project` set to the AppHost's project file:
+
+```sh
+groundhog create my-tunnel-dev1 --project AppHost/AppHost.csproj
+```
+
+The CLI sets `Parameters:groundhog-tunnel-name` to `my-tunnel-dev1` and `Parameters:groundhog-tunnel-key` to the new
+tunnel's connection key in the AppHost's user secrets, without printing the key. For a tunnel created earlier from
+the CLI on this computer, `key copy` writes the same 2 values from the key the CLI saved then:
+
+```sh
+groundhog key copy my-tunnel-dev1 --project AppHost/AppHost.csproj
+```
+
+A tunnel created in the Groundhog dashboard or on another computer has no saved key here.
+`groundhog key rotate my-tunnel-dev1 --project AppHost/AppHost.csproj` makes a new key and writes both values; anything
+still using the old key disconnects.
+
+Or save them with `dotnet user-secrets`, from the AppHost project folder. In PowerShell, the key is read at a hidden
+prompt so it stays out of shell history:
 
 ```powershell
 dotnet user-secrets set "Parameters:groundhog-tunnel-name" "my-tunnel-dev1"
@@ -145,7 +165,7 @@ var webTunnel = builder.AddGroundhogTunnel("web-tunnel", tunnelName, tunnelKey)
 On the computer of the developer who saved `my-tunnel-dev1`, `tunnelName` is `my-tunnel-dev1` and
 `webTunnel.Resource.PublicAddress` is `https://my-tunnel-dev1.groundhog.unifinity.com`.
 
-Instead of saving the values with `dotnet user-secrets`, a developer can leave them unset and enter both when the
+Instead of saving the values with the CLI or `dotnet user-secrets`, a developer can leave them unset and enter both when the
 Aspire dashboard asks, with **Save to user secrets** on. Keep both out of committed settings files: a shared tunnel
 name makes every developer take the same tunnel over from each other.
 
