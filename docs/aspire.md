@@ -113,8 +113,20 @@ address change is delivered in a client update.
 ### One tunnel per developer
 
 A tunnel serves one computer at a time, so on a team each developer creates their own tunnel, for example
-`my-tunnel-dev1` and `my-tunnel-dev2`. Read the tunnel name and key from parameters so the AppHost code is the same
-for everyone:
+`my-tunnel-dev1` and `my-tunnel-dev2`. Keep the tunnel name and key out of the AppHost code so the code is the same
+for everyone, and have each developer save their own 2 values first.
+
+Each developer saves their tunnel's name and key in the AppHost's user secrets, from the AppHost project folder. In
+PowerShell, the key is read at a hidden prompt so it stays out of shell history:
+
+```powershell
+dotnet user-secrets set "Parameters:groundhog-tunnel-name" "my-tunnel-dev1"
+$tunnelKey = Read-Host "Groundhog connection key" -MaskInput
+dotnet user-secrets set "Parameters:groundhog-tunnel-key" $tunnelKey
+Remove-Variable tunnelKey
+```
+
+The AppHost reads those 2 values as parameters:
 
 ```csharp
 // Each developer sets these 2 values in their own user secrets.
@@ -130,18 +142,12 @@ var webTunnel = builder.AddGroundhogTunnel("web-tunnel", tunnelName, tunnelKey)
     .WithReference(web.GetEndpoint("https"));
 ```
 
-Each developer stores their own values in the AppHost's user secrets, from the AppHost project folder. In
-PowerShell, the key is read at a hidden prompt so it stays out of shell history:
+On the computer of the developer who saved `my-tunnel-dev1`, `tunnelName` is `my-tunnel-dev1` and
+`webTunnel.Resource.PublicAddress` is `https://my-tunnel-dev1.groundhog.unifinity.com`.
 
-```powershell
-dotnet user-secrets set "Parameters:groundhog-tunnel-name" "my-tunnel-dev1"
-$tunnelKey = Read-Host "Groundhog connection key" -MaskInput
-dotnet user-secrets set "Parameters:groundhog-tunnel-key" $tunnelKey
-Remove-Variable tunnelKey
-```
-
-Or leave them unset and enter both when the Aspire dashboard asks, with **Save to user secrets** on. Keep both out of
-committed settings files: a shared tunnel name makes every developer take the same tunnel over from each other.
+Instead of saving the values with `dotnet user-secrets`, a developer can leave them unset and enter both when the
+Aspire dashboard asks, with **Save to user secrets** on. Keep both out of committed settings files: a shared tunnel
+name makes every developer take the same tunnel over from each other.
 
 ### Service discovery through the tunnel
 
@@ -273,8 +279,8 @@ example because the relay rejected the key).
 
 ## In the dashboard
 
-A tunnel shows with a rabbit icon (Fluent UI `AnimalRabbit`), the closest animal the Aspire dashboard can draw. To
-choose another Fluent UI icon, call `WithIconName` on the tunnel builder, for example
+A tunnel shows with a paw print icon (Fluent UI `AnimalPawPrint`). The Aspire dashboard can only draw Fluent UI icons,
+which have no groundhog. To choose another Fluent UI icon, call `WithIconName` on the tunnel builder, for example
 `webTunnel.WithIconName("PlugConnected")`.
 
 | State | Meaning |
