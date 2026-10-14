@@ -157,6 +157,35 @@ frontend.WithGroundhogTunnel("myapp", configure: tunnel =>
 server: { allowedHosts: process.env.VITE_ALLOWED_HOST ? [process.env.VITE_ALLOWED_HOST] : [] }
 ```
 
+### Service discovery through the tunnel
+
+To make other resources call a resource through its tunnel, reference both from each caller with
+`WithReference(target, tunnel)`, the same shape as Aspire's dev tunnels (available from 0.4.0-preview.6):
+
+```csharp
+var key = builder.AddParameter("groundhog-key", secret: true);
+var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway");
+var tunnel = builder.AddGroundhogTunnel("api-gateway-tunnel", "myapp", key)
+    .WithReference(apiGateway.GetEndpoint("https"));
+
+builder.AddProject<Projects.Worker>("worker").WithReference(apiGateway, tunnel);
+```
+
+The worker gets `services__api-gateway__https__0=https://myapp.groundhog.unifinity.com`, so `https://api-gateway`
+and `https+http://api-gateway` resolve to the public address. Only an `https` entry is set: the public address is
+always HTTPS. The value is resolved when the worker starts, as described below, and the worker doesn't wait for the
+tunnel. The tunnel must forward to the referenced resource; another target is refused when the AppHost is built. In
+publish mode nothing is set.
+
+With `WithGroundhogTunnel`, get the tunnel it added with `GetGroundhogTunnel()`:
+
+```csharp
+var apiGateway = builder.AddProject<Projects.ApiGateway>("api-gateway").WithGroundhogTunnel("myapp");
+builder.AddProject<Projects.Worker>("worker").WithReference(apiGateway, apiGateway.GetGroundhogTunnel());
+```
+
+`GetGroundhogTunnel()` fails if no tunnel, or more than one, forwards to the resource.
+
 ### Where the value comes from
 
 The address is the one the relay announces when the agent connects. A resource that uses it waits for the tunnel's

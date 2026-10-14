@@ -308,6 +308,85 @@ public static class GroundhogTunnelBuilderExtensions
     }
 
     /// <summary>
+    /// Points this resource's service discovery for <paramref name="target"/> at the tunnel's public address, the
+    /// same way <c>WithReference(target, tunnel)</c> does for an Aspire dev tunnel: sets
+    /// <c>services__&lt;target name&gt;__https__0</c> to <see cref="GroundhogTunnelResource.PublicAddress"/>, so
+    /// <c>https://&lt;target name&gt;</c> and <c>https+http://&lt;target name&gt;</c> resolve to the tunnel.
+    /// </summary>
+    /// <typeparam name="TDestination">The resource type.</typeparam>
+    /// <param name="builder">The resource that calls the target, for example a downstream service.</param>
+    /// <param name="target">The resource the tunnel forwards to.</param>
+    /// <param name="tunnel">
+    /// The tunnel, from <see cref="AddGroundhogTunnel(IDistributedApplicationBuilder, string, string, IResourceBuilder{ParameterResource})"/>,
+    /// <c>configure</c>, or <see cref="GetGroundhogTunnel{T}"/> after <c>WithGroundhogTunnel</c>.
+    /// </param>
+    /// <returns>The resource builder, for chaining.</returns>
+    /// <exception cref="ArgumentException">The tunnel already forwards to a different resource.</exception>
+    /// <remarks>
+    /// <para>
+    /// Only an <c>https</c> entry is set: the public address is always an HTTPS origin. The value is resolved when the
+    /// resource starts, waiting at most a few seconds for the tunnel's first connection attempt (see
+    /// <see cref="GroundhogTunnelResource.PublicAddress"/>); nothing waits for the tunnel unless it asks to with
+    /// <c>WaitFor</c>.
+    /// </para>
+    /// <para>
+    /// In publish mode nothing is set: tunnels are left out of the manifest, so deployed resources keep their own
+    /// service discovery.
+    /// </para>
+    /// </remarks>
+    public static IResourceBuilder<TDestination> WithReference<TDestination>(
+        this IResourceBuilder<TDestination> builder,
+        IResourceBuilder<IResourceWithEndpoints> target,
+        IResourceBuilder<GroundhogTunnelResource> tunnel)
+        where TDestination : IResourceWithEnvironment
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(tunnel);
+        if (tunnel.Resource.Target is { } forwarded && !ReferenceEquals(forwarded.Resource, target.Resource))
+        {
+            throw new ArgumentException(
+                $"The tunnel '{tunnel.Resource.Name}' forwards to '{forwarded.Resource.Name}', not '{target.Resource.Name}'.",
+                nameof(tunnel));
+        }
+
+        builder.WithReferenceRelationship(tunnel);
+        if (builder.ApplicationBuilder.ExecutionContext.IsPublishMode)
+        {
+            return builder;
+        }
+
+        return builder.WithEnvironment($"services__{target.Resource.Name}__https__0", tunnel.Resource.PublicAddress);
+    }
+
+    /// <summary>
+    /// Gets the tunnel that forwards to this resource, for example the one <c>WithGroundhogTunnel</c> added, so it
+    /// can be passed to <see cref="WithReference{TDestination}(IResourceBuilder{TDestination}, IResourceBuilder{IResourceWithEndpoints}, IResourceBuilder{GroundhogTunnelResource})"/>.
+    /// </summary>
+    /// <typeparam name="T">The resource type.</typeparam>
+    /// <param name="resource">The resource the tunnel forwards to.</param>
+    /// <returns>The tunnel.</returns>
+    /// <exception cref="InvalidOperationException">No tunnel, or more than one, forwards to the resource.</exception>
+    public static IResourceBuilder<GroundhogTunnelResource> GetGroundhogTunnel<T>(this IResourceBuilder<T> resource)
+        where T : IResourceWithEndpoints
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        var tunnels = resource.ApplicationBuilder.Resources.OfType<GroundhogTunnelResource>()
+            .Where(tunnel => ReferenceEquals(tunnel.Target?.Resource, resource.Resource))
+            .ToArray();
+        return tunnels.Length switch
+        {
+            1 => resource.ApplicationBuilder.CreateResourceBuilder(tunnels[0]),
+            0 => throw new InvalidOperationException(
+                $"No Groundhog tunnel forwards to '{resource.Resource.Name}'. Add one with WithGroundhogTunnel first."),
+            _ => throw new InvalidOperationException(
+                $"More than one Groundhog tunnel forwards to '{resource.Resource.Name}' "
+                + $"({string.Join(", ", tunnels.Select(tunnel => tunnel.Name))}). Use the tunnel builder from "
+                + "AddGroundhogTunnel or configure instead."),
+        };
+    }
+
+    /// <summary>
     /// Writes each completed request's method, path, status and duration to the tunnel's console log.
     /// Query strings, headers and bodies are omitted. Request logging is off by default.
     /// </summary>
