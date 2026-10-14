@@ -16,5 +16,7 @@ These apply to docs, code comments, commit messages, pull request descriptions a
 - Say what you mean in concrete terms. Never use vague summary labels that stand in for the actual point, such as
   "one naming set, used everywhere". Write the specific thing instead, for example "Every example calls the tunnel
   `my-tunnel` and names each C# variable after its Aspire resource: `apiGateway` for `api-gateway`."
+- Name headings, titles and labels for what the thing is, not how it's used. A table of example variable names is
+  "Variable name reference", not "Names used in every example".
 - Keep names continuous across examples. Once an example names something (`my-tunnel`, `apiGateway`), every later
   snippet on that page uses the same name, and no snippet uses a variable it hasn't declared.
