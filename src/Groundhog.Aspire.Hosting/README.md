@@ -110,7 +110,8 @@ the public tunnel URL, which opens the live app. Request lines describe complete
 stored request.
 
 HTTPS local endpoints need a certificate trusted by this machine. In publish mode
-the tunnel is omitted and its agent does not start. C# AppHosts are supported; TypeScript bindings are not
+the tunnel is omitted, its agent does not start, and environment variables that use its `PublicAddress` or
+`PublicHost` are left out of the manifest, so a deployed app gets its public address from its own configuration. C# AppHosts are supported; TypeScript bindings are not
 currently advertised. The complete package-only example is in `samples/AspireQuickstart`.
 
 See [the Aspire guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/aspire.md) for more options.

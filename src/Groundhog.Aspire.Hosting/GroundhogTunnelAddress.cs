@@ -31,8 +31,9 @@ public sealed class GroundhogTunnelAddress : IValueProvider, IManifestExpression
     public GroundhogTunnelResource Resource { get; }
 
     /// <summary>
-    /// A placeholder for publish manifests. Tunnels are for local development and are left out of manifests, so
-    /// deployed resources should get their public address from their own configuration instead.
+    /// A placeholder for publish manifests, for example <c>{web-tunnel.outputs.publicAddress}</c>. Tunnels are for
+    /// local development and are left out of manifests, and so are environment variables whose value uses this
+    /// address; deployed resources get their public address from their own configuration instead.
     /// </summary>
     public string ValueExpression => _part == Part.Origin
         ? $"{{{Resource.Name}.outputs.publicAddress}}"

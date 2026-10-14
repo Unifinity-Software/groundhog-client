@@ -374,18 +374,23 @@ traffic and do not link to stored request details.
 
 ## Deploying
 
-A tunnel is for local development. It's left out of the deployment manifest, and in publish mode the agent never
-starts. A deployed app has its own public address: give it that through its own configuration rather than through
-`PublicAddress`, for example by adding the tunnel only when running locally:
+A tunnel is for local development. In publish mode the agent never starts, and the deployment manifest leaves out the
+tunnel, the parameters `WithGroundhogTunnel` adds, and every environment variable whose value uses the tunnel's
+`PublicAddress` or `PublicHost`. A deployed app has its own public address, so give it that through the deployment's
+own configuration. The same AppHost code works for both:
 
 ```csharp
 var web = builder.AddProject<Projects.Web>("web");
 
-if (builder.ExecutionContext.IsRunMode)
-{
-    web.WithGroundhogTunnel("my-tunnel", configure: tunnel =>
-        web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress));
-}
+web.WithGroundhogTunnel("my-tunnel", configure: tunnel =>
+    web.WithEnvironment("PublicOrigin", tunnel.Resource.PublicAddress)
+       .WithEnvironment("Webhooks__BaseUrl", ReferenceExpression.Create($"{tunnel.Resource.PublicAddress}/webhooks")));
 ```
 
-The key parameter that `WithGroundhogTunnel` adds is also left out of the manifest.
+When the AppHost runs locally, `web` gets `PublicOrigin` set to `https://my-tunnel.groundhog.unifinity.com` and
+`Webhooks__BaseUrl` set to `https://my-tunnel.groundhog.unifinity.com/webhooks`. In the published manifest, `web` has
+neither variable. Without this, each would be an expression such as `{web-tunnel.outputs.publicAddress}` that refers to
+a resource the deployment doesn't have.
+
+Only environment variables are left out. A command-line argument that uses the address (with `WithArgs`) is published
+as such an expression, so add it only when `builder.ExecutionContext.IsRunMode` is `true`.

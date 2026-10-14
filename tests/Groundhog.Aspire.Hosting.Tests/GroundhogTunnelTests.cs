@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Eventing;
@@ -138,6 +139,47 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         var echo = await connection.Client.GetStringAsync(
             new Uri("http://aspire-up.groundhog.unifinity.com/echo"), Cancellation);
         Assert.StartsWith("aspire-up.groundhog.unifinity.com|/echo|", echo, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PublishingLeavesOutTheTunnelAndEnvironmentVariablesThatUseItsAddress()
+    {
+        var output = Directory.CreateTempSubdirectory("groundhog-manifest-");
+        try
+        {
+            var manifestPath = Path.Combine(output.FullName, "manifest.json");
+            var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+            {
+                Args = ["--publisher", "manifest", "--output-path", manifestPath],
+                DisableDashboard = true,
+            });
+            var web = builder.AddExecutable("web", "web", ".").WithHttpEndpoint(name: "http")
+                .WithEnvironment("Greeting", "hello");
+            web.WithGroundhogTunnel(configure: webTunnel => web
+                .WithEnvironment("PublicOrigin", webTunnel.Resource.PublicAddress)
+                .WithEnvironment("AllowedHost", webTunnel.Resource.PublicHost)
+                .WithEnvironment("Webhooks__BaseUrl", ReferenceExpression.Create($"{webTunnel.Resource.PublicAddress}/webhooks")));
+
+            await using (var app = builder.Build())
+            {
+                await app.RunAsync(Cancellation).WaitAsync(s_timeout, Cancellation);
+            }
+
+            // Without the tunnel in the manifest, the 3 variables would be expressions such as
+            // {web-tunnel.outputs.publicAddress} that refer to a resource the deployment doesn't have.
+            var manifestJson = await File.ReadAllTextAsync(manifestPath, Cancellation);
+            using var manifest = JsonDocument.Parse(manifestJson);
+            var resources = manifest.RootElement.GetProperty("resources");
+            Assert.Equal(["web"], resources.EnumerateObject().Select(resource => resource.Name));
+            var environment = resources.GetProperty("web").GetProperty("env");
+            Assert.Equal(["Greeting"], environment.EnumerateObject().Select(variable => variable.Name));
+            Assert.DoesNotContain("groundhog-tunnel-", manifestJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("web-tunnel", manifestJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            output.Delete(recursive: true);
+        }
     }
 
     [Fact]

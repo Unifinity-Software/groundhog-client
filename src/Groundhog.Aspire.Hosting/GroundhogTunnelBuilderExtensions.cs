@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.Publishing;
 using Groundhog.Agent;
 using Groundhog.Aspire.Hosting;
 using Groundhog.Aspire.Hosting.Internal;
@@ -519,6 +520,16 @@ public static class GroundhogTunnelBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrEmpty(name);
 
+        // The first tunnel subscribes for all of them; only this method creates tunnels.
+        if (builder.ExecutionContext.IsPublishMode && !builder.Resources.OfType<GroundhogTunnelResource>().Any())
+        {
+            builder.Eventing.Subscribe<BeforePublishEvent>((e, _) =>
+            {
+                LeaveTunnelAddressesOutOfPublishedEnvironments(e.Model);
+                return Task.CompletedTask;
+            });
+        }
+
         var tunnel = builder.AddResource(new GroundhogTunnelResource(name, relayAddress, tunnelName, credential))
             .WithInitialState(GroundhogTunnelRunner.InitialSnapshot())
             // The dashboard can only draw Fluent UI icons, which have no groundhog; a paw print stands in for the brand.
@@ -554,6 +565,49 @@ public static class GroundhogTunnelBuilderExtensions
 
         return tunnel;
     }
+
+    /// <summary>
+    /// Leaves environment variables whose value uses a tunnel, such as <see cref="GroundhogTunnelResource.PublicAddress"/>,
+    /// out of what is published. Tunnels are left out of the manifest, so those values would refer to a resource
+    /// the deployment doesn't have.
+    /// </summary>
+    /// <remarks>
+    /// Runs before publishing starts, once the model is complete, so the callback it adds to each resource runs after
+    /// the resource's own environment callbacks.
+    /// </remarks>
+    private static void LeaveTunnelAddressesOutOfPublishedEnvironments(DistributedApplicationModel model)
+    {
+        foreach (var resource in model.Resources)
+        {
+            if (resource is GroundhogTunnelResource || !resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Any())
+            {
+                continue;
+            }
+
+            resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
+            {
+                foreach (var (variable, value) in context.EnvironmentVariables.ToArray())
+                {
+                    if (UsesTunnel(value, new HashSet<object>(ReferenceEqualityComparer.Instance)))
+                    {
+                        context.EnvironmentVariables.Remove(variable);
+                    }
+                }
+            }));
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="value"/> is a tunnel or refers to one, for example a tunnel's address or a
+    /// <see cref="ReferenceExpression"/> containing it.
+    /// </summary>
+    private static bool UsesTunnel(object? value, HashSet<object> visited) => value switch
+    {
+        GroundhogTunnelResource => true,
+        IValueWithReferences withReferences when visited.Add(withReferences) =>
+            withReferences.References.Any(reference => UsesTunnel(reference, visited)),
+        _ => false,
+    };
 
     private static void AddRunner(IServiceCollection services)
     {
