@@ -64,10 +64,12 @@ internal static class GroundhogCommand
           groundhog workspace list|use <slug>
           groundhog list [--workspace <slug>] [--status <state>] [--output json]
           groundhog describe <name> [--workspace <slug>] [--output json]
-          groundhog create <name> [--workspace <slug>]
+          groundhog create <name> [--workspace <slug>] [--project <file> [user secrets options]]
           groundhog rename <old-name> <new-name> [--workspace <slug>] [--yes]
           groundhog delete <name> [--workspace <slug>] [--yes]
-          groundhog key rotate|revoke <name> [--workspace <slug>] [--yes]
+          groundhog key rotate <name> [--workspace <slug>] [--yes] [--project <file> [user secrets options]]
+          groundhog key revoke <name> [--workspace <slug>] [--yes]
+          groundhog key copy <name> --project <file> [--workspace <slug>] [user secrets options]
           groundhog open <name> [--workspace <slug>]
           groundhog access <name> [--workspace <slug>] [--output json]
           groundhog access set <name> (--allow <methods> [--path <prefix>=<methods>]... [--ip <cidr>]... | --access-file <file>)
@@ -105,6 +107,14 @@ internal static class GroundhogCommand
                                    connection key). Repeatable. Only its SHA-256 hash is sent.
           --access-file <file>     The rules as JSON ({"default":{"allow":[...]},"rules":[...],"ipRanges":[...]})
                                    instead of --allow, --path and --ip.
+
+        User secrets (create, key rotate and key copy), for an Aspire AppHost that reads the tunnel from parameters:
+          --project <file>          The AppHost's .csproj. Writes Parameters:groundhog-tunnel-name (the tunnel name)
+                                    and Parameters:groundhog-tunnel-key (the connection key) into its user secrets.
+                                    The project needs a UserSecretsId: run dotnet user-secrets init --project <file>.
+                                    key copy writes the key create or key rotate saved on this computer.
+          --name-parameter <name>   Use Parameters:<name> for the tunnel name instead of groundhog-tunnel-name.
+          --key-parameter <name>    Use Parameters:<name> for the connection key instead of groundhog-tunnel-key.
 
         Exit codes: 0 stopped (Ctrl+C), 1 other failure, 2 bad arguments, 3 key rejected or unknown tunnel.
 
