@@ -9,7 +9,7 @@ and supply its connection key through `GROUNDHOG_KEY`. Keep the key out of sourc
 The example expects your local app to be running on port 5173.
 
 ```
-dotnet tool install --global Groundhog.Cli --version 0.4.0-preview.7
+dotnet tool install --global Groundhog.Cli --version 1.0.0
 groundhog host myapp --port 5173
 ```
 
@@ -64,7 +64,7 @@ environment configuration; avoid a literal key in command history. Create a tunn
 and use its name and connection key. The hosted service address is automatic.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
-`dotnet tool install Groundhog.Cli --version 0.4.0-preview.7` and `dotnet tool run groundhog -- --help`.
+`dotnet tool install Groundhog.Cli --version 1.0.0` and `dotnet tool run groundhog -- --help`.
 Source and the full guide are available in the public Groundhog client repository.
 
 MIT licensed.

@@ -26,7 +26,7 @@ See [NuGet trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org
 
 Install with `dotnet add package Groundhog.Aspire.Hosting`. Aspire CLI's current integration search filters
 package IDs to `Aspire.Hosting.*` and `CommunityToolkit.Aspire.Hosting.*`; an exact ID does not bypass that filter.
-NuGet search and the package README are the supported discovery path for this preview. Aspire CLI discovery
+NuGet search and the package README are the supported discovery path for these packages. Aspire CLI discovery
 requires a separate upstream or Community Toolkit contribution; do not promise an `aspire add` alias.
 See the [Aspire CLI package filter](https://github.com/microsoft/aspire/blob/main/src/Aspire.Cli/NuGet/NuGetPackageCache.cs).
 
@@ -43,9 +43,9 @@ Run the complete affected local suites before pushing code or creating the relea
 local work. Fix failures and repeat affected checks after corrections.
 
 ```text
-dotnet build Groundhog.Client.slnx -c Release -p:Version=0.4.0-preview.3
+dotnet build Groundhog.Client.slnx -c Release -p:Version=1.0.0
 dotnet test --solution Groundhog.Client.slnx -c Release --no-build
-dotnet pack Groundhog.Client.slnx -c Release --no-build -p:Version=0.4.0-preview.3 -o artifacts/packages
+dotnet pack Groundhog.Client.slnx -c Release --no-build -p:Version=1.0.0 -o artifacts/packages
 ```
 
 The full client solution uses local fake relays and does not require Azurite, a server checkout or production
