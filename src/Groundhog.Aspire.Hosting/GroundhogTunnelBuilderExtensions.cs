@@ -21,6 +21,11 @@ public static class GroundhogTunnelBuilderExtensions
     internal const string TunnelKeyParameterName = "groundhog-tunnel-key";
 
     internal const string LogRequestsCommand = "groundhog-log-requests";
+    internal const string TestPublicAddressCommand = "groundhog-test-public-address";
+
+    // The named client the Test public address command uses. Redirects aren't followed, so the result is what the
+    // tunnel itself answered.
+    internal const string TestPublicAddressHttpClient = "groundhog-test-public-address";
     internal const string StopLoggingRequestsCommand = "groundhog-stop-logging-requests";
 
     /// <summary>
@@ -611,6 +616,21 @@ public static class GroundhogTunnelBuilderExtensions
                 IconVariant = IconVariant.Regular,
             });
 
+        tunnel.WithCommand(TestPublicAddressCommand, "Test public address", context =>
+            GroundhogTunnelRunner.TestPublicAddressAsync(
+                tunnel.Resource,
+                context.Services.GetRequiredService<ResourceNotificationService>(),
+                context.Services.GetRequiredService<IHttpClientFactory>().CreateClient(TestPublicAddressHttpClient),
+                context.Services.GetRequiredService<ResourceLoggerService>().GetLogger(tunnel.Resource),
+                context.CancellationToken),
+            new CommandOptions
+            {
+                Description = "Send a GET to the public address, as a visitor would, and report the status and response time.",
+                UpdateState = context => context.ResourceSnapshot.State?.Text == KnownResourceStates.Running
+                    ? ResourceCommandState.Enabled : ResourceCommandState.Disabled,
+                IconName = "HeartPulse",
+            });
+
         // A pair that shows one at a time: request logging can be switched without restarting the tunnel.
         tunnel.WithCommand(LogRequestsCommand, "Log requests", context =>
             GroundhogTunnelRunner.SetRequestLoggingAsync(
@@ -706,6 +726,8 @@ public static class GroundhogTunnelBuilderExtensions
         }
 
         services.AddSingleton<GroundhogTunnelRunner>();
+        services.AddHttpClient(TestPublicAddressHttpClient)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<GroundhogTunnelRunner>());
     }
 

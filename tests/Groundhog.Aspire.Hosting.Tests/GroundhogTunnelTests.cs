@@ -50,7 +50,7 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         var commands = tunnel.Resource.Annotations.OfType<ResourceCommandAnnotation>().ToDictionary(c => c.Name);
         Assert.Equal(
             [KnownResourceCommands.StartCommand, KnownResourceCommands.StopCommand, KnownResourceCommands.RestartCommand,
-                GroundhogTunnelBuilderExtensions.LogRequestsCommand, GroundhogTunnelBuilderExtensions.StopLoggingRequestsCommand],
+                GroundhogTunnelBuilderExtensions.TestPublicAddressCommand, GroundhogTunnelBuilderExtensions.LogRequestsCommand, GroundhogTunnelBuilderExtensions.StopLoggingRequestsCommand],
             commands.Keys);
         using var services = builder.Services.BuildServiceProvider();
 
@@ -394,39 +394,42 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         public Task<string[]> RecordStates(string resourceName, string until)
         {
             var current = CurrentState(resourceName);
-            var watching = new TaskCompletionSource();
-            var recording = Task.Run(async () =>
+            var timeout = CancellationTokenSource.CreateLinkedTokenSource(Cancellation);
+            timeout.CancelAfter(s_timeout);
+            var events = Notifications.WatchAsync(timeout.Token).GetAsyncEnumerator(timeout.Token);
+
+            // The watch subscribes when it's first advanced; do that before returning so no change is missed.
+            var next = events.MoveNextAsync();
+            return RecordAsync();
+
+            async Task<string[]> RecordAsync()
             {
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Cancellation);
-                timeout.CancelAfter(s_timeout);
                 var states = new List<string>();
-                var events = Notifications.WatchAsync(timeout.Token).GetAsyncEnumerator(timeout.Token);
-                watching.SetResult();
                 try
                 {
-                    while (await events.MoveNextAsync())
+                    while (await next)
                     {
                         // The watch replays every resource's current state first; those aren't changes.
                         var state = events.Current.Snapshot.State?.Text;
-                        if (events.Current.Resource.Name != resourceName || state is null || state == (states.LastOrDefault() ?? current))
+                        if (events.Current.Resource.Name == resourceName && state is not null && state != (states.LastOrDefault() ?? current))
                         {
-                            continue;
+                            states.Add(state);
+                            if (state == until)
+                            {
+                                return [.. states];
+                            }
                         }
-                        states.Add(state);
-                        if (state == until)
-                        {
-                            return states.ToArray();
-                        }
+                        next = events.MoveNextAsync();
                     }
                 }
                 finally
                 {
                     await events.DisposeAsync();
+                    timeout.Dispose();
                 }
 
                 throw new InvalidOperationException("The watch ended before the state was reached.");
-            });
-            return watching.Task.ContinueWith(_ => recording, TaskScheduler.Default).Unwrap();
+            }
         }
 
         public Task StopAsync() => _app.Services.GetRequiredService<GroundhogTunnelRunner>().StopAsync(Cancellation);
