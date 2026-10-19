@@ -350,15 +350,49 @@ which have no groundhog. To choose another Fluent UI icon, call `WithIconName` o
 | Reconnecting | The connection dropped (sleep, network change, relay restart). The agent retries by itself: 1, 2, 4, 8, 16, then every 30 seconds. |
 | Failed to start | The tunnel stopped without ever connecting: a bad setting, a rejected key, an unknown tunnel. The reason is in its console log. |
 | Exited | The tunnel was connected but stopped for good, for example because the key was regenerated or another agent took the tunnel over. |
-
-After a tunnel fails to start or exits, use its **Reconnect** command in the Aspire dashboard to start a new agent
-without restarting the AppHost. It reads the current relay, tunnel name, credential and target endpoint again.
-The command is disabled while the tunnel is active, including automatic reconnection. Duplicate commands cannot
-start overlapping agents. Environment variables already resolved for other resources retain their existing values.
+| Stopping | The tunnel's **Stop** or **Restart** command is stopping its agent. |
+| Finished | The tunnel was stopped by its **Stop** command or by the AppHost shutting down. |
 
 The tunnel's console log has one line per connection change, for example
 `Connected: https://my-tunnel.groundhog.unifinity.com/ → http://localhost:5173/`, and the reason whenever it disconnects or
 stops. Its details show the relay, the tunnel name and where requests go; the key is never shown.
+
+### Dashboard commands
+
+Aspire adds Start, Stop and Restart to executables, containers and projects itself. A tunnel's agent runs inside the
+AppHost process instead, so the package adds the same commands to the tunnel. They use Aspire's own command names
+(`resource-start`, `resource-stop`, `resource-restart`), so the dashboard places them where it places the built-in
+ones.
+
+| Command | Available when | What it does |
+| --- | --- | --- |
+| Start | Not started, Finished, Exited or Failed to start | Starts a new agent. It reads the relay, tunnel name, key and target endpoint again, so a key or endpoint that changed since the last run is used. |
+| Stop | Starting, Connecting, Running or Reconnecting | Stops this tunnel's agent. The state goes to Stopping, then Finished. The AppHost and other tunnels keep running. |
+| Restart | Starting, Connecting, Running or Reconnecting | Stops the agent, then starts a new one with the current settings: Stopping, Finished, Starting, Connecting, Running. |
+| Log requests | Request logging is off | Turns on [request logging](#request-logging) without restarting the tunnel. |
+| Stop logging requests | Request logging is on | Turns request logging off. |
+
+Start and Stop show one at a time, like Aspire's built-in commands. Only one command runs per tunnel at a time, so two
+clicks cannot start overlapping agents. Environment variables already resolved for other resources keep the values
+they had when those resources started.
+
+A resource that waits for the tunnel with `WaitFor` waits until the tunnel is Running. Stopping the tunnel later
+doesn't stop that resource.
+
+### Start a tunnel only when you need it
+
+By default a tunnel starts with the AppHost. To keep `my-tunnel` stopped until you click **Start** in the dashboard,
+add Aspire's `WithExplicitStart()` to the tunnel builder:
+
+```csharp
+var web = builder.AddProject<Projects.Web>("web");
+
+web.WithGroundhogTunnel("my-tunnel", configure: tunnel => tunnel.WithExplicitStart());
+```
+
+The tunnel shows as Not started until you start it. A resource that waits for it with `WaitFor` waits until then.
+Resources that use `tunnel.Resource.PublicAddress` still start: after a few seconds without a connection, the address
+is `https://my-tunnel.groundhog.unifinity.com`.
 
 ### Request logging
 
@@ -369,7 +403,8 @@ GET /api/health 200 12 ms
 WS /socket 101 850 ms
 ```
 
-Logging is off by default. Lines contain the method (`WS` for WebSockets), path, status and duration in milliseconds;
+Logging is off by default. The tunnel's **Log requests** and **Stop logging requests** dashboard commands switch it on
+and off while the AppHost runs; the tunnel's **Request logging** detail shows which is in effect. Lines contain the method (`WS` for WebSockets), path, status and duration in milliseconds;
 query strings, headers and bodies are omitted. WebSocket duration covers the full connection and is logged when it
 closes. The `Connected:` line includes the public URL for opening the live app; individual lines describe completed
 traffic and do not link to stored request details.

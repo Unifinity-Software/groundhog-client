@@ -24,9 +24,9 @@ refusals exit 3. See [the full Agent behavior](agent.md#reconnecting).
 
 ## Recover Aspire without restarting everything
 
-When a tunnel is permanently stopped, use its **Reconnect** command after correcting its parameters. The command
-reads the current name, relay, credential and endpoint. It is disabled while the client is connected or automatically
-retrying; it cannot start a second overlapping agent. Other resources' environment variables already resolved from
+When a tunnel is permanently stopped, use its **Start** command after correcting its parameters. While it's running or
+retrying, use **Restart** instead. Both read the current name, relay, credential and endpoint, and neither can start a
+second overlapping agent. Other resources' environment variables already resolved from
 `PublicAddress` or `PublicHost` retain their values. Restart an affected resource if those values changed.
 
 For a rotated key, update the key parameter through Manage User Secrets or your secret configuration:
