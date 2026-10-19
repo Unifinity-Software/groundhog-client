@@ -8,8 +8,8 @@ using Microsoft.Extensions.Logging;
 namespace Groundhog.Aspire.Hosting.Internal;
 
 /// <summary>
-/// Runs each tunnel's agent in the AppHost process for as long as the AppHost runs, and reflects the agent's status
-/// in the tunnel's dashboard state, URL and console log.
+/// Runs each tunnel's agent in the AppHost process, and reflects the agent's status in the tunnel's dashboard state,
+/// URL and console log. An agent runs until the AppHost stops or the tunnel's Stop or Restart command stops it.
 /// </summary>
 internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
 {
@@ -18,14 +18,19 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
     internal const string TunnelProperty = "groundhog.tunnel";
     internal const string TargetProperty = "groundhog.target";
     internal const string VisitorAccessProperty = "groundhog.visitor-access";
+    internal const string RequestLoggingProperty = "groundhog.request-logging";
 
-    private static readonly ResourceStateSnapshot s_connecting = new("Connecting", KnownResourceStateStyles.Info);
-    private static readonly ResourceStateSnapshot s_reconnecting = new("Reconnecting", KnownResourceStateStyles.Warn);
+    internal const string ConnectingState = "Connecting";
+    internal const string ReconnectingState = "Reconnecting";
+
+    private static readonly ResourceStateSnapshot s_connecting = new(ConnectingState, KnownResourceStateStyles.Info);
+    private static readonly ResourceStateSnapshot s_reconnecting = new(ReconnectingState, KnownResourceStateStyles.Warn);
 
     private readonly CancellationTokenSource _stopping = new();
     private readonly Lock _gate = new();
-    private readonly Dictionary<GroundhogTunnelResource, Task> _runs = [];
+    private readonly Dictionary<GroundhogTunnelResource, TunnelRun> _runs = [];
     private readonly HashSet<GroundhogTunnelResource> _terminal = [];
+    private readonly HashSet<GroundhogTunnelResource> _changing = [];
     private bool _stopped;
 
     /// <summary>Starts the tunnel's agent in the background and returns at once.</summary>
@@ -39,7 +44,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
             }
             if (_runs.TryGetValue(resource, out var existing))
             {
-                return existing;
+                return existing.Task;
             }
             return StartCore(resource, notifications, logger);
         }
@@ -47,44 +52,147 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
 
     private Task StartCore(GroundhogTunnelResource resource, ResourceNotificationService notifications, ILogger logger)
     {
+        if (_runs.Remove(resource, out var previous))
+        {
+            previous.Cancellation.Dispose();
+        }
         _terminal.Remove(resource);
-        var run = Task.Run(() => RunAsync(resource, notifications, logger, _stopping.Token));
+
+        // Each run has its own cancellation, so one tunnel can stop while the AppHost and other tunnels keep running.
+        var run = new TunnelRun(CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token));
+        run.Task = Task.Run(() => RunAsync(run, resource, notifications, logger, run.Cancellation.Token));
         _runs[resource] = run;
-        return run;
+        return run.Task;
     }
 
-    internal async Task<ExecuteCommandResult> ReconnectAsync(GroundhogTunnelResource resource,
+    /// <summary>The Start command: starts a new agent for a tunnel that isn't running, with its current settings.</summary>
+    internal async Task<ExecuteCommandResult> StartTunnelAsync(GroundhogTunnelResource resource,
         ResourceNotificationService notifications, ILogger logger, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        Task previous;
+        if (BeginChange(resource) is { } refused)
+        {
+            return refused;
+        }
+        try
+        {
+            Task? previous;
+            lock (_gate)
+            {
+                if (_runs.TryGetValue(resource, out var run) && !_terminal.Contains(resource))
+                {
+                    return CommandResults.Failure("The tunnel is already running.");
+                }
+                previous = run?.Task;
+            }
+
+            // Finish the old run's final snapshot before a replacement can publish any state.
+            if (previous is not null)
+            {
+                await previous.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            return StartAfterChange(resource, notifications, logger);
+        }
+        finally
+        {
+            EndChange(resource);
+        }
+    }
+
+    /// <summary>The Stop command: stops one tunnel's agent and leaves the AppHost and other tunnels running.</summary>
+    internal async Task<ExecuteCommandResult> StopTunnelAsync(GroundhogTunnelResource resource,
+        ResourceNotificationService notifications, CancellationToken cancellationToken)
+    {
+        if (BeginChange(resource) is { } refused)
+        {
+            return refused;
+        }
+        try
+        {
+            return await StopCoreAsync(resource, notifications, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            EndChange(resource);
+        }
+    }
+
+    /// <summary>The Restart command: stops the tunnel's agent, then starts a new one with the current settings.</summary>
+    internal async Task<ExecuteCommandResult> RestartTunnelAsync(GroundhogTunnelResource resource,
+        ResourceNotificationService notifications, ILogger logger, CancellationToken cancellationToken)
+    {
+        if (BeginChange(resource) is { } refused)
+        {
+            return refused;
+        }
+        try
+        {
+            var stopped = await StopCoreAsync(resource, notifications, cancellationToken).ConfigureAwait(false);
+            return stopped.Success ? StartAfterChange(resource, notifications, logger) : stopped;
+        }
+        finally
+        {
+            EndChange(resource);
+        }
+    }
+
+    private async Task<ExecuteCommandResult> StopCoreAsync(GroundhogTunnelResource resource,
+        ResourceNotificationService notifications, CancellationToken cancellationToken)
+    {
+        TunnelRun? run;
         lock (_gate)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_stopped)
+            if (!_runs.TryGetValue(resource, out run) || _terminal.Contains(resource))
             {
-                return CommandResults.Failure("The AppHost is stopping.");
+                return CommandResults.Failure("The tunnel isn't running.");
             }
-            if (!_terminal.Contains(resource) || !_runs.TryGetValue(resource, out previous!))
-            {
-                return CommandResults.Failure("The tunnel is still running.");
-            }
+
+            // From here the run publishes no more active states, so Stopping can't be overwritten by Running.
+            run.StopRequested = true;
         }
 
-        // Finish the old run's final snapshot before a replacement can publish any state.
-        await previous.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // A run that ended on its own in the meantime keeps its final state.
+        await notifications.PublishUpdateAsync(resource, s => KnownResourceStates.TerminalStates.Contains(s.State?.Text)
+            ? s
+            : s with { State = KnownResourceStates.Stopping }).ConfigureAwait(false);
+        await run.Cancellation.CancelAsync().ConfigureAwait(false);
+
+        // The run publishes Finished before it completes.
+        await run.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return CommandResults.Success();
+    }
+
+    private ExecuteCommandResult StartAfterChange(GroundhogTunnelResource resource,
+        ResourceNotificationService notifications, ILogger logger)
+    {
         lock (_gate)
         {
             if (_stopped)
             {
                 return CommandResults.Failure("The AppHost is stopping.");
-            }
-            if (_runs[resource] != previous)
-            {
-                return CommandResults.Failure("The tunnel is already reconnecting.");
             }
             StartCore(resource, notifications, logger);
             return CommandResults.Success();
+        }
+    }
+
+    // One command at a time per tunnel, so two clicks can't start overlapping agents.
+    private ExecuteCommandResult? BeginChange(GroundhogTunnelResource resource)
+    {
+        lock (_gate)
+        {
+            if (_stopped)
+            {
+                return CommandResults.Failure("The AppHost is stopping.");
+            }
+            return _changing.Add(resource) ? null : CommandResults.Failure("Another command is already changing the tunnel.");
+        }
+    }
+
+    private void EndChange(GroundhogTunnelResource resource)
+    {
+        lock (_gate)
+        {
+            _changing.Remove(resource);
         }
     }
 
@@ -96,7 +204,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
         lock (_gate)
         {
             _stopped = true;
-            runs = [.. _runs.Values];
+            runs = [.. _runs.Values.Select(run => run.Task)];
         }
         await _stopping.CancelAsync().ConfigureAwait(false);
 
@@ -104,7 +212,17 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
         await Task.WhenAll(runs).WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
-    public void Dispose() => _stopping.Dispose();
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            foreach (var run in _runs.Values)
+            {
+                run.Cancellation.Dispose();
+            }
+        }
+        _stopping.Dispose();
+    }
 
     /// <summary>The dashboard state a tunnel starts with, before the AppHost starts it.</summary>
     internal static CustomResourceSnapshot InitialSnapshot() => new()
@@ -116,6 +234,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
     };
 
     private async Task RunAsync(
+        TunnelRun run,
         GroundhogTunnelResource resource,
         ResourceNotificationService notifications,
         ILogger logger,
@@ -125,7 +244,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
         Uri target;
         try
         {
-            await notifications.PublishUpdateAsync(resource, s => s with
+            await PublishActiveAsync(notifications, resource, run, s => s with
             {
                 State = KnownResourceStates.Starting,
                 StartTimeStamp = DateTime.UtcNow,
@@ -160,7 +279,14 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                     ? await access.ResolveAsync(cancellationToken).ConfigureAwait(false)
                     : null,
                 Client = GroundhogClientInfo.FromAssembly("Groundhog.Aspire.Hosting", typeof(GroundhogTunnelRunner).Assembly),
-                OnRequestCompleted = resource.RequestLoggingEnabled ? request => LogRequest(logger, request) : null,
+                // Checked per request, so the dashboard's request logging commands take effect without a restart.
+                OnRequestCompleted = request =>
+                {
+                    if (resource.RequestLoggingEnabled)
+                    {
+                        LogRequest(logger, request);
+                    }
+                },
             };
 
             // Validates every setting; messages never repeat the credential.
@@ -176,12 +302,14 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                     new ResourcePropertySnapshot(VisitorAccessProperty, resource.VisitorAccess?.Describe() ?? "Unchanged")
                     {
                         DisplayName = "Visitor access",
-                    }),
+                    },
+                    RequestLoggingSnapshot(resource.RequestLoggingEnabled)),
             }).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             resource.ReportFirstOutcome(null);
+            await PublishStoppedAsync(notifications, resource, KnownResourceStates.Finished).ConfigureAwait(false);
             return;
         }
         catch (Exception ex)
@@ -202,7 +330,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
             switch (status.State)
             {
                 case GroundhogAgentState.Connecting:
-                    await notifications.PublishUpdateAsync(resource, s => s with { State = s_connecting }).ConfigureAwait(false);
+                    await PublishActiveAsync(notifications, resource, run, s => s with { State = s_connecting }).ConfigureAwait(false);
                     break;
 
                 case GroundhogAgentState.Connected:
@@ -210,7 +338,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                     var address = status.PublicAddress!;
                     resource.ReportFirstOutcome(address);
                     logger.LogInformation("Connected: {PublicAddress} → {Target}", address, target);
-                    await notifications.PublishUpdateAsync(resource, s => s with
+                    await PublishActiveAsync(notifications, resource, run, s => s with
                     {
                         State = KnownResourceStates.Running,
                         Urls = [new UrlSnapshot("public", address.ToString(), IsInternal: false)],
@@ -220,7 +348,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                 case GroundhogAgentState.Reconnecting:
                     resource.ReportFirstOutcome(null);
                     logger.LogWarning("Disconnected: {Reason} Reconnecting in {Delay}.", status.Reason, Describe(status.RetryDelay));
-                    await notifications.PublishUpdateAsync(resource, s => s with
+                    await PublishActiveAsync(notifications, resource, run, s => s with
                     {
                         State = s_reconnecting,
                         Urls = [.. s.Urls.Select(url => url with { IsInactive = true })],
@@ -230,7 +358,7 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
                 case GroundhogAgentState.Stopped:
                     resource.ReportFirstOutcome(null);
 
-                    // Cancelled is the AppHost stopping; without a stop reason the agent failed and RunAsync says how.
+                    // Cancelled is the AppHost stopping or a Stop command; without a stop reason the agent failed and RunAsync says how.
                     if (status.StopReason is { } stopReason && stopReason != GroundhogAgentStopReason.Cancelled)
                     {
                         logger.LogError("Stopped: {Reason}", status.Reason);
@@ -259,6 +387,14 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
         await PublishStoppedAsync(notifications, resource, state).ConfigureAwait(false);
     }
 
+    // Skips the update once a command has asked the run to stop, so the dashboard keeps showing Stopping.
+    private static Task PublishActiveAsync(
+        ResourceNotificationService notifications,
+        GroundhogTunnelResource resource,
+        TunnelRun run,
+        Func<CustomResourceSnapshot, CustomResourceSnapshot> update) =>
+        notifications.PublishUpdateAsync(resource, s => run.StopRequested ? s : update(s));
+
     private Task PublishStoppedAsync(
         ResourceNotificationService notifications,
         GroundhogTunnelResource resource,
@@ -285,6 +421,23 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
         request.StatusCode,
         request.Duration.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture));
 
+    /// <summary>Switches request logging on or off for the tunnel's current and later agents.</summary>
+    internal static async Task<ExecuteCommandResult> SetRequestLoggingAsync(
+        GroundhogTunnelResource resource, ResourceNotificationService notifications, bool enabled)
+    {
+        resource.RequestLoggingEnabled = enabled;
+
+        // The new snapshot also makes the dashboard re-evaluate which of the two commands to show.
+        await notifications.PublishUpdateAsync(resource, s => s with
+        {
+            Properties = WithProperties(s.Properties, RequestLoggingSnapshot(enabled)),
+        }).ConfigureAwait(false);
+        return CommandResults.Success();
+    }
+
+    private static ResourcePropertySnapshot RequestLoggingSnapshot(bool enabled) =>
+        new(RequestLoggingProperty, enabled ? "On" : "Off") { DisplayName = "Request logging" };
+
     private static ImmutableArray<ResourcePropertySnapshot> WithProperties(
         ImmutableArray<ResourcePropertySnapshot> existing,
         params ResourcePropertySnapshot[] properties)
@@ -299,4 +452,20 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
 
     private static string Describe(TimeSpan? delay) =>
         delay is { } d ? $"{Math.Max(1, (int)Math.Round(d.TotalSeconds))} s" : "a moment";
+
+    /// <summary>One agent run of a tunnel: from Start (or AppHost start) until it stops.</summary>
+    private sealed class TunnelRun(CancellationTokenSource cancellation)
+    {
+        public CancellationTokenSource Cancellation { get; } = cancellation;
+
+        public Task Task { get; set; } = Task.CompletedTask;
+
+        private volatile bool _stopRequested;
+
+        public bool StopRequested
+        {
+            get => _stopRequested;
+            set => _stopRequested = value;
+        }
+    }
 }

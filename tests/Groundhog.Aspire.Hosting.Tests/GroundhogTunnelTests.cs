@@ -42,26 +42,49 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
     }
 
     [Fact]
-    public void ReconnectIsEnabledOnlyForTerminalStates()
+    public void LifecycleCommandsFollowTheTunnelState()
     {
         var builder = CreateBuilder();
         var key = builder.AddParameter("command-key", fixture.Key, secret: true);
         var tunnel = builder.AddGroundhogTunnel("tunnel", fixture.Relay.Address.ToString(), "command-state", key);
-        var command = Assert.Single(tunnel.Resource.Annotations.OfType<ResourceCommandAnnotation>());
+        var commands = tunnel.Resource.Annotations.OfType<ResourceCommandAnnotation>().ToDictionary(c => c.Name);
+        Assert.Equal(
+            [KnownResourceCommands.StartCommand, KnownResourceCommands.StopCommand, KnownResourceCommands.RestartCommand,
+                GroundhogTunnelBuilderExtensions.LogRequestsCommand, GroundhogTunnelBuilderExtensions.StopLoggingRequestsCommand],
+            commands.Keys);
         using var services = builder.Services.BuildServiceProvider();
-        foreach (var state in new[] { KnownResourceStates.NotStarted, KnownResourceStates.Starting, "Connecting", KnownResourceStates.Running, "Reconnecting", KnownResourceStates.FailedToStart, KnownResourceStates.Exited, KnownResourceStates.Finished })
+
+        const ResourceCommandState on = ResourceCommandState.Enabled, off = ResourceCommandState.Disabled, hidden = ResourceCommandState.Hidden;
+        (string State, ResourceCommandState Start, ResourceCommandState Stop, ResourceCommandState Restart)[] expected =
+        [
+            (KnownResourceStates.NotStarted, on, hidden, off),
+            (KnownResourceStates.Starting, hidden, on, on),
+            ("Connecting", hidden, on, on),
+            (KnownResourceStates.Running, hidden, on, on),
+            ("Reconnecting", hidden, on, on),
+            (KnownResourceStates.Stopping, off, off, off),
+            (KnownResourceStates.Finished, on, hidden, off),
+            (KnownResourceStates.Exited, on, hidden, off),
+            (KnownResourceStates.FailedToStart, on, hidden, off),
+        ];
+        foreach (var row in expected)
         {
-            Assert.Equal(KnownResourceStates.TerminalStates.Contains(state) ? ResourceCommandState.Enabled : ResourceCommandState.Disabled,
-                command.UpdateState(new UpdateCommandStateContext
-                {
-                    ResourceSnapshot = GroundhogTunnelRunner.InitialSnapshot() with { State = state },
-                    Services = services,
-                }));
+            var context = new UpdateCommandStateContext
+            {
+                ResourceSnapshot = GroundhogTunnelRunner.InitialSnapshot() with { State = row.State },
+                Services = services,
+            };
+            Assert.Equal(
+                (row.State, row.Start, row.Stop, row.Restart),
+                (row.State,
+                    commands[KnownResourceCommands.StartCommand].UpdateState(context),
+                    commands[KnownResourceCommands.StopCommand].UpdateState(context),
+                    commands[KnownResourceCommands.RestartCommand].UpdateState(context)));
         }
     }
 
     [Fact]
-    public async Task ReconnectUsesCurrentSettingsAndRejectsDuplicateCommands()
+    public async Task StartUsesCurrentSettingsAndRejectsDuplicateCommands()
     {
         fixture.Relay.Tunnel("restart-refused").RefuseAll(401);
         var builder = CreateBuilder();
@@ -78,19 +101,78 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         fixture.Relay.Tunnel("restart-refused").RefuseAll(0);
         var updatedTarget = new UriBuilder(fixture.LocalApp) { Host = "localhost" }.Uri;
         Allocate(web.Resource, updatedTarget);
-        var results = await Task.WhenAll(host.ReconnectAsync(tunnel.Resource), host.ReconnectAsync(tunnel.Resource));
+        var results = await Task.WhenAll(
+            host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.StartCommand),
+            host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.StartCommand));
         Assert.Single(results, result => result.Success);
         var running = await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
         Assert.Equal("https://restart-refused.groundhog.unifinity.com/", Assert.Single(running.Snapshot.Urls).Url);
         Assert.Null(running.Snapshot.StopTimeStamp);
         Assert.Equal(updatedTarget.ToString(), running.Snapshot.Properties.Single(p => p.Name == GroundhogTunnelRunner.TargetProperty).Value);
-        Assert.False((await host.ReconnectAsync(tunnel.Resource)).Success);
+        Assert.False((await host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.StartCommand)).Success);
         var connection = await fixture.Relay.Tunnel("restart-refused").Connections.Reader.ReadAsync(Cancellation);
         Assert.StartsWith("restart-refused.groundhog.unifinity.com|/echo|", await connection.Client.GetStringAsync(
             new Uri("http://restart-refused.groundhog.unifinity.com/echo"), Cancellation), StringComparison.Ordinal);
         await host.StopAsync();
-        Assert.False((await host.ReconnectAsync(tunnel.Resource)).Success);
+        Assert.False((await host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.StartCommand)).Success);
         Assert.Equal(KnownResourceStates.Finished, (await host.WaitForFinalStateAsync("tunnel")).Snapshot.State?.Text);
+    }
+
+    [Fact]
+    public async Task StopAndRestartChangeOneTunnelWithoutStoppingTheAppHost()
+    {
+        var builder = CreateBuilder();
+        var key = builder.AddParameter("lifecycle-key", fixture.Key, secret: true);
+        var web = builder.AddExecutable("web", "web", ".").WithHttpEndpoint(name: "http");
+        var tunnel = builder.AddGroundhogTunnel("tunnel", fixture.Relay.Address.ToString(), "lifecycle", key)
+            .WithReference(web.GetEndpoint("http"));
+        var otherTunnel = builder.AddGroundhogTunnel("other-tunnel", fixture.Relay.Address.ToString(), "lifecycle-other", key)
+            .WithReference(web.GetEndpoint("http"));
+        Allocate(web.Resource, fixture.LocalApp);
+        await using var host = new TestAppHost(builder);
+        await host.InitializeAsync(tunnel.Resource);
+        await host.InitializeAsync(otherTunnel.Resource);
+        await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
+        await host.WaitForStateAsync("other-tunnel", KnownResourceStates.Running);
+
+        var stopStates = host.RecordStates("tunnel", until: KnownResourceStates.Finished);
+        Assert.True((await host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.StopCommand)).Success);
+        Assert.Equal([KnownResourceStates.Stopping, KnownResourceStates.Finished], await stopStates);
+        Assert.False((await host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.StopCommand)).Success);
+        Assert.Equal(KnownResourceStates.Running, host.CurrentState("other-tunnel"));
+
+        var startStates = host.RecordStates("tunnel", until: KnownResourceStates.Running);
+        Assert.True((await host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.StartCommand)).Success);
+        Assert.Equal([KnownResourceStates.Starting, "Connecting", KnownResourceStates.Running], await startStates);
+
+        var restartStates = host.RecordStates("tunnel", until: KnownResourceStates.Running);
+        Assert.True((await host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.RestartCommand)).Success);
+        Assert.Equal(
+            [KnownResourceStates.Stopping, KnownResourceStates.Finished, KnownResourceStates.Starting, "Connecting", KnownResourceStates.Running],
+            await restartStates);
+        Assert.Equal(KnownResourceStates.Running, host.CurrentState("other-tunnel"));
+    }
+
+    [Fact]
+    public async Task AnExplicitStartTunnelWaitsForTheStartCommand()
+    {
+        var builder = CreateBuilder();
+        var key = builder.AddParameter("explicit-key", fixture.Key, secret: true);
+        var web = builder.AddExecutable("web", "web", ".").WithHttpEndpoint(name: "http");
+        var tunnel = builder.AddGroundhogTunnel("tunnel", fixture.Relay.Address.ToString(), "explicit-start", key)
+            .WithReference(web.GetEndpoint("http"))
+            .WithExplicitStart();
+        Allocate(web.Resource, fixture.LocalApp);
+        await using var host = new TestAppHost(builder);
+        await host.InitializeAsync(tunnel.Resource);
+
+        // Initialization started no agent, so there's nothing to stop and no state has been published.
+        Assert.False((await host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.StopCommand)).Success);
+        Assert.Null(host.CurrentState("tunnel"));
+
+        Assert.True((await host.ExecuteAsync(tunnel.Resource, KnownResourceCommands.StartCommand)).Success);
+        var running = await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
+        Assert.Equal("https://explicit-start.groundhog.unifinity.com/", Assert.Single(running.Snapshot.Urls).Url);
     }
 
     [Fact]
@@ -284,8 +366,8 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
                 new InitializeResourceEvent(resource, eventing, Logs, Notifications, _app.Services), Cancellation);
         }
 
-        public Task<ExecuteCommandResult> ReconnectAsync(GroundhogTunnelResource resource) =>
-            resource.Annotations.OfType<ResourceCommandAnnotation>().Single(command => command.Name == "reconnect")
+        public Task<ExecuteCommandResult> ExecuteAsync(GroundhogTunnelResource resource, string commandName) =>
+            resource.Annotations.OfType<ResourceCommandAnnotation>().Single(command => command.Name == commandName)
                 .ExecuteCommand(new ExecuteCommandContext
                 {
                     Services = _app.Services,
@@ -294,6 +376,58 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
                     ResourceName = resource.Name,
                     CancellationToken = Cancellation,
                 });
+
+        public Task<ResourceEvent> WaitForPropertyAsync(string resourceName, string property, string value) =>
+            Notifications.WaitForResourceAsync(
+                    resourceName,
+                    e => e.Snapshot.Properties.Any(p => p.Name == property && Equals(p.Value, value)),
+                    Cancellation)
+                .WaitAsync(s_timeout, Cancellation);
+
+        public string? CurrentState(string resourceName) =>
+            Notifications.TryGetCurrentState(resourceName, out var e) ? e.Snapshot.State?.Text : null;
+
+        /// <summary>
+        /// Records each state change of the resource, from now until it reaches <paramref name="until"/>. Repeated
+        /// snapshots with the same state, such as a property update, count once.
+        /// </summary>
+        public Task<string[]> RecordStates(string resourceName, string until)
+        {
+            var current = CurrentState(resourceName);
+            var watching = new TaskCompletionSource();
+            var recording = Task.Run(async () =>
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Cancellation);
+                timeout.CancelAfter(s_timeout);
+                var states = new List<string>();
+                var events = Notifications.WatchAsync(timeout.Token).GetAsyncEnumerator(timeout.Token);
+                watching.SetResult();
+                try
+                {
+                    while (await events.MoveNextAsync())
+                    {
+                        // The watch replays every resource's current state first; those aren't changes.
+                        var state = events.Current.Snapshot.State?.Text;
+                        if (events.Current.Resource.Name != resourceName || state is null || state == (states.LastOrDefault() ?? current))
+                        {
+                            continue;
+                        }
+                        states.Add(state);
+                        if (state == until)
+                        {
+                            return states.ToArray();
+                        }
+                    }
+                }
+                finally
+                {
+                    await events.DisposeAsync();
+                }
+
+                throw new InvalidOperationException("The watch ended before the state was reached.");
+            });
+            return watching.Task.ContinueWith(_ => recording, TaskScheduler.Default).Unwrap();
+        }
 
         public Task StopAsync() => _app.Services.GetRequiredService<GroundhogTunnelRunner>().StopAsync(Cancellation);
 

@@ -1,6 +1,8 @@
 using System.Net.WebSockets;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using Groundhog.Aspire.Hosting.Internal;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Groundhog.Aspire.Hosting.Tests;
 
@@ -51,6 +53,45 @@ public sealed partial class GroundhogTunnelTests
         {
             Assert.DoesNotContain(logs, line => line.Contains(secret, StringComparison.Ordinal));
         }
+    }
+
+    [Fact]
+    public async Task DashboardCommandsSwitchRequestLoggingWhileTheTunnelRuns()
+    {
+        var builder = CreateBuilder();
+        var key = builder.AddParameter("groundhog-key", fixture.Key, secret: true);
+        var web = builder.AddExecutable("web", "web", ".").WithHttpEndpoint(name: "http");
+        var tunnel = builder.AddGroundhogTunnel("tunnel", fixture.Relay.Address.ToString(), "logged-switch", key)
+            .WithReference(web.GetEndpoint("http"));
+        var commands = tunnel.Resource.Annotations.OfType<ResourceCommandAnnotation>().ToDictionary(c => c.Name);
+        Allocate(web.Resource, fixture.LocalApp);
+        await using var host = new TestAppHost(builder);
+        await host.InitializeAsync(tunnel.Resource);
+        var running = await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
+        Assert.Equal("Off", running.Snapshot.Properties.Single(p => p.Name == GroundhogTunnelRunner.RequestLoggingProperty).Value);
+        var connection = await fixture.Relay.Tunnel("logged-switch").Connections.Reader.ReadAsync(Cancellation);
+        async Task GetAsync(string path)
+        {
+            using var response = await connection.Client.GetAsync($"http://logged-switch.groundhog.unifinity.com{path}", Cancellation);
+            await response.Content.ReadAsStringAsync(Cancellation);
+        }
+
+        await GetAsync("/before");
+        Assert.True((await host.ExecuteAsync(tunnel.Resource, GroundhogTunnelBuilderExtensions.LogRequestsCommand)).Success);
+        var switchedOn = await host.WaitForPropertyAsync("tunnel", GroundhogTunnelRunner.RequestLoggingProperty, "On");
+        using var services = builder.Services.BuildServiceProvider();
+        var context = new UpdateCommandStateContext { ResourceSnapshot = switchedOn.Snapshot, Services = services };
+        Assert.Equal(ResourceCommandState.Hidden, commands[GroundhogTunnelBuilderExtensions.LogRequestsCommand].UpdateState(context));
+        Assert.Equal(ResourceCommandState.Enabled, commands[GroundhogTunnelBuilderExtensions.StopLoggingRequestsCommand].UpdateState(context));
+        await GetAsync("/during");
+        await host.ReadLogUntilAsync(tunnel.Resource, line => line.Contains("GET /during", StringComparison.Ordinal));
+
+        Assert.True((await host.ExecuteAsync(tunnel.Resource, GroundhogTunnelBuilderExtensions.StopLoggingRequestsCommand)).Success);
+        await GetAsync("/after");
+        var logs = await host.ReadAllLogsAfterStopAsync(tunnel.Resource);
+        Assert.Single(logs, line => line.Contains("GET /during", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs, line => line.Contains("GET /before", StringComparison.Ordinal)
+            || line.Contains("GET /after", StringComparison.Ordinal));
     }
 
     [Fact]

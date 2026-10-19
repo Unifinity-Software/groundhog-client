@@ -74,8 +74,9 @@ parameter holding the connection key copied when the tunnel was created. The tun
   dashboard or in a log.
 - The dashboard shows the tunnel as connecting, running (with its public address), reconnecting, or failed with
   the reason.
-- A stopped tunnel has a **Reconnect** command in the dashboard. It resolves the current settings again and starts
-  a new agent without restarting the AppHost. Active tunnels cannot be restarted with this command.
+- The tunnel has **Start**, **Stop** and **Restart** commands in the dashboard, like Aspire's executables and
+  containers. They stop or start this tunnel's agent without restarting the AppHost; Start and Restart read the
+  current settings again. Add `WithExplicitStart()` to the tunnel builder to keep it stopped until you click Start.
 - `PublicAddress` (for example `https://my-tunnel.groundhog.unifinity.com`) and `PublicHost` (`my-tunnel.groundhog.unifinity.com`)
   can be passed to `WithEnvironment` or used in a `ReferenceExpression`.
 - Nothing waits for the tunnel unless it opts in with `WaitFor`, so an unreachable service never stops your app from
@@ -107,7 +108,8 @@ web.WithGroundhogTunnel("my-tunnel", configure: tunnel => tunnel.WithRequestLogg
 ```
 
 Lines look like `GET /api/health 200 12 ms` or `WS /socket 101 850 ms`. WebSockets are reported when they close.
-Logging is off by default; query strings, headers and bodies are omitted. The existing `Connected:` line includes
+Logging is off by default; the tunnel's **Log requests** and **Stop logging requests** dashboard commands switch it
+while the AppHost runs. Query strings, headers and bodies are omitted. The existing `Connected:` line includes
 the public tunnel URL, which opens the live app. Request lines describe completed traffic rather than linking to a
 stored request.
 

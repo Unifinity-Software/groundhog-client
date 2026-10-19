@@ -20,6 +20,9 @@ public static class GroundhogTunnelBuilderExtensions
     internal const string TunnelNameParameterName = "groundhog-tunnel-name";
     internal const string TunnelKeyParameterName = "groundhog-tunnel-key";
 
+    internal const string LogRequestsCommand = "groundhog-log-requests";
+    internal const string StopLoggingRequestsCommand = "groundhog-stop-logging-requests";
+
     /// <summary>
     /// Gives this resource a public HTTPS address through the hosted Groundhog service: adds a tunnel named
     /// <c>&lt;resource name&gt;-tunnel</c> that forwards to one of its endpoints, and a secret parameter
@@ -541,30 +544,116 @@ public static class GroundhogTunnelBuilderExtensions
         {
             AddRunner(builder.Services);
 
-            tunnel.WithCommand("reconnect", "Reconnect", context =>
-                context.Services.GetRequiredService<GroundhogTunnelRunner>().ReconnectAsync(
-                    tunnel.Resource,
-                    context.Services.GetRequiredService<ResourceNotificationService>(),
-                    context.Services.GetRequiredService<ResourceLoggerService>().GetLogger(tunnel.Resource),
-                    context.CancellationToken),
-                new CommandOptions
-                {
-                    Description = "Reconnect a stopped tunnel using its current settings.",
-                    UpdateState = context => KnownResourceStates.TerminalStates.Contains(context.ResourceSnapshot.State?.Text)
-                        ? ResourceCommandState.Enabled : ResourceCommandState.Disabled,
-                });
+            AddLifecycleCommands(tunnel);
 
             // Initialization runs before any resource starts. The agent runs in the background, so nothing waits for
-            // it unless a resource asks to with WaitFor.
+            // it unless a resource asks to with WaitFor. A tunnel with WithExplicitStart waits for its Start command.
             tunnel.OnInitializeResource((resource, e, _) =>
             {
-                e.Services.GetRequiredService<GroundhogTunnelRunner>().Start(resource, e.Notifications, e.Logger);
+                if (!resource.Annotations.OfType<ExplicitStartupAnnotation>().Any())
+                {
+                    e.Services.GetRequiredService<GroundhogTunnelRunner>().Start(resource, e.Notifications, e.Logger);
+                }
                 return Task.CompletedTask;
             });
         }
 
         return tunnel;
     }
+
+    /// <summary>
+    /// Adds the dashboard's Start, Stop and Restart commands. Aspire adds these to executables, containers and projects
+    /// itself, but not to custom resources such as a tunnel. They use Aspire's own command names, so the dashboard and
+    /// the <c>aspire</c> CLI treat them like the built-in ones.
+    /// </summary>
+    private static void AddLifecycleCommands(IResourceBuilder<GroundhogTunnelResource> tunnel)
+    {
+        tunnel.WithCommand(KnownResourceCommands.StartCommand, "Start", context =>
+            context.Services.GetRequiredService<GroundhogTunnelRunner>().StartTunnelAsync(
+                tunnel.Resource,
+                context.Services.GetRequiredService<ResourceNotificationService>(),
+                context.Services.GetRequiredService<ResourceLoggerService>().GetLogger(tunnel.Resource),
+                context.CancellationToken),
+            new CommandOptions
+            {
+                Description = "Start the tunnel's agent with the current settings.",
+                UpdateState = context => StartCommandState(context.ResourceSnapshot.State?.Text),
+                IconName = "Play",
+                IconVariant = IconVariant.Filled,
+                IsHighlighted = true,
+            });
+
+        tunnel.WithCommand(KnownResourceCommands.StopCommand, "Stop", context =>
+            context.Services.GetRequiredService<GroundhogTunnelRunner>().StopTunnelAsync(
+                tunnel.Resource,
+                context.Services.GetRequiredService<ResourceNotificationService>(),
+                context.CancellationToken),
+            new CommandOptions
+            {
+                Description = "Stop the tunnel's agent. The AppHost and other resources keep running.",
+                UpdateState = context => StopCommandState(context.ResourceSnapshot.State?.Text),
+                IconName = "Stop",
+                IconVariant = IconVariant.Filled,
+                IsHighlighted = true,
+            });
+
+        tunnel.WithCommand(KnownResourceCommands.RestartCommand, "Restart", context =>
+            context.Services.GetRequiredService<GroundhogTunnelRunner>().RestartTunnelAsync(
+                tunnel.Resource,
+                context.Services.GetRequiredService<ResourceNotificationService>(),
+                context.Services.GetRequiredService<ResourceLoggerService>().GetLogger(tunnel.Resource),
+                context.CancellationToken),
+            new CommandOptions
+            {
+                Description = "Stop the tunnel's agent and start a new one with the current settings.",
+                UpdateState = context => RestartCommandState(context.ResourceSnapshot.State?.Text),
+                IconName = "ArrowCounterclockwise",
+                IconVariant = IconVariant.Regular,
+            });
+
+        // A pair that shows one at a time: request logging can be switched without restarting the tunnel.
+        tunnel.WithCommand(LogRequestsCommand, "Log requests", context =>
+            GroundhogTunnelRunner.SetRequestLoggingAsync(
+                tunnel.Resource, context.Services.GetRequiredService<ResourceNotificationService>(), enabled: true),
+            new CommandOptions
+            {
+                Description = "Write one console line per completed request: method, path, status and duration.",
+                UpdateState = _ => tunnel.Resource.RequestLoggingEnabled ? ResourceCommandState.Hidden : ResourceCommandState.Enabled,
+                IconName = "DocumentText",
+            });
+
+        tunnel.WithCommand(StopLoggingRequestsCommand, "Stop logging requests", context =>
+            GroundhogTunnelRunner.SetRequestLoggingAsync(
+                tunnel.Resource, context.Services.GetRequiredService<ResourceNotificationService>(), enabled: false),
+            new CommandOptions
+            {
+                Description = "Stop writing a console line per request.",
+                UpdateState = _ => tunnel.Resource.RequestLoggingEnabled ? ResourceCommandState.Enabled : ResourceCommandState.Hidden,
+                IconName = "DocumentDismiss",
+            });
+    }
+
+    // Start shows while the tunnel isn't running, Stop while it is; the other one is hidden, like Aspire's own commands.
+    internal static ResourceCommandState StartCommandState(string? state) =>
+        IsStopped(state) ? ResourceCommandState.Enabled
+        : state == KnownResourceStates.Stopping ? ResourceCommandState.Disabled
+        : ResourceCommandState.Hidden;
+
+    internal static ResourceCommandState StopCommandState(string? state) =>
+        IsActive(state) ? ResourceCommandState.Enabled
+        : state == KnownResourceStates.Stopping ? ResourceCommandState.Disabled
+        : ResourceCommandState.Hidden;
+
+    internal static ResourceCommandState RestartCommandState(string? state) =>
+        IsActive(state) ? ResourceCommandState.Enabled : ResourceCommandState.Disabled;
+
+    private static bool IsStopped(string? state) =>
+        state is null || state == KnownResourceStates.NotStarted || KnownResourceStates.TerminalStates.Contains(state);
+
+    // Starting covers waiting for the target's port; Connecting and Reconnecting are the runner's own states.
+    private static bool IsActive(string? state) =>
+        state == KnownResourceStates.Starting || state == KnownResourceStates.Running
+        || state == GroundhogTunnelRunner.ConnectingState || state == GroundhogTunnelRunner.ReconnectingState;
 
     /// <summary>
     /// Leaves environment variables whose value uses a tunnel, such as <see cref="GroundhogTunnelResource.PublicAddress"/>,

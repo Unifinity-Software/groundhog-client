@@ -73,7 +73,14 @@ public sealed class GroundhogTunnelResource : Resource
     /// <summary>The endpoint requests are forwarded to, set by <c>WithReference</c>.</summary>
     public EndpointReference? Target { get; internal set; }
 
-    internal bool RequestLoggingEnabled { get; set; }
+    private volatile bool _requestLoggingEnabled;
+
+    /// <summary>Set by <c>WithRequestLogging</c>, and switched while the AppHost runs by the dashboard's commands.</summary>
+    internal bool RequestLoggingEnabled
+    {
+        get => _requestLoggingEnabled;
+        set => _requestLoggingEnabled = value;
+    }
 
     /// <summary>The declared visitor access rules, set by <c>WithVisitorAccess</c>; null leaves the stored rules alone.</summary>
     internal VisitorAccessSource? VisitorAccess { get; set; }
