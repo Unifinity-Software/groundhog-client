@@ -77,6 +77,8 @@ parameter holding the connection key copied when the tunnel was created. The tun
 - The tunnel has **Start**, **Stop** and **Restart** commands in the dashboard, like Aspire's executables and
   containers. They stop or start this tunnel's agent without restarting the AppHost; Start and Restart read the
   current settings again. Add `WithExplicitStart()` to the tunnel builder to keep it stopped until you click Start.
+- **Test public address** sends a GET to the public address and shows the status and response time, which checks
+  DNS, the relay, the agent and your app in one step.
 - `PublicAddress` (for example `https://my-tunnel.groundhog.unifinity.com`) and `PublicHost` (`my-tunnel.groundhog.unifinity.com`)
   can be passed to `WithEnvironment` or used in a `ReferenceExpression`.
 - Nothing waits for the tunnel unless it opts in with `WaitFor`, so an unreachable service never stops your app from

@@ -421,6 +421,59 @@ internal sealed class GroundhogTunnelRunner : IHostedService, IDisposable
         request.StatusCode,
         request.Duration.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture));
 
+    /// <summary>The longest the Test public address command waits for a response.</summary>
+    internal static readonly TimeSpan AddressTestTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// The Test public address command: sends a GET to the tunnel's public address, the way a visitor would, and reports
+    /// the status and how long it took. Any response proves DNS, the relay and the agent work; a 5xx is reported as a
+    /// failure because the relay or the app couldn't answer.
+    /// </summary>
+    internal static async Task<ExecuteCommandResult> TestPublicAddressAsync(GroundhogTunnelResource resource,
+        ResourceNotificationService notifications, HttpClient client, ILogger logger, CancellationToken cancellationToken)
+    {
+        var address = notifications.TryGetCurrentState(resource.Name, out var current)
+            ? current.Snapshot.Urls.FirstOrDefault(url => url.Name == "public" && !url.IsInactive)?.Url
+            : null;
+        if (address is null)
+        {
+            return CommandResults.Failure("The tunnel isn't connected.");
+        }
+
+        var time = resource.TimeProvider;
+        using var timeout = new CancellationTokenSource(AddressTestTimeout, time);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        var started = time.GetTimestamp();
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, address);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linked.Token)
+                .ConfigureAwait(false);
+            var elapsed = time.GetElapsedTime(started);
+            var message = string.Create(CultureInfo.InvariantCulture,
+                $"GET {address} returned {(int)response.StatusCode} {response.ReasonPhrase} in {elapsed.TotalMilliseconds:0} ms.");
+            if ((int)response.StatusCode >= 500)
+            {
+                logger.LogWarning("Test public address: {Result}", message);
+                return CommandResults.Failure(message);
+            }
+            logger.LogInformation("Test public address: {Result}", message);
+            return CommandResults.Success(message);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            var message = $"GET {address} got no response within {AddressTestTimeout.TotalSeconds:0} s.";
+            logger.LogWarning("Test public address: {Result}", message);
+            return CommandResults.Failure(message);
+        }
+        catch (HttpRequestException ex)
+        {
+            var message = $"GET {address} failed: {ex.Message}";
+            logger.LogWarning("Test public address: {Result}", message);
+            return CommandResults.Failure(message);
+        }
+    }
+
     /// <summary>Switches request logging on or off for the tunnel's current and later agents.</summary>
     internal static async Task<ExecuteCommandResult> SetRequestLoggingAsync(
         GroundhogTunnelResource resource, ResourceNotificationService notifications, bool enabled)

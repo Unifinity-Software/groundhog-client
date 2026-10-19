@@ -50,7 +50,7 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
         var commands = tunnel.Resource.Annotations.OfType<ResourceCommandAnnotation>().ToDictionary(c => c.Name);
         Assert.Equal(
             [KnownResourceCommands.StartCommand, KnownResourceCommands.StopCommand, KnownResourceCommands.RestartCommand,
-                GroundhogTunnelBuilderExtensions.LogRequestsCommand, GroundhogTunnelBuilderExtensions.StopLoggingRequestsCommand],
+                GroundhogTunnelBuilderExtensions.TestPublicAddressCommand, GroundhogTunnelBuilderExtensions.LogRequestsCommand, GroundhogTunnelBuilderExtensions.StopLoggingRequestsCommand],
             commands.Keys);
         using var services = builder.Services.BuildServiceProvider();
 

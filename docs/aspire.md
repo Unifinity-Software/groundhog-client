@@ -369,6 +369,7 @@ ones.
 | Start | Not started, Finished, Exited or Failed to start | Starts a new agent. It reads the relay, tunnel name, key and target endpoint again, so a key or endpoint that changed since the last run is used. |
 | Stop | Starting, Connecting, Running or Reconnecting | Stops this tunnel's agent. The state goes to Stopping, then Finished. The AppHost and other tunnels keep running. |
 | Restart | Starting, Connecting, Running or Reconnecting | Stops the agent, then starts a new one with the current settings: Stopping, Finished, Starting, Connecting, Running. |
+| Test public address | Running | Sends a GET to the public address, as a visitor would, and shows the status and response time, for example `GET https://my-tunnel.groundhog.unifinity.com/ returned 200 OK in 142 ms.` The same line goes to the tunnel's console log. A 5xx status, an error or no response within 10 seconds is reported as a failure. |
 | Log requests | Request logging is off | Turns on [request logging](#request-logging) without restarting the tunnel. |
 | Stop logging requests | Request logging is on | Turns request logging off. |
 
