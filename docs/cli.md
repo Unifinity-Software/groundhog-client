@@ -212,8 +212,9 @@ By default anyone with the address can reach a tunnel. Visitor access rules deci
 | `ips` | Requests from one of the tunnel's IP ranges. |
 
 A request passes when any listed method passes. The longest matching path prefix wins (on segment boundaries,
-ignoring case); the default rule applies elsewhere. Visitor access is enabled per workspace; where it isn't, the
-commands below print "Visitor access rules aren't enabled for this workspace."
+ignoring case); the default rule applies elsewhere. Rules declared with `host` apply in every workspace. Changing
+stored rules and API keys is enabled per workspace; where it isn't, those commands print "Visitor access rules aren't
+enabled for this workspace."
 
 An API key is what a caller (a script, a test runner, another service) sends to reach a path. It is not the tunnel's
 connection key, which only the hosting agent uses.

@@ -103,8 +103,8 @@ rules.
   stored if it changed) adds `X-Groundhog-Visitor-Access: applied` to its `101`. An agent that declared rules
   and gets a `101` without that header (a relay that predates visitor access) closes the WebSocket and stops
   for good, so a declared policy is never silently ignored.
-- The relay refuses a declaration with `403` and a message when it's invalid, when the tunnel's visitor access
-  is managed in the dashboard, or when visitor access isn't enabled for the workspace.
+- The relay refuses a declaration with `403` and a message when it's invalid or when the tunnel's visitor access
+  is managed in the dashboard. A declaration doesn't need the workspace's visitor access feature.
 
 ### Connection pool
 
@@ -221,8 +221,9 @@ Create and rotate return `{ "tunnel": {...}, "connectionKey": "<one-time-key>" }
 and never prints it in normal output. Other management errors use HTTP status codes and problem details;
 the CLI does not echo arbitrary response bodies.
 
-Visitor access (behind a per-workspace feature; without it these endpoints answer 404, which the CLI reports as
-"Visitor access rules aren't enabled for this workspace."):
+Visitor access. `GET` works in every workspace. Changing rules or API keys is behind a per-workspace feature; without
+it `PUT` and the API key endpoints answer 404, which the CLI reports as "Visitor access rules aren't enabled for this
+workspace."
 
 - `GET …/visitor-access` returns the stored policy in the declaration's shape, with `apiKeys`
   (`[{"id","name","created"}]`, never hashes or plaintext) instead of `apiKeyHashes`, plus `managedBy`:
