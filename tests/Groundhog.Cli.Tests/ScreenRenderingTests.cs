@@ -126,8 +126,8 @@ public sealed class ScreenRenderingTests
         Harness.Export("cli-narrow", await CaptureAsync([], "Menu", 80, 24), 80, 24);
         Harness.Export("cli-tunnels", await CaptureAsync([ConsoleKey.D2], "Tunnels", 120, 36), 120, 36);
         Harness.Export("cli-tunnel-detail", await CaptureAsync([ConsoleKey.D2, ConsoleKey.Enter], "myapp", 120, 36), 120, 36);
-        Harness.Export("cli-session", await CaptureAsync([ConsoleKey.D2, ConsoleKey.Enter, ConsoleKey.H, ConsoleKey.Enter], "myapp", 120, 36,
-            pick: frames => frames.First(f => f.Screen == "Live").Frame), 120, 36);
+        Harness.Export("cli-session", await CaptureAsync([ConsoleKey.D2, ConsoleKey.Enter, ConsoleKey.H, ConsoleKey.Enter, ConsoleKey.Enter,
+            ConsoleKey.Enter], "myapp", 120, 36, new FakeServices { AgentList = [] }, pick: frames => frames.First(f => f.Screen == "Live").Frame), 120, 36);
         Harness.Export("cli-diagnostics", await CaptureAsync([ConsoleKey.D6], "Diagnostics", 120, 36), 120, 36);
         Harness.Export("cli-sign-in", await CaptureAsync([ConsoleKey.D7], "Sign in", 120, 36, new FakeServices { SignedIn = false }), 120, 36);
         Harness.Export("cli-confirm", await CaptureAsync([ConsoleKey.D2, ConsoleKey.Enter, ConsoleKey.D], "Confirm", 120, 36), 120, 36);

@@ -370,6 +370,15 @@ internal static class RemoteCommands
 
     internal static string KeyId(string workspace, string name) => workspace + "/" + name;
 
+    /// <summary>
+    /// The connection key saved on this computer for tunnel <paramref name="name"/>: the default workspace's entry first,
+    /// then any workspace's (tunnel names are globally unique, so a name identifies one tunnel).
+    /// </summary>
+    internal static string? StoredKey(LoginSession session, string name) =>
+        session.Workspace is { } workspace && session.TunnelKeys.TryGetValue(KeyId(workspace, name), out var key) ? key
+            : session.TunnelKeys.Where(entry => entry.Key.EndsWith("/" + name, StringComparison.Ordinal))
+                .Select(entry => entry.Value).FirstOrDefault();
+
     private static string Minute(DateTimeOffset time) => time.UtcDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 
     /// <summary>Whether <paramref name="value"/> has the form of a connection key ID: 32 lowercase hexadecimal characters.</summary>

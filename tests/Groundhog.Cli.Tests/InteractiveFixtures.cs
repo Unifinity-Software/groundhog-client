@@ -189,6 +189,27 @@ internal sealed class FakeServices : IInteractiveServices
 
     public TunnelProfile[] Profiles() => ProfileList;
 
+    /// <summary>Connection keys saved on this machine, by tunnel name; the saved profiles have one.</summary>
+    internal Dictionary<string, string> Keys { get; } = new(StringComparer.Ordinal)
+    {
+        ["api-preview"] = Groundhog.Protocol.ConnectionKey.Generate(),
+        ["myapp"] = Groundhog.Protocol.ConnectionKey.Generate(),
+    };
+
+    /// <summary>Each key the app saved, as workspace, tunnel name and key.</summary>
+    internal List<string[]> SavedKeys { get; } = [];
+
+    public string? EnvironmentKey { get; set; }
+
+    public string? SavedKey(string name) => Keys.GetValueOrDefault(name);
+
+    public bool SaveKey(string workspace, string name, string key)
+    {
+        SavedKeys.Add([workspace, name, key]);
+        Keys[name] = key;
+        return true;
+    }
+
     public Task<CommandResult> RunAsync(string[] args, CancellationToken cancellation)
     {
         Commands.Add(args);

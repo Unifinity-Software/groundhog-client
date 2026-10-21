@@ -440,7 +440,8 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
 
     internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => _insight is null
         ? [Hints.Refresh, Hints.Back, Hints.Quit]
-        : [new("O", "Open"), new("C", "Copy URL"), new("H", "Host"), Hints.Refresh, Hints.Back, Hints.Quit];
+        : [new("O", "Open"), new("C", "Copy URL"), HostFlow.Running(app, name) is null ? new("H", "Host") : new("S", "Stop agent"),
+            Hints.Refresh, Hints.Back, Hints.Quit];
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -453,7 +454,7 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
             return Task.FromResult<Nav?>(Nav.Stay);
         }
 
-        if (_insight?.Tunnel is not { } tunnel || letter is not ('O' or 'C' or 'H' or 'N' or 'A' or 'K' or 'X' or 'D'))
+        if (_insight?.Tunnel is not { } tunnel || letter is not ('O' or 'C' or 'H' or 'S' or 'N' or 'A' or 'K' or 'X' or 'D'))
         {
             return Task.FromResult<Nav?>(null);
         }
@@ -472,14 +473,11 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
                     : new($"The address is {url}", StatusKind.Info);
                 return Task.FromResult<Nav?>(Nav.Stay);
             case 'H':
-                var profile = app.Data.Current.Profiles.FirstOrDefault(p => p.Name == name);
-                var relay = app.Data.Current.Account?.Relay;
-                return Task.FromResult<Nav?>(Nav.Open(new PromptScreen($"Host {name} from this machine", "Local target",
-                    profile?.Target.TrimEnd('/') ?? "http://localhost:5173", "Where your app listens, for example http://localhost:5173.",
-                    target => Names.TargetProblem(name, target),
-                    target => Task.FromResult(Nav.Replace(new HostLaunchScreen(relay is null
-                        ? ["host", name, "--target", target]
-                        : ["host", name, "--target", target, "--relay", relay]))))));
+                return Task.FromResult<Nav?>(HostFlow.Host(app, workspace, name, addKeyHint: true));
+            case 'S':
+                return Task.FromResult<Nav?>(HostFlow.Running(app, name) is { } running
+                    ? Nav.Open(AgentsScreen.StopConfirmation(app, running, closeDetail: false))
+                    : null);
         }
 
         var (action, verb) = letter switch
@@ -527,6 +525,145 @@ internal sealed class TunnelDetailScreen(string workspace, string name) : Screen
                     result => result.Succeeded ? new Nav(2, null, false) : Nav.Back)))),
         };
         return Task.FromResult<Nav?>(Nav.Open(next));
+    }
+}
+
+/// <summary>
+/// Hosting a tunnel from a menu: its local target, its connection key, then where the agent runs. In this terminal the
+/// live view takes over until Esc; in the background the agent keeps running after the app closes, so several tunnels can
+/// run from this machine at once, each with its own local target.
+/// </summary>
+internal static class HostFlow
+{
+    /// <summary>The agent hosting <paramref name="name"/> from this machine, or null.</summary>
+    internal static LocalAgent? Running(InteractiveApp app, string name) =>
+        app.Data.Current.Agents?.FirstOrDefault(a => a.Snapshot.Name == name);
+
+    /// <summary>H on a tunnel: asks for the local target and the key, then where to run the agent.</summary>
+    internal static Nav Host(InteractiveApp app, string workspace, string name, bool addKeyHint)
+    {
+        if (Running(app, name) is not null)
+        {
+            app.Status = new($"{name} is already running on this machine. Press S to stop it first.", StatusKind.Warning);
+            return Nav.Stay;
+        }
+
+        var profile = app.Data.Current.Profiles.FirstOrDefault(p => p.Name == name);
+        return Nav.Open(new PromptScreen($"Host {name} from this machine", "Local target",
+            profile?.Target.TrimEnd('/') ?? "http://localhost:5173", "Where your app listens, for example http://localhost:5173.",
+            target => Names.TargetProblem(name, target),
+            target => Task.FromResult(Nav.Replace(KeyPrompt(app, workspace, name, addKeyHint,
+                key => Nav.Replace(new ChoiceScreen($"Host {name} from this machine",
+                    $"{name} forwards to {target}. In the background it keeps running after you leave, and Saved profiles starts and stops it.",
+                    [
+                        new("Enter", "Host here", () => Task.FromResult(Nav.Replace(new HostLaunchScreen(
+                            HostArguments(app, name, target, key))))),
+                        new("B", "Run in background", () => Task.FromResult(Nav.Replace(Background(app, name, target, profile)))),
+     ])))))));
+    }
+
+    /// <summary>Enter or B on a saved profile: asks for the key first when this machine has none for the tunnel.</summary>
+    internal static Nav HostProfile(InteractiveApp app, TunnelProfile profile, bool background)
+    {
+        Screen Next(string? key) => background
+            ? Background(app, profile.Name, null, profile)
+            : new HostLaunchScreen(key is null ? ["host", profile.Name] : ["host", .. profile.ToHostArguments(), "--key", key]);
+
+        if (app.Services.SavedKey(profile.Name) is not null || !string.IsNullOrWhiteSpace(app.Services.EnvironmentKey))
+        {
+            return Nav.Open(Next(null));
+        }
+
+        return Nav.Open(KeyPrompt(app, app.Data.Current.Account?.Workspace, profile.Name, addKeyHint: false,
+            key => Nav.Replace(Next(key))));
+    }
+
+    /// <summary>
+    /// The connection key, required: Enter does nothing until a well-formed key is typed or pasted. It starts with the
+    /// key saved on this machine, if any, and the key entered is saved for later and background hosting.
+    /// </summary>
+    private static PromptScreen KeyPrompt(InteractiveApp app, string? workspace, string name, bool addKeyHint, Func<string, Nav> next) =>
+        new($"Host {name} from this machine", "Connection key", app.Services.SavedKey(name) ?? "",
+            addKeyHint ? "Paste the tunnel's connection key. No key? Press Esc, then A to add one." : "Paste the tunnel's connection key.",
+            KeyProblem,
+            key =>
+            {
+                if (app.Services.SavedKey(name) != key)
+                {
+                    app.Services.SaveKey(workspace ?? "local", name, key);
+                }
+
+                return Task.FromResult(next(key));
+            },
+            secret: true);
+
+    internal static string? KeyProblem(string key) =>
+        key.Length == 0 ? "Enter the connection key."
+        : ConnectionKey.IsWellFormed(key) ? null
+        : $"A connection key is {ConnectionKey.Length} letters, digits, - and _. Paste it in full.";
+
+    private static string[] HostArguments(InteractiveApp app, string name, string target, string key) =>
+        app.Data.Current.Account?.Relay is { } relay
+            ? ["host", name, "--target", target, "--relay", relay, "--key", key]
+            : ["host", name, "--target", target, "--key", key];
+
+    /// <summary>
+    /// Starts the agent in the background. Background agents are started from a saved profile, so the target is saved as
+    /// one first; an existing profile keeps its visitor access options.
+    /// </summary>
+    private static BusyScreen Background(InteractiveApp app, string name, string? target, TunnelProfile? profile) =>
+        new($"Starting {name} in the background…", async token =>
+        {
+            if (app.Services.SavedKey(name) is null && string.IsNullOrWhiteSpace(app.Services.EnvironmentKey))
+            {
+                return new CommandResult(ExitCodes.BadArguments, "", "Sign in to save the key on this machine, then start the agent again.");
+            }
+
+            if (target is not null && profile?.Target.TrimEnd('/') != target.TrimEnd('/'))
+            {
+                string[] save = ["profile", "save", name, "--target", target];
+                var relay = profile?.Relay ?? app.Data.Current.Account?.Relay;
+                if (relay is not null && new Uri(relay) != new Uri(Groundhog.Agent.GroundhogService.DefaultRelayAddress))
+                {
+                    save = [.. save, "--relay", relay];
+                }
+
+                var saved = await app.Services.RunAsync([.. save, .. profile?.Access?.ToArguments() ?? []], token);
+                if (!saved.Succeeded)
+                {
+                    return saved;
+                }
+            }
+
+            return await app.Services.RunAsync(["start", name], token);
+        });
+}
+
+/// <summary>An in-frame choice between actions, each with its own key; Esc cancels.</summary>
+internal sealed class ChoiceScreen(string question, string detail, ChoiceScreen.Choice[] choices) : Screen
+{
+    internal sealed record Choice(string Key, string Label, Func<Task<Nav>> Choose);
+
+    internal override string Title => question;
+    internal override bool CapturesText => true;
+
+    internal override IRenderable Render(InteractiveApp app, ViewSize size) => Chrome.Modal(question, new Rows(
+        new Markup(Theme.Safe(detail)), new Text(""),
+        new Markup(string.Join("   ", choices.Select(c => $"{Chrome.KeyCap(c.Key)} {Theme.Safe(c.Label)}").Append($"{Chrome.KeyCap("Esc")} Cancel")))),
+        size);
+
+    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) =>
+        [.. choices.Select(c => new KeyHint(c.Key, c.Label)), new("Esc", "Cancel")];
+
+    internal override async Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
+    {
+        if (key.Key == ConsoleKey.Escape)
+        {
+            return Nav.Back;
+        }
+
+        var name = key.Key == ConsoleKey.Enter ? "Enter" : Selection.Letter(key).ToString();
+        return choices.FirstOrDefault(c => c.Key == name) is { } choice ? await choice.Choose() : Nav.Stay;
     }
 }
 
@@ -749,10 +886,20 @@ internal sealed class ProfilesScreen : Screen
         return LocalViews.Profiles(dashboard.Profiles, dashboard.Agents, _selected, size);
     }
 
-    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => app.Data.Current.Profiles is { Length: > 0 } profiles
-        ? [.. Hints.List(profiles.Length, new KeyHint("Enter", "Host"), new KeyHint("B", "Background")), new("A", "Add"), new("D", "Delete"),
-            Hints.Back, Hints.Quit]
-        : [new("A", "Add"), Hints.Back, Hints.Quit];
+    internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app)
+    {
+        var profiles = app.Data.Current.Profiles;
+        if (profiles.Length == 0)
+        {
+            return [new("A", "Add"), Hints.Back, Hints.Quit];
+        }
+
+        // A running profile can only be stopped; one that isn't running can be hosted here or started in the background.
+        KeyHint[] actions = HostFlow.Running(app, profiles[Selection.Clamp(_selected, profiles.Length)].Name) is null
+            ? [new("Enter", "Host"), new("B", "Background")]
+            : [new("S", "Stop")];
+        return [.. Hints.List(profiles.Length, actions), new("A", "Add"), new("D", "Delete"), Hints.Back, Hints.Quit];
+    }
 
     internal override Task<Nav?> KeyAsync(InteractiveApp app, ConsoleKeyInfo key)
     {
@@ -779,15 +926,21 @@ internal sealed class ProfilesScreen : Screen
         }
 
         var profile = profiles[_selected];
-        if (key.Key == ConsoleKey.Enter || letter == 'H')
+        var running = HostFlow.Running(app, profile.Name);
+        if (key.Key == ConsoleKey.Enter || letter is 'H' or 'B')
         {
-            return Task.FromResult<Nav?>(Nav.Open(new HostLaunchScreen(["host", profile.Name])));
+            if (running is not null)
+            {
+                app.Status = new($"{profile.Name} is already running on this machine. Press S to stop it first.", StatusKind.Warning);
+                return Task.FromResult<Nav?>(Nav.Stay);
+            }
+
+            return Task.FromResult<Nav?>(HostFlow.HostProfile(app, profile, background: letter == 'B'));
         }
 
         return Task.FromResult<Nav?>(letter switch
         {
-            'B' => Nav.Open(new BusyScreen($"Starting {profile.Name} in the background…",
-                token => app.Services.RunAsync(["start", profile.Name], token))),
+            'S' when running is not null => Nav.Open(AgentsScreen.StopConfirmation(app, running, closeDetail: false)),
             'D' => Nav.Open(new ConfirmScreen($"Delete the profile {profile.Name}?",
                 "Only the saved name and target are removed. The tunnel itself and any running agent are not affected.",
                 "Delete profile", danger: true,
@@ -1079,9 +1232,12 @@ internal sealed class HelpScreen : Screen
     internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => [Hints.Back, Hints.Quit];
 }
 
-/// <summary>Reads one line of text in a modal panel. Backspace edits; Esc cancels.</summary>
+/// <summary>
+/// Reads one line of text in a modal panel. Backspace edits; Esc cancels. A <paramref name="secret"/> value, such as a
+/// connection key, is drawn as dots.
+/// </summary>
 internal sealed class PromptScreen(string title, string label, string initial, string? hint, Func<string, string?> validate,
-    Func<string, Task<Nav>> submit) : Screen
+    Func<string, Task<Nav>> submit, bool secret = false) : Screen
 {
     private string _value = initial;
     private string? _error;
@@ -1091,7 +1247,8 @@ internal sealed class PromptScreen(string title, string label, string initial, s
     internal string Value => _value;
 
     internal override IRenderable Render(InteractiveApp app, ViewSize size) =>
-        Chrome.Modal(title, Chrome.Input(label, _value, hint, _error, Math.Min(size.Width, 72) - 6), size);
+        Chrome.Modal(title, Chrome.Input(label, secret ? new string('•', _value.Length) : _value, hint, _error,
+            Math.Min(size.Width, 72) - 6), size);
 
     internal override IReadOnlyList<KeyHint> Keys(InteractiveApp app) => [new("Enter", "Confirm"), new("Esc", "Cancel")];
 

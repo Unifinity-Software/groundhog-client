@@ -68,6 +68,15 @@ internal static class AgentLifecycle
         var profile = new ProfileStore(ProfileStore.DefaultDirectory).Read().SingleOrDefault(p => p.Name == name)
             ?? throw new ArgumentException("Save a profile before background hosting.");
         ProfileStore.Validate(profile);
+        // The background agent has no terminal to report a missing key on, so check before starting it.
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(HostArguments.KeyVariable))
+            && GroundhogCommand.StoredKey(profile.ToHostArguments()) is null)
+        {
+            error.WriteLine($"groundhog: no connection key for {name}. Set the {HostArguments.KeyVariable} environment variable, " +
+                "or host the tunnel once from the dashboard (groundhog dashboard), which saves its key on this computer.");
+            return ExitCodes.BadArguments;
+        }
+
         var existing = LocalSessions.Registrations().Where(r => r.Name == name).ToArray();
         foreach (var registration in existing)
         {
