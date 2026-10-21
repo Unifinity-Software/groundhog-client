@@ -18,6 +18,35 @@ public class GroundhogCommandTests
         Assert.Equal(new Uri("http://localhost:8080"), custom!.Relay);
     }
 
+    [Fact]
+    public void A_saved_key_is_found_by_tunnel_name_with_the_default_workspace_first()
+    {
+        var other = ConnectionKey.Generate();
+        var session = new LoginSession("https://groundhog.unifinity.com", "sample-token", DateTimeOffset.UtcNow.AddHours(1), "web-team",
+            new() { ["personal/myapp"] = other, ["web-team/myapp"] = _key, ["personal/docs"] = other });
+
+        Assert.Equal(_key, RemoteCommands.StoredKey(session, "myapp"));
+        Assert.Equal(other, RemoteCommands.StoredKey(session, "docs"));
+        Assert.Null(RemoteCommands.StoredKey(session, "app"));
+        Assert.Null(RemoteCommands.StoredKey(session with { Workspace = null }, "shop"));
+    }
+
+    [Fact]
+    public async Task Background_start_without_a_connection_key_fails_before_starting_an_agent()
+    {
+        var cancellation = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "groundhog-nokey-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            new ProfileStore(directory).Save(new("myapp", "http://localhost:5173"));
+            var (exitCode, output) = await CliProcess.RunAsync(["start", "myapp", "--timeout", "5"], directory, null, cancellation);
+            Assert.Equal(ExitCodes.BadArguments, exitCode);
+            Assert.Contains("no connection key for myapp", output, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(Path.Combine(directory, "sessions")));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     [Theory]
     [InlineData("--help")]
     [InlineData("help")]

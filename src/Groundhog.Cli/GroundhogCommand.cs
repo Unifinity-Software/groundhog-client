@@ -225,20 +225,10 @@ internal static class GroundhogCommand
             }
         }
         var credential = getEnvironmentVariable(HostArguments.KeyVariable);
-        if (string.IsNullOrWhiteSpace(credential) && args.Length > 0)
+        if (string.IsNullOrWhiteSpace(credential) && StoredKey(args) is { } storedKey)
         {
-            var saved = new CredentialStore(ProfileStore.DefaultDirectory).Read();
-            if (saved?.Workspace is { } workspace)
-            {
-                // Never send a stored key to a different relay chosen on the command line or in a profile.
-                var (candidate, _, _) = HostArguments.Parse(args, _ => ConnectionKey.Generate());
-                if (candidate is not null && candidate.Relay == new Uri(saved.Relay)
-                    && saved.TunnelKeys.TryGetValue(RemoteCommands.KeyId(workspace, args[0]), out var storedKey))
-                {
-                    var originalEnvironment = getEnvironmentVariable;
-                    getEnvironmentVariable = variable => variable == HostArguments.KeyVariable ? storedKey : originalEnvironment(variable);
-                }
-            }
+            var originalEnvironment = getEnvironmentVariable;
+            getEnvironmentVariable = variable => variable == HostArguments.KeyVariable ? storedKey : originalEnvironment(variable);
         }
         var (arguments, problem, help) = HostArguments.Parse(args, getEnvironmentVariable);
         if (help)
@@ -336,6 +326,22 @@ internal static class GroundhogCommand
                 or GroundhogAgentStopReason.TunnelNotFound => ExitCodes.Rejected,
             _ => ExitCodes.Failed,
         };
+    }
+
+    /// <summary>
+    /// The connection key saved on this computer for the tunnel that <c>host</c> <paramref name="args"/> name, or null.
+    /// A key is used only with the service it was saved for.
+    /// </summary>
+    internal static string? StoredKey(string[] args)
+    {
+        if (args.Length == 0 || new CredentialStore(ProfileStore.DefaultDirectory).Read() is not { } saved)
+        {
+            return null;
+        }
+
+        // Never send a stored key to a different relay chosen on the command line or in a profile.
+        var (candidate, _, _) = HostArguments.Parse(args, _ => ConnectionKey.Generate());
+        return candidate is not null && candidate.Relay == new Uri(saved.Relay) ? RemoteCommands.StoredKey(saved, candidate.Name) : null;
     }
 
     private static async Task ReportStatusAsync(

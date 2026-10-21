@@ -20,7 +20,7 @@
     the organisation-string guard (eng/check-org-strings.sh) allows exactly these elements.
   -->
   <PropertyGroup>
-    <VersionPrefix>1.1.0</VersionPrefix>
+    <VersionPrefix>1.2.0</VersionPrefix>
     <VersionSuffix></VersionSuffix>
     <Authors>Unifinity Software Corporation</Authors>
     <Company>Unifinity Software Corporation</Company>

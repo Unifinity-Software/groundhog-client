@@ -42,7 +42,7 @@ and dashboards stack their panels and drop less important columns.
 | Tunnels | The workspace's tunnels; Enter opens a tunnel, N creates one |
 | Tunnel detail | Public URL, state, traffic totals, a status-class breakdown, requests per minute and the service's recent request log, updated live as requests finish, with actions |
 | Running agents | Agents hosting from this machine; Enter opens a live view of one, S stops it |
-| Saved profiles | [Saved profiles](#saved-profiles) (a tunnel name plus your app's local address) and whether each is running; Enter hosts one here, B starts it in the background, A adds, D deletes |
+| Saved profiles | [Saved profiles](#saved-profiles) (a tunnel name plus your app's local address) and whether each is running; Enter hosts one here, B starts it in the background, S stops a running one, A adds, D deletes |
 | Workspaces | Your workspaces as a tree with the highlighted workspace's tunnels; Enter makes it the default |
 | Diagnostics | The doctor checks as a live checklist: service health, sign-in, local agents and each saved profile's target |
 | Sign in | Browser-approved sign-in with the code shown large; sign out when already signed in |
@@ -79,12 +79,20 @@ The tunnel dashboard lists the actions your role permits:
 | --- | --- |
 | O | Open the public URL in your browser (the address is shown when no browser is available) |
 | C | Copy the public URL through your terminal's clipboard support (OSC 52); the address is shown either way |
-| H | Host the tunnel from this machine: enter the local target, then the live view opens |
+| H | Host the tunnel from this machine: enter the local target and the connection key, then choose Enter to host here with the live view, or B to run the agent in the background |
+| S | Stop the agent hosting the tunnel from this machine (shown instead of H while one runs) |
 | N | Rename (asks for the new name) |
 | A | Add a second connection key and save it on this machine; agents using the old key stay connected |
 | K | Rotate the connection key and save the new one on this machine |
 | X | Revoke every key |
 | D | Delete |
+
+**H** needs the tunnel's connection key: Enter does nothing until a complete key (43 characters) is entered. The field
+starts with the key saved on this machine, if there is one, and the key you enter is saved securely on this machine
+for the next time and for background agents. If you don't have the key, press Esc and then **A** to add a key, which
+is saved the same way. **B** saves the tunnel and its local target as a [saved profile](#saved-profiles) and starts
+the agent in the background, so you can host several tunnels from one machine at once, each forwarding to its own
+local target (for example `myapp` to `http://localhost:5173` and `api-preview` to `https://localhost:7132`).
 
 Add key, rotate, revoke and delete ask for confirmation inside the frame; Y confirms and N or Esc cancels. Each action
 runs the same code as its command (`open`, `rename`, `key add`, `key rotate`, `key revoke`, `delete`), so permissions, saved keys and
@@ -297,9 +305,11 @@ What a profile lets you do:
 - **Check it**: the app's **Diagnostics** screen checks that each saved profile's local target answers.
 
 Where the key comes from: a profile only names the tunnel, so hosting still needs its connection key. Groundhog uses,
-in order, `--key`, the `GROUNDHOG_KEY` environment variable, or the key this CLI saved when you created the tunnel or
-rotated its key while signed in (for the selected workspace and the same service address). A tunnel created on the
-website has no saved key here; supply it through `GROUNDHOG_KEY`, or rotate its key from the CLI to save one (agents using the old key disconnect).
+in order, `--key`, the `GROUNDHOG_KEY` environment variable, or the key this CLI saved while signed in (for the same
+service address): when you created the tunnel, added or rotated its key, or entered it in the app. A tunnel created on
+the website has no saved key here until you enter it once in the app (a tunnel's **H**, or Enter or **B** on its
+profile, which asks for the key when none is saved), or supply it through `GROUNDHOG_KEY`. `start` and `restart` check
+for a key before starting the background agent and fail with `no connection key for myapp` when there is none.
 
 Create and manage profiles:
 
@@ -318,7 +328,9 @@ groundhog profile delete myapp                       # Removes only the saved na
 ```
 
 In the app, **Saved profiles** lists each profile with whether it is running on this machine: Enter hosts it here,
-**B** starts it in the background, **A** adds one and **D** deletes one. Deleting a profile never touches the tunnel
+**B** starts it in the background, **S** stops a running one, **A** adds one and **D** deletes one. Each background
+agent is its own process, so several profiles can run at once; a profile that is already running can only be stopped,
+because a second agent for the same tunnel would replace the first. Deleting a profile never touches the tunnel
 on the service or a running agent.
 
 A profile's name must be an existing tunnel's name. Saving checks that the target is an `http://` or `https://`

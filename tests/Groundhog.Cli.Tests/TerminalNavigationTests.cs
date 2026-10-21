@@ -194,19 +194,73 @@ public sealed class TerminalNavigationTests
     [Fact]
     public async Task Hosting_from_a_tunnel_runs_the_live_view_in_the_frame_and_Esc_returns_to_the_tunnel()
     {
+        // api-preview has a key saved on this machine, so the key field starts filled in and Enter accepts it.
         var services = new FakeServices();
-        var keys = new ScriptedKeys().Press(ConsoleKey.D2, ConsoleKey.Enter, ConsoleKey.H, ConsoleKey.Enter,
-            ConsoleKey.D2, ConsoleKey.D3, ConsoleKey.Escape, ConsoleKey.Q);
+        var key = services.Keys["api-preview"];
+        var keys = new ScriptedKeys().Press(ConsoleKey.D2, ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.H)
+            .Press(ConsoleKey.Enter, ConsoleKey.Enter, ConsoleKey.Enter, ConsoleKey.D2, ConsoleKey.D3, ConsoleKey.Escape, ConsoleKey.Q);
         var (app, frames) = await RunAsync(keys, services);
 
-        Assert.Equal(["host", "myapp", "--target", "http://localhost:5173", "--relay", Groundhog.Agent.GroundhogService.DefaultRelayAddress],
-            Assert.Single(services.Commands));
-        Assert.Equal(["Menu", "Tunnels", "myapp", "Host myapp from this machine", "Host", "Live", "myapp"], app.Trace);
+        Assert.Equal(["host", "api-preview", "--target", "https://localhost:7132", "--relay", Groundhog.Agent.GroundhogService.DefaultRelayAddress,
+            "--key", key], Assert.Single(services.Commands));
+        Assert.Equal(["Menu", "Tunnels", "api-preview", "Host api-preview from this machine", "Host api-preview from this machine",
+            "Host api-preview from this machine", "Host", "Live", "api-preview"], app.Trace);
+        Assert.Empty(services.SavedKeys);
+        // The key is drawn as dots, never in clear.
+        Assert.DoesNotContain(frames, f => Harness.Text(f.Frame, 120, 36).Contains(key, StringComparison.Ordinal));
         var live = frames.Where(f => f.Screen == "Live").Select(f => Harness.Text(f.Frame, 120, 36)).ToArray();
         Assert.Contains(live, f => f.Contains("Live requests", StringComparison.Ordinal));
         Assert.Contains(live, f => f.Contains("Requests · newest first", StringComparison.Ordinal));
         Assert.Contains(live, f => f.Contains("Session totals", StringComparison.Ordinal));
-        Assert.Contains("Stopped hosting myapp.", Harness.Text(frames[^1].Frame, 120, 36), StringComparison.Ordinal);
+        Assert.Contains("Stopped hosting api-preview.", Harness.Text(frames[^1].Frame, 120, 36), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Hosting_a_tunnel_requires_its_connection_key_and_saves_the_key_entered()
+    {
+        // docs has no key on this machine: Enter on the empty field and on a partial key stays on the field.
+        var services = new FakeServices();
+        var key = Groundhog.Protocol.ConnectionKey.Generate();
+        var keys = new ScriptedKeys().Press(ConsoleKey.D2, ConsoleKey.DownArrow, ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.H)
+            .Press(ConsoleKey.Enter, ConsoleKey.Enter).Type(key[..10]).Press(ConsoleKey.Enter)
+            .Press(Enumerable.Repeat(ConsoleKey.Backspace, 10).ToArray()).Type(key).Press(ConsoleKey.Enter, ConsoleKey.Enter)
+            .Press(ConsoleKey.Escape, ConsoleKey.Q);
+        var (app, frames) = await RunAsync(keys, services);
+
+        var prompts = frames.Where(f => f.Screen == "Host docs from this machine").Select(f => Harness.Text(f.Frame, 120, 36)).ToArray();
+        Assert.Contains(prompts, f => f.Contains("✗ Enter the connection key.", StringComparison.Ordinal));
+        Assert.Contains(prompts, f => f.Contains("✗ A connection key is 43 letters", StringComparison.Ordinal));
+        Assert.Equal(["web-team", "docs", key], Assert.Single(services.SavedKeys));
+        Assert.Equal(["host", "docs", "--target", "http://localhost:5173", "--relay", Groundhog.Agent.GroundhogService.DefaultRelayAddress,
+            "--key", key], Assert.Single(services.Commands));
+        Assert.Equal("docs", app.Trace[^1]);
+    }
+
+    [Fact]
+    public async Task Hosting_a_tunnel_in_the_background_saves_a_profile_and_starts_it()
+    {
+        var services = new FakeServices();
+        var key = Groundhog.Protocol.ConnectionKey.Generate();
+        var keys = new ScriptedKeys().Press(ConsoleKey.D2, ConsoleKey.DownArrow, ConsoleKey.DownArrow, ConsoleKey.Enter, ConsoleKey.H)
+            .Press(Enumerable.Repeat(ConsoleKey.Backspace, 4).ToArray()).Type("5174").Press(ConsoleKey.Enter)
+            .Type(key).Press(ConsoleKey.Enter, ConsoleKey.B, ConsoleKey.Q);
+        var (app, _) = await RunAsync(keys, services);
+
+        Assert.Equal([["profile", "save", "docs", "--target", "http://localhost:5174"], ["start", "docs"]], services.Commands);
+        Assert.Equal(key, services.Keys["docs"]);
+        Assert.Equal("docs", app.Trace[^1]);
+    }
+
+    [Fact]
+    public async Task A_tunnel_running_on_this_machine_offers_stop_instead_of_host()
+    {
+        var services = new FakeServices();
+        var keys = new ScriptedKeys().Press(ConsoleKey.D2, ConsoleKey.Enter, ConsoleKey.H, ConsoleKey.S, ConsoleKey.Y, ConsoleKey.Q);
+        var (app, frames) = await RunAsync(keys, services);
+
+        Assert.Equal(["stop-agent", "myapp"], Assert.Single(services.Commands));
+        Assert.Contains(frames, f => Harness.Text(f.Frame, 120, 36).Contains("myapp is already running on this machine", StringComparison.Ordinal));
+        Assert.Equal(["Menu", "Tunnels", "myapp", "Confirm", "Working", "myapp"], app.Trace);
     }
 
     [Fact]
@@ -266,6 +320,33 @@ public sealed class TerminalNavigationTests
         await RunAsync(keys, services);
         Assert.Equal(["profile", "save", "shop", "--target", "http://localhost:5173"], services.Commands[0]);
         Assert.Equal(["start", "api-preview"], services.Commands[1]);
+    }
+
+    [Fact]
+    public async Task Saved_profiles_start_and_stop_several_agents_on_this_machine()
+    {
+        // myapp runs already; api-preview starts beside it, then myapp is stopped from the same list.
+        var services = new FakeServices();
+        var keys = new ScriptedKeys().Press(ConsoleKey.D4, ConsoleKey.DownArrow, ConsoleKey.B, ConsoleKey.UpArrow, ConsoleKey.B,
+            ConsoleKey.DownArrow, ConsoleKey.S, ConsoleKey.Y, ConsoleKey.Q);
+        var (_, frames) = await RunAsync(keys, services);
+
+        Assert.Equal([["start", "api-preview"], ["stop-agent", "myapp"]], services.Commands);
+        Assert.Contains(frames, f => Harness.Text(f.Frame, 120, 36).Contains("myapp is already running on this machine", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_saved_profile_without_a_key_asks_for_one_before_hosting()
+    {
+        var services = new FakeServices();
+        services.Keys.Remove("api-preview");
+        var key = Groundhog.Protocol.ConnectionKey.Generate();
+        var keys = new ScriptedKeys().Press(ConsoleKey.D4, ConsoleKey.B).Type(key).Press(ConsoleKey.Enter, ConsoleKey.Q);
+        var (app, _) = await RunAsync(keys, services);
+
+        Assert.Equal(["web-team", "api-preview", key], Assert.Single(services.SavedKeys));
+        Assert.Equal(["start", "api-preview"], Assert.Single(services.Commands));
+        Assert.Equal(["Menu", "Saved profiles", "Host api-preview from this machine", "Working", "Saved profiles"], app.Trace);
     }
 
     [Fact]

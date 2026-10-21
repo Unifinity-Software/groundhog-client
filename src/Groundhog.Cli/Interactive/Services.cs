@@ -109,6 +109,18 @@ internal interface IInteractiveServices
     Task<SessionSnapshot?> QueryAgentAsync(SessionRegistration registration, bool stop, CancellationToken cancellation);
     TunnelProfile[] Profiles();
 
+    /// <summary>The connection key saved on this machine for the tunnel <paramref name="name"/>, or null.</summary>
+    string? SavedKey(string name);
+
+    /// <summary>The <c>GROUNDHOG_KEY</c> environment variable, which every host and background start falls back to.</summary>
+    string? EnvironmentKey { get; }
+
+    /// <summary>
+    /// Saves <paramref name="key"/> on this machine for the tunnel, with the sign-in, so later and background hosting
+    /// find it. False when there is no sign-in to save it with, or it could not be written.
+    /// </summary>
+    bool SaveKey(string workspace, string name, string key);
+
     /// <summary>Runs a <c>groundhog</c> command with captured output, exactly as a script would.</summary>
     Task<CommandResult> RunAsync(string[] args, CancellationToken cancellation);
 
@@ -273,6 +285,40 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return [];
+        }
+    }
+
+    public string? EnvironmentKey => Environment.GetEnvironmentVariable(HostArguments.KeyVariable);
+
+    public string? SavedKey(string name)
+    {
+        try
+        {
+            return new CredentialStore(Home).Read() is { } session ? RemoteCommands.StoredKey(session, name) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    public bool SaveKey(string workspace, string name, string key)
+    {
+        try
+        {
+            var store = new CredentialStore(Home);
+            if (store.Read() is not { } session)
+            {
+                return false;
+            }
+
+            session.TunnelKeys[RemoteCommands.KeyId(workspace, name)] = key;
+            store.Save(session);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or CryptographicException)
+        {
+            return false;
         }
     }
 

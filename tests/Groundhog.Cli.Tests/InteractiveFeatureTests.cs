@@ -212,7 +212,7 @@ internal static class CliProcess
         if (executable is null) { start.ArgumentList.Add(typeof(GroundhogCommand).Assembly.Location); }
         foreach (var arg in args) { start.ArgumentList.Add(arg); }
         start.Environment["GROUNDHOG_HOME"] = home;
-        if (key is not null) { start.Environment["GROUNDHOG_KEY"] = key; }
+        if (key is not null) { start.Environment["GROUNDHOG_KEY"] = key; } else { start.Environment.Remove("GROUNDHOG_KEY"); }
         using var process = Process.Start(start)!;
         var stdout = process.StandardOutput.ReadToEndAsync(cancellation);
         var stderr = process.StandardError.ReadToEndAsync(cancellation);
