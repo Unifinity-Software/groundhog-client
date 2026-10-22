@@ -10,7 +10,7 @@ namespace Groundhog.Cli.Ide;
 internal sealed record IdeAuth(string State, string? Workspace = null, DateTimeOffset? ExpiresAt = null);
 internal sealed record IdeAgent(string Name, string Target, string? Url, string State, string Source, int ProcessId);
 internal sealed record IdeTunnel(string Workspace, string Name, string Url, string State, string[] Actions, bool HasKey,
-    string Location);
+    string Location, long RequestsLastMinute);
 internal sealed record IdeRequest(string RequestId, DateTimeOffset Completed, string Method, string Path, int StatusCode,
     double DurationMs, string Source);
 internal sealed record IdeCheck(string Code, string Status, string Message);
@@ -25,6 +25,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private static readonly object Empty = new { };
     private readonly string _directory;
     private readonly CredentialStore _credentials;
+    private readonly SessionAuthentication _authentication;
     private readonly Func<string, string?, ManagementClient> _client;
     private readonly TimeProvider _time;
     private readonly Func<SessionRegistration[]> _registrations;
@@ -36,6 +37,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private CancellationTokenSource? _login;
     private CancellationTokenSource? _workspaceEvents;
     private bool _workspaceEventsSupported;
+    private bool _refreshSupported;
     private bool _initialized;
     private string? _lastAuth;
     private string? _lastTunnels;
@@ -51,6 +53,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
         _client = client ?? ((relay, token) => new(relay, token));
         _time = time ?? TimeProvider.System;
         _registrations = registrations ?? LocalSessions.Registrations;
+        _authentication = new(_credentials, _client, _time);
     }
 
     internal async Task<object> InvokeAsync(string method, JsonElement p, CancellationToken cancellation)
@@ -77,7 +80,15 @@ internal sealed partial class IdeServices : IAsyncDisposable
         }
         catch (LocalRpcException) { throw; }
         catch (OperationCanceledException) { throw; }
-        catch (ManagementException ex) { throw FromManagement(ex); }
+        catch (ManagementException ex)
+        {
+            if (ex.Status == HttpStatusCode.Unauthorized)
+            {
+                var saved = _credentials.Read();
+                await Notify("auth/changed", new IdeAuth("expired", saved?.Workspace, saved?.Expires));
+            }
+            throw FromManagement(ex);
+        }
         catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidOperationException or JsonException)
         { throw Fault(-32602, "invalidParams", "The supplied parameters or stored configuration are invalid."); }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException
@@ -105,6 +116,8 @@ internal sealed partial class IdeServices : IAsyncDisposable
             {
                 _workspaceEventsSupported = caps.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.String && c.GetString() == "workspaceEvents");
                 if (_workspaceEventsSupported) { _capabilities.Add("workspaceEvents"); }
+                _refreshSupported = caps.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.String && c.GetString() == "refreshToken");
+                if (_refreshSupported) { _capabilities.Add("refreshToken"); }
             }
         }
         catch (Exception ex) when (ex is ManagementException or HttpRequestException or TaskCanceledException or JsonException) { ct.ThrowIfCancellationRequested(); }
@@ -121,9 +134,9 @@ internal sealed partial class IdeServices : IAsyncDisposable
         return session is null ? new("signedOut") : new(session.Expires <= _time.GetUtcNow() ? "expired" : "signedIn", session.Workspace, session.Expires);
     }
 
-    private LoginSession Session()
+    private async Task<LoginSession> SessionAsync(CancellationToken ct)
     {
-        var session = _credentials.Read() ?? throw Fault(-32010, "signedOut", "Sign in to Groundhog first.");
+        var session = await _authentication.GetSessionAsync(ct) ?? throw Fault(-32010, "signedOut", "Sign in to Groundhog first.");
         if (session.Expires <= _time.GetUtcNow()) { throw Fault(-32011, "sessionExpired", "Your Groundhog sign-in has expired."); }
         return session;
     }
@@ -133,30 +146,24 @@ internal sealed partial class IdeServices : IAsyncDisposable
         if (method == "auth/logout")
         {
             _login?.Cancel();
-            var saved = _credentials.Read();
             try
             {
-                if (saved is not null)
-                {
-                    using var revoke = _client(saved.Relay, saved.Token);
-                    await revoke.SendAsync<object>(HttpMethod.Post, "/api/cli/logout", null, ct);
-                }
+                await _authentication.LogoutAsync(ct);
             }
             catch (Exception ex) when (ex is ManagementException or HttpRequestException or TaskCanceledException) { }
-            finally { _credentials.Delete(); }
             foreach (var id in _subscriptions.Keys) { await UnsubscribeAsync(id); }
             await EmitAuthAsync();
             return Empty;
         }
-        var session = Session();
-        using var client = _client(session.Relay, session.Token);
+        var session = await SessionAsync(ct);
+        using var client = _authentication.CreateClient(session);
         if (method is "workspaces/list" or "workspaces/use")
         {
             var account = await client.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, ct);
             if (method == "workspaces/list") { return new { workspaces = account.Workspaces, selected = session.Workspace }; }
             var workspace = Required(p, "workspace");
             if (!account.Workspaces.Any(w => w.Slug == workspace)) { throw Fault(-32013, "permissionDenied", "This workspace is not accessible."); }
-            _credentials.Save(session with { Workspace = workspace });
+            await UpdateSessionAsync(session, fresh => fresh with { Workspace = workspace }, ct);
             await EmitAuthAsync();
             return new { workspace };
         }
@@ -176,8 +183,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
             if (!ConnectionKey.IsWellFormed(key)) { throw Fault(-32602, "invalidParams", "A connection key must be 43 base64url characters."); }
             var account = await client.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, ct);
             if (!account.Workspaces.Any(w => w.Slug == slug)) { throw Fault(-32013, "permissionDenied", "This workspace is not accessible."); }
-            session.TunnelKeys[RemoteCommands.KeyId(slug, name!)] = key;
-            _credentials.Save(session);
+            await UpdateSessionAsync(session, fresh => { fresh.TunnelKeys[RemoteCommands.KeyId(slug, name!)] = key; return fresh; }, ct);
             await Notify("tunnels/changed", new { workspace = slug });
             return Empty;
         }
@@ -186,8 +192,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
         {
             case "tunnels/create":
                 var created = await client.SendAsync<TunnelCreated>(HttpMethod.Post, path[..path.LastIndexOf('/')], new { Name = name }, ct);
-                session.TunnelKeys[RemoteCommands.KeyId(slug, created.Tunnel.Name)] = created.ConnectionKey;
-                _credentials.Save(session);
+                session = await UpdateSessionAsync(session, fresh => { fresh.TunnelKeys[RemoteCommands.KeyId(slug, created.Tunnel.Name)] = created.ConnectionKey; return fresh; }, ct);
                 result = Tunnel(slug, created.Tunnel, session, []);
                 break;
             case "tunnels/rename":
@@ -195,14 +200,17 @@ internal sealed partial class IdeServices : IAsyncDisposable
                 var newName = Required(p, "newName");
                 if (!TunnelName.IsValid(newName)) { throw Fault(-32602, "invalidParams", "Invalid tunnel name."); }
                 var renamed = await client.SendAsync<TunnelInfo>(HttpMethod.Patch, path, new { Name = newName }, ct);
-                if (session.TunnelKeys.Remove(RemoteCommands.KeyId(slug, name!), out var saved))
-                { session.TunnelKeys[RemoteCommands.KeyId(slug, renamed.Name)] = saved; _credentials.Save(session); }
+                session = await UpdateSessionAsync(session, fresh =>
+                {
+                    if (fresh.TunnelKeys.Remove(RemoteCommands.KeyId(slug, name!), out var saved)) { fresh.TunnelKeys[RemoteCommands.KeyId(slug, renamed.Name)] = saved; }
+                    return fresh;
+                }, ct);
                 result = Tunnel(slug, renamed, session, []);
                 break;
             case "tunnels/delete":
                 Confirm(p);
                 await client.SendAsync<object>(HttpMethod.Delete, path, null, ct);
-                session.TunnelKeys.Remove(RemoteCommands.KeyId(slug, name!)); _credentials.Save(session);
+                await UpdateSessionAsync(session, fresh => { fresh.TunnelKeys.Remove(RemoteCommands.KeyId(slug, name!)); return fresh; }, ct);
                 result = Empty;
                 break;
             default: throw Fault(-32601, "methodNotFound", "Method not found.");
@@ -213,7 +221,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
 
     private static IdeTunnel Tunnel(string workspace, TunnelInfo t, LoginSession session, IdeAgent[] agents) =>
         new(workspace, t.Name, SafePublicUrl(t.Url), t.State, t.Actions, session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, t.Name)),
-            agents.Any(a => a.Name == t.Name) ? "local" : t.State.Equals("connected", StringComparison.OrdinalIgnoreCase) ? "remote" : "offline");
+            agents.Any(a => a.Name == t.Name) ? "local" : t.State.Equals("connected", StringComparison.OrdinalIgnoreCase) ? "remote" : "offline", t.RequestsLastMinute);
 
     private async Task<object> LoginAsync(CancellationToken ct)
     {
@@ -251,10 +259,10 @@ internal sealed partial class IdeServices : IAsyncDisposable
                 {
                     ct.ThrowIfCancellationRequested();
                     // Preserve saved keys when renewing an existing login for the same relay.
-                    var old = _credentials.Read();
-                    _credentials.Save(new(relay, grant.AccessToken, _time.GetUtcNow().AddSeconds(grant.ExpiresIn),
-                        old?.Workspace ?? (account.Workspaces.Length == 1 ? account.Workspaces[0].Slug : null),
-                        old?.Relay == relay ? old.TunnelKeys : new()));
+                    await _credentials.UpdateAsync(old => new(relay, grant.AccessToken, _time.GetUtcNow().AddSeconds(grant.ExpiresIn),
+                        old?.Relay == relay ? old.Workspace : (account.Workspaces.Length == 1 ? account.Workspaces[0].Slug : null),
+                        old?.Relay == relay ? old.TunnelKeys : new(), grant.RefreshToken,
+                        _refreshSupported && grant.RefreshToken is not null, Guid.NewGuid().ToString("N")), ct);
                 }
                 finally { _mutations.Release(); }
                 await EmitAuthAsync();
@@ -354,6 +362,8 @@ internal sealed partial class IdeServices : IAsyncDisposable
             while (true)
             {
                 await Task.Delay(TimeSpan.FromSeconds(2), _time, _stop.Token);
+                try { await _authentication.GetSessionAsync(_stop.Token); }
+                catch (Exception ex) when (ex is ManagementException or HttpRequestException) { }
                 var auth = JsonSerializer.Serialize(Auth());
                 if (auth != _lastAuth) { await EmitAuthAsync(); }
                 var agents = await AgentsAsync(_stop.Token);
@@ -378,11 +388,11 @@ internal sealed partial class IdeServices : IAsyncDisposable
                 }
                 await Task.Delay(TimeSpan.FromSeconds(30), _time, _stop.Token);
                 if (Auth().State != "signedIn") { continue; }
-                var session = Session();
+                var session = await SessionAsync(_stop.Token);
                 if (session.Workspace is not { } workspace) { continue; }
                 try
                 {
-                    using var client = _client(session.Relay, session.Token);
+                    using var client = _authentication.CreateClient(session);
                     var tunnels = await client.SendAsync<TunnelInfo[]>(HttpMethod.Get, $"/api/w/{Uri.EscapeDataString(workspace)}/tunnels", null, _stop.Token);
                     var state = JsonSerializer.Serialize(tunnels.Select(t => Tunnel(workspace, t, session, [])));
                     if (state != _lastTunnels) { _lastTunnels = state; await Notify("tunnels/changed", new { workspace }); }
@@ -401,6 +411,11 @@ internal sealed partial class IdeServices : IAsyncDisposable
         var status = Auth(); _lastAuth = JsonSerializer.Serialize(status);
         await Notify("auth/changed", status);
     }
+
+    private async Task<LoginSession> UpdateSessionAsync(LoginSession expected, Func<LoginSession, LoginSession> update, CancellationToken ct) =>
+        await _credentials.UpdateAsync(fresh => fresh is null || fresh.Relay != expected.Relay || fresh.SessionId != expected.SessionId
+            ? throw Fault(-32011, "sessionExpired", "Your Groundhog sign-in changed. Try again after signing in.") : update(fresh), ct)
+        ?? throw Fault(-32011, "sessionExpired", "Your Groundhog sign-in changed.");
 
     private void Track(Task task) { lock (_background) { _background.Add(task); } }
     private static string Workspace(JsonElement p, LoginSession session) => Optional(p, "workspace") ?? session.Workspace
@@ -468,9 +483,9 @@ internal sealed partial class IdeServices : IAsyncDisposable
         var wait = TimeSpan.FromSeconds(1);
         try
         {
-            var session = Session();
+            var session = await SessionAsync(ct);
             if (session.Workspace is not { } workspace) { return; }
-            using var client = _client(session.Relay, session.Token);
+            using var client = _authentication.CreateClient(session);
             await using var stream = await client.OpenWorkspaceEventStreamAsync(workspace, ct);
             // Re-fetch after every connection so disconnect gaps do not leave stale explorer state.
             await Notify("tunnels/changed", new { workspace });

@@ -51,8 +51,8 @@ internal sealed partial class IdeServices
         }
         else
         {
-            session = Session();
-            client = _client(session.Relay, session.Token);
+            session = await SessionAsync(ct);
+            client = _authentication.CreateClient(session);
             try
             {
                 recent = (await client.SendAsync<RemoteSearchResult>(HttpMethod.Get, SearchPath(workspace, name), null, ct)).Entries;

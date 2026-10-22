@@ -15,6 +15,21 @@ namespace Groundhog.Cli.Tests;
 public sealed class IdeBackendTests
 {
     [Fact]
+    public async Task Backend_refreshes_shared_session_before_management_calls_and_keeps_secrets_local()
+    {
+        await using var fixture = new Fixture();
+        fixture.Handler.RefreshTokens = true;
+        fixture.Store.Save(fixture.Store.Read()! with { Expires = fixture.Time.GetUtcNow().AddMinutes(1), RefreshToken = "private-refresh-token", RefreshSupported = true });
+        var initialized = await fixture.InitializeAsync();
+        Assert.Contains("refreshToken", initialized.GetRawText(), StringComparison.Ordinal);
+        await fixture.CallAsync("tunnels/list", new { workspace = "example" });
+        Assert.Equal("private-refreshed-access-token", fixture.Store.Read()!.Token);
+        Assert.Equal(1, fixture.Handler.Refreshes);
+        Assert.DoesNotContain("private-refresh-token", fixture.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-refreshed-access-token", fixture.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Concurrent_subscriptions_reserve_capacity_before_asynchronous_setup()
     {
         await using var fixture = new Fixture();
@@ -300,6 +315,8 @@ public sealed class IdeBackendTests
         internal int Lists { get; private set; }
         internal int EventStreams { get; private set; }
         internal bool WorkspaceEvents { get; set; }
+        internal bool RefreshTokens { get; set; }
+        internal int Refreshes { get; private set; }
         internal TaskCompletionSource PollReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ListReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -322,7 +339,8 @@ public sealed class IdeBackendTests
             }
             object? result = path switch
             {
-                "/api/service-info" => new { capabilities = WorkspaceEvents ? new[] { "workspaceEvents" } : [] },
+                "/api/service-info" => new { capabilities = new[] { WorkspaceEvents ? "workspaceEvents" : null, RefreshTokens ? "refreshToken" : null }.OfType<string>().ToArray() },
+                "/api/cli/refresh" => Refresh(),
                 "/api/cli/device" => new DeviceAuthorization("private-device-code", "ABCD-EFGH", "https://groundhog.unifinity.com/cli-login", 600, 1),
                 "/api/cli/token" => Grant(),
                 "/api/me" => new AccountInfo("Example", "person@example.com", [new("example", "Example", "owner")]),
@@ -337,6 +355,7 @@ public sealed class IdeBackendTests
             { Content = result is null ? null : JsonContent.Create(result) });
         }
         private DeviceToken Grant() { PollReached.TrySetResult(); return new("approved", Fixture.Token, 3600); }
+        private DeviceToken Refresh() { Refreshes++; return new("approved", "private-refreshed-access-token", 3600, "private-refreshed-refresh-token"); }
         private TunnelInfo[] List() { Lists++; ListReached.TrySetResult(); return [Tunnel("my-tunnel")]; }
         private static TunnelInfo Tunnel(string name) => new(name, $"https://{name}.groundhog.unifinity.com", "disconnected",
             DateTimeOffset.UnixEpoch, 0, 0, 0, 0, ["rename", "delete"]);

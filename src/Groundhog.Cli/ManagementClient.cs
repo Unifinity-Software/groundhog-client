@@ -133,9 +133,8 @@ internal sealed class ManagementClient : IDisposable
 
     internal async Task<WorkspaceEventStream> OpenWorkspaceEventStreamAsync(string workspace, CancellationToken cancellation)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/w/{Uri.EscapeDataString(workspace)}/events");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+        var response = await SendAuthenticatedAsync(HttpMethod.Get, $"/api/w/{Uri.EscapeDataString(workspace)}/events", null,
+            HttpCompletionOption.ResponseHeadersRead, cancellation, eventStream: true);
         try
         {
             ThrowIfFailed(response);
