@@ -196,7 +196,8 @@ groundhog host myapp --target https://localhost:7132
 
 Supply an existing tunnel's key through `GROUNDHOG_KEY`. Login does not retrieve existing one-time connection keys.
 Keys created, added or rotated through this CLI are saved securely and are used when the selected workspace matches.
-An explicit `--key` or `GROUNDHOG_KEY` takes precedence. A saved key is never sent to a different service address.
+An explicit `--key` or nonempty `GROUNDHOG_KEY` takes precedence. An empty or whitespace-only environment value uses
+the saved key, including for background `start` and `restart`. A saved key is never sent to a different service address.
 
 ![Live hosting dashboard with requests, status classes and connection events](images/cli-session.png)
 

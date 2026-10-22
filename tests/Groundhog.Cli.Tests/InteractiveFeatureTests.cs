@@ -194,12 +194,14 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
     }
 
     [Fact(Timeout = 30000)]
-    public async Task Real_cli_background_start_status_and_stop_use_the_saved_profile()
+    public async Task Real_cli_background_start_status_and_stop_use_saved_profile_and_key_when_environment_key_is_empty()
     {
         var cancellation = TestContext.Current.CancellationToken;
         var directory = Path.Combine(Path.GetTempPath(), "groundhog-background-" + Guid.NewGuid().ToString("N"));
         var store = new ProfileStore(directory);
         store.Save(new("background-smoke", fixture.LocalApp.ToString(), fixture.Relay.Address.ToString()));
+        new CredentialStore(directory).Save(new(fixture.Relay.Address.ToString(), "unused-management-token", DateTimeOffset.UtcNow.AddHours(1),
+            "example", new() { ["example/background-smoke"] = fixture.Key }));
         Process? process = null;
         try
         {
@@ -225,7 +227,7 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
         }
 
         Task<(int ExitCode, string Output)> RunProcessAsync(string[] args) =>
-            CliProcess.RunAsync(args, directory, fixture.Key, cancellation);
+            CliProcess.RunAsync(args, directory, "", cancellation);
     }
     [Fact(Timeout = 30000)]
     public async Task Another_invocation_can_query_traffic_and_stop_the_host_without_seeing_keys_or_query_strings()

@@ -36,8 +36,12 @@ internal static class AgentLifecycle
         }
         else
         {
-            var (parsed, problem, _) = HostArguments.Parse(resolved, variable => Environment.GetEnvironmentVariable(variable)
-                ?? (variable == HostArguments.KeyVariable ? GroundhogCommand.StoredKey(resolved) : null));
+            var (parsed, problem, _) = HostArguments.Parse(resolved, variable =>
+            {
+                var value = Environment.GetEnvironmentVariable(variable);
+                return variable == HostArguments.KeyVariable && string.IsNullOrWhiteSpace(value)
+                    ? GroundhogCommand.StoredKey(resolved) : value;
+            });
             if (parsed is null)
             {
                 if (problem?.StartsWith("No connection key:", StringComparison.Ordinal) == true)
