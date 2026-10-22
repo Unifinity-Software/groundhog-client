@@ -27,13 +27,13 @@ services in one installation.
 `IVsDebuggableProjectCfg2.OnBeforeDebugLaunch` belongs to a project configuration, rather than a global package event.
 Microsoft explicitly says not to implement or consume `IVsDebugLaunchHook`. This preview therefore uses the supported
 Run-mode notification without intercepting Visual Studio commands. Manual hosting before F5 is required when initial
-requests depend on the tunnel; automatic pre-launch parity remains an owner scope decision.
+requests depend on the tunnel; automatic pre-launch hosting is not supported in this preview.
 
 The spike built an actual VSIX locally using `dotnet build`, including generated package/tool-window registrations and
 compiled View-menu commands. This succeeded without installing Visual Studio. The final standalone verification also
 asserts that the package, native tool-window registration, new SDK metadata, license and shared inspector files are in
-the VSIX. Visual Studio Community 2026 has since been installed, but actual host qualification is pending while desktop
-testing is on hold. These checks cannot prove Visual Studio host loading or rendering.
+the VSIX. Visual Studio Community 2026 has since been installed, but actual host qualification is pending.
+These checks cannot prove Visual Studio host loading or rendering.
 
 Public sources:
 

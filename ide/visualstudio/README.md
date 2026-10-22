@@ -72,7 +72,7 @@ Studio 2026. Limit the smoke to one small project and one tunnel; no load or sle
 5. Start an Aspire AppHost and verify its tunnel is visible, labels Aspire, and cannot be stopped through this extension.
 6. Close the tool window and Visual Studio; verify the stdio child exits while independent hosting agents remain running.
 
-Visual Studio Community 2026 is installed in the development environment. Actual host qualification is pending while
-desktop testing is on hold. Compilation, VSIX packaging and standalone checks passed; debugger callbacks, actual IDE
+Visual Studio Community 2026 is installed in the development environment. Actual host qualification is pending.
+Compilation, VSIX packaging and standalone checks passed; debugger callbacks, actual IDE
 rendering, install/uninstall and version-specific host loading remain a release validation gap until the checklist runs
 on those hosts. See [the spike](spike.md).
