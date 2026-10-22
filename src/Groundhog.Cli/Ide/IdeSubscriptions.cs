@@ -106,23 +106,28 @@ internal sealed partial class IdeServices
         var subscription = new Subscription(CancellationTokenSource.CreateLinkedTokenSource(_stop.Token));
         if (!_subscriptions.TryAdd(id, subscription)) { client?.Dispose(); subscription.Stop.Dispose(); throw new InvalidOperationException(); }
         subscription.Running = local is not null
-            ? FollowLocalAsync(id, subscription, local, initial)
+            ? FollowLocalAsync(id, subscription, local, snapshot!, initial)
             : FollowRemoteAsync(id, subscription, client!, workspace, name, recent);
         return new { subscriptionId = id, requests = initial, source = local is not null ? "local" : "remote" };
     }
 
-    private async Task FollowLocalAsync(string id, Subscription subscription, SessionRegistration registration, IdeRequest[] initial)
+    private async Task FollowLocalAsync(string id, Subscription subscription, SessionRegistration registration, SessionSnapshot initialSnapshot, IdeRequest[] initial)
     {
         var ct = subscription.Stop.Token;
         var seen = initial.Select(r => r.RequestId).ToHashSet(StringComparer.Ordinal);
         try
         {
-            await ConnectionAsync(id, subscription, "live");
+            var previous = LocalConnection(initialSnapshot.State, initialSnapshot.StopReason);
+            await ConnectionAsync(id, subscription, previous.State, previous.Reason, previous.Code);
             while (true)
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(500), _time, ct);
-                var snapshot = await LocalSessions.QueryAsync(registration, false, ct);
-                if (snapshot is null) { await ConnectionAsync(id, subscription, "stopped", "The local agent stopped."); return; }
+                var terminal = TerminalStatusStore.Read(registration.Pipe, _time);
+                var snapshot = terminal is null ? await LocalSessions.QueryAsync(registration, false, ct) : null;
+                var current = LocalConnection(snapshot?.State ?? "Stopped", snapshot?.StopReason ?? terminal);
+                if (current != previous)
+                { await ConnectionAsync(id, subscription, current.State, current.Reason, current.Code); previous = current; }
+                if (snapshot is null) { return; }
                 var recent = snapshot.Recent.TakeLast(1000).Select(LocalRequest).ToArray();
                 foreach (var request in recent)
                 {
@@ -157,8 +162,19 @@ internal sealed partial class IdeServices
         }
     }
 
-    private Task ConnectionAsync(string id, Subscription subscription, string state, string? reason = null) =>
-        EventAsync(id, subscription, "connection/event", new { subscriptionId = id, state, reason });
+    private static (string State, string? Reason, string? Code) LocalConnection(string state, GroundhogAgentStopReason? reason)
+    {
+        var safe = SafeStopReason(reason);
+        return state switch
+        {
+            "Connected" => ("live", null, null),
+            "Stopped" => ("stopped", safe.Text ?? "The local agent stopped.", safe.Code),
+            _ => ("reconnecting", "The local agent is reconnecting.", null)
+        };
+    }
+
+    private Task ConnectionAsync(string id, Subscription subscription, string state, string? reason = null, string? reasonCode = null) =>
+        EventAsync(id, subscription, "connection/event", new { subscriptionId = id, state, reason, reasonCode });
 
     private async Task EventAsync(string id, Subscription subscription, string method, object parameters)
     {

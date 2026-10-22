@@ -262,3 +262,10 @@ Local completed-request telemetry may include the relay's validated `X-Groundhog
 links a request in an IDE's local inspector to the relay's captured detail; it exposes no bodies, headers or credentials.
 IDE detail uses the existing request-detail and capture-body management endpoints, applies safe projections and
 redaction, and replays only to explicitly approved loopback targets. See the IDE contract for frame limits and fields.
+
+Local session telemetry includes the structured agent stop enum. IDE projections map that enum to fixed safe codes
+and text instead of forwarding raw reasons. For an IDE that observed a session before it exited, a separate private
+terminal marker preserves the enum and UTC timestamp under the exact random pipe identity for five minutes.
+It contains no names, targets, credentials or traffic, is written atomically before pipe shutdown, and is excluded from
+live discovery. Writes prune expired markers and retain at most 64; the IDE bounds its observed identities to 256.
+See the IDE contract for state transitions and terminal notice behavior.

@@ -42,6 +42,21 @@ public sealed class ProjectConfigurationTests : IDisposable
     }
 
     [Fact]
+    public void Initialization_preserves_same_name_saved_target_access_relay_and_tls_precedence()
+    {
+        Write(_directory, "my-tunnel", "http://localhost:5173", allow: ["members"]);
+        var saved = new TunnelProfile("my-tunnel", "https://localhost:6000/", "https://groundhog.unifinity.com/",
+            new() { Allow = "anyone" }, InsecureLocal: true);
+        _store.Save(saved);
+        var merged = ProjectConfiguration.ProfileForInitialization(ProjectConfiguration.Find(_directory)!.Value.Profile, _store, _directory);
+        Assert.Equal(saved.Target, merged.Target);
+        Assert.Equal(saved.Relay, merged.Relay);
+        Assert.Equal(saved.Access!.Allow, merged.Access!.Allow);
+        Assert.True(merged.InsecureLocal);
+        Assert.Null(merged.LocalCaFile);
+    }
+
+    [Fact]
     public void Project_access_reuses_shared_validator_and_resolves_api_keys_only_when_hosting()
     {
         File.WriteAllText(Path.Combine(_directory, "groundhog.json"), """

@@ -159,7 +159,8 @@ internal static class GroundhogCommand
             {
                 if (ProjectConfiguration.Find(Environment.CurrentDirectory) is { } project)
                 {
-                    new ProfileStore(ProfileStore.DefaultDirectory).Save(project.Profile);
+                    var store = new ProfileStore(ProfileStore.DefaultDirectory);
+                    store.Save(ProjectConfiguration.ProfileForInitialization(project.Profile, store, Environment.CurrentDirectory));
                     output.WriteLine($"Profile saved from {project.Path}. Host it with: groundhog host {project.Profile.Name}");
                     return 0;
                 }

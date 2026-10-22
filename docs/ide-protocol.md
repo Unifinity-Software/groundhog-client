@@ -44,7 +44,9 @@ combines it with `clientVersion` and bounds the device sign-in label to 128 char
 
 `capabilities` contains only working features. `deviceLogin`, `localAgents` and `liveRequests` describe baseline
 backend support. `refreshToken` and `workspaceEvents` additionally require relay support discovered through
-`GET /api/service-info`; a missing endpoint means neither capability is available. Without `workspaceEvents`,
+anonymous `GET /api/service-info`; a missing endpoint means neither capability is available.
+Discovery never sends a saved bearer and is repeated for the actual relay after successful device login, so an expired
+session or an initially unavailable endpoint cannot permanently disable refresh or workspace events. Without `workspaceEvents`,
 refresh remote workspace/tunnel state every 30 seconds while initialized and signed in, and after mutations.
 Without `refreshToken`, expired credentials require sign-in again. Optional phase 2/3 capability names are
 `requestDetail`, `requestReplay`, `requestExportHttp`, `captureBodies`, `rotateWithoutDowntime` and `visitorAccess`.
@@ -58,10 +60,13 @@ A workspace is `{ "slug": "example", "name": "Example", "role": "owner" }`.
 A tunnel is `{ "workspace": "example", "name": "my-tunnel", "url": "https://my-tunnel.groundhog.unifinity.com",
 "state": "connected", "actions": ["rename", "delete"], "hasKey": true, "location": "local" }`.
 `location` merges relay status and responsive local sessions: `local`, `remote` (connected elsewhere), or `offline`.
-Relay state/action strings are passed through; clients handle unknown values without offering unknown actions.
+`target` is optional safe metadata: the responsive agent target takes precedence, otherwise a saved profile target
+is included only when its relay matches the current sign-in. Targets are validated HTTP(S) origins without credentials.
+This lets adapters reuse a known target across starts and restarts. Relay state/action strings are passed through; clients handle unknown values without offering unknown actions.
 An agent is `{ "name": "my-tunnel", "target": "http://localhost:5173", "url": "https://my-tunnel.groundhog.unifinity.com",
 "state": "Connected", "source": "cli", "processId": 1234 }`. `source` is `cli`, `aspire` or `agent` (library-hosted); agent states follow
-`GroundhogAgentState` (`Connecting`, `Connected`, `Reconnecting`, `Disconnected`, `Stopped`, `Failed`).
+`GroundhogAgentState` (`Connecting`, `Connected`, `Reconnecting`, `Stopped`).
+An agent may also include `reasonCode` and `reason`: fixed safe terminal status, never raw relay text.
 Agent objects omit URL until known. A request summary is `{ "requestId": "request-1", "completed":
 "2026-10-22T12:00:00Z", "method": "GET", "path": "/webhooks", "statusCode": 200, "durationMs": 12,
 "source": "local" }`; `source` is `local` or `remote`. IDs are opaque and may be synthesized for local metadata.
@@ -215,7 +220,9 @@ invalid parameters or an unavailable diagnostic operation use RPC errors.
 ## Notifications
 
 These are backend-to-client only. `auth/changed` carries the `auth/status` result. `tunnels/changed` is an invalidation
-for the given workspace. `agents/changed` carries a full responsive local agent list. Request and connection events
+for the given workspace. `agents/changed` carries the responsive local agent list and may include a one-time stopped
+row for an exact session identity previously observed by this backend. Stopped rows are notifications only; ordinary
+`tunnels/list` discovery does not return stale agents. Request and connection events
 are scoped to a subscription. Notifications may follow any successful request and also report externally made changes.
 
 ```json
@@ -226,7 +233,20 @@ are scoped to a subscription. Notifications may follow any successful request an
 {"jsonrpc":"2.0","method":"connection/event","params":{"subscriptionId":"subscription-1","state":"reconnecting","reason":"Relay unreachable."}}
 ```
 
-Connection states are `live`, `reconnecting` and `stopped`; `reason` is optional safe text. Local agent discovery
+Connection states are `live`, `reconnecting` and `stopped`; local streams follow the actual agent state, including
+initial connection and reconnect transitions. `reason` is optional fixed safe text. Both local connection events and
+agent rows may carry `reasonCode`: `credentialRejected`, `replaced`, `tunnelNotFound`, `notAllowed`,
+`unsupportedProtocol`, `visitorAccessUnsupported` or `cancelled`. Clients use the code for notices rather than
+matching arbitrary text. A rejected credential includes revoked or rotated keys.
+
+On a non-cancelled terminal stop, the agent atomically writes an OS-user-local handoff marker before closing its pipe.
+The separate terminal directory contains only a stop enum and UTC timestamp keyed by the exact random pipe identity;
+it stores no names, targets, request data, raw reasons or credentials. Markers expire after five minutes and writes
+prune expired markers and retain at most the newest 64. Reads are bounded to 512 bytes. The backend remembers at
+most 256 observed live identities and consumes each terminal notification once. There is no exit delay or persistent
+request log, and terminal markers are excluded from ordinary discovery.
+
+Local agent discovery
 refreshes every two seconds while needed; use injected time in tests. Workspace event streams replace the 30-second
 remote poll when supported and trigger the same invalidations. Polls/streams stop on EOF/logout. No busy waiting.
 

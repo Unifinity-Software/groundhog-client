@@ -8,9 +8,9 @@ using StreamJsonRpc;
 namespace Groundhog.Cli.Ide;
 
 internal sealed record IdeAuth(string State, string? Workspace = null, DateTimeOffset? ExpiresAt = null);
-internal sealed record IdeAgent(string Name, string Target, string? Url, string State, string Source, int ProcessId);
+internal sealed record IdeAgent(string Name, string Target, string? Url, string State, string Source, int ProcessId, string? ReasonCode = null, string? Reason = null);
 internal sealed record IdeTunnel(string Workspace, string Name, string Url, string State, string[] Actions, bool HasKey,
-    string Location, long RequestsLastMinute, bool CaptureBodies, bool CanCaptureBodies);
+    string Location, long RequestsLastMinute, bool CaptureBodies, bool CanCaptureBodies, string? Target = null);
 internal sealed record IdeRequest(string RequestId, DateTimeOffset Completed, string Method, string Path, int StatusCode,
     double DurationMs, string Source);
 internal sealed record IdeCheck(string Code, string Status, string Message);
@@ -121,26 +121,33 @@ internal sealed partial class IdeServices : IAsyncDisposable
             throw new LocalRpcException("No supported protocol version.")
             { ErrorCode = -32001, ErrorData = new { kind = "unsupportedVersion", supportedVersions = new[] { 1 } } };
         }
-        // Optional service-info discovery must not prevent a signed-out or offline IDE from starting.
-        try
-        {
-            var session = _credentials.Read();
-            using var client = _client(session?.Relay ?? GroundhogService.DefaultRelayAddress, session?.Token);
-            var info = await client.SendAsync<JsonElement>(HttpMethod.Get, "/api/service-info", null, ct);
-            if (info.TryGetProperty("capabilities", out var caps) && caps.ValueKind == JsonValueKind.Array)
-            {
-                _workspaceEventsSupported = caps.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.String && c.GetString() == "workspaceEvents");
-                if (_workspaceEventsSupported) { _capabilities.Add("workspaceEvents"); }
-                _refreshSupported = caps.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.String && c.GetString() == "refreshToken");
-                if (_refreshSupported) { _capabilities.Add("refreshToken"); }
-            }
-        }
-        catch (Exception ex) when (ex is ManagementException or HttpRequestException or TaskCanceledException or JsonException) { ct.ThrowIfCancellationRequested(); }
+        await DiscoverCapabilitiesAsync(_credentials.Read()?.Relay ?? GroundhogService.DefaultRelayAddress, ct);
+        if (_workspaceEventsSupported) { _capabilities.Add("workspaceEvents"); }
+        if (_refreshSupported) { _capabilities.Add("refreshToken"); }
+        await AgentsAsync(ct); // Observe identities before polling, without emitting notifications during initialization.
         _initialized = true;
         _lastAuth = JsonSerializer.Serialize(Auth());
         Track(PollAsync());
         Track(PollRemoteAsync());
         return new { protocolVersion = 1, cliVersion = UpdateCommands.Version, capabilities = _capabilities };
+    }
+
+    private async Task DiscoverCapabilitiesAsync(string relay, CancellationToken ct)
+    {
+        _workspaceEventsSupported = _refreshSupported = false;
+        try
+        {
+            // This public endpoint must work even when a saved bearer has expired or been revoked.
+            using var client = _client(relay, null);
+            var info = await client.SendAsync<JsonElement>(HttpMethod.Get, "/api/service-info", null, ct);
+            if (info.TryGetProperty("capabilities", out var caps) && caps.ValueKind == JsonValueKind.Array)
+            {
+                _workspaceEventsSupported = caps.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.String && c.GetString() == "workspaceEvents");
+                _refreshSupported = caps.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.String && c.GetString() == "refreshToken");
+            }
+        }
+        catch (Exception ex) when (ex is ManagementException or HttpRequestException or TaskCanceledException or JsonException)
+        { ct.ThrowIfCancellationRequested(); }
     }
 
     private IdeAuth Auth()
@@ -191,7 +198,8 @@ internal sealed partial class IdeServices : IAsyncDisposable
         {
             var tunnels = await client.SendAsync<TunnelInfo[]>(HttpMethod.Get, path, null, ct);
             var agents = await AgentsAsync(ct);
-            return new { tunnels = tunnels.Select(t => Tunnel(slug, t, session, agents)).ToArray(), agents };
+            var profiles = new ProfileStore(_directory).Read();
+            return new { tunnels = tunnels.Select(t => Tunnel(slug, t, session, agents, profiles)).ToArray(), agents };
         }
         if (method is "agents/start" or "agents/stop" or "agents/restart") { return await AgentAsync(method, p, session, slug, name!, ct); }
         if (method == "keys/set")
@@ -236,10 +244,10 @@ internal sealed partial class IdeServices : IAsyncDisposable
         return result;
     }
 
-    private static IdeTunnel Tunnel(string workspace, TunnelInfo t, LoginSession session, IdeAgent[] agents) =>
+    private static IdeTunnel Tunnel(string workspace, TunnelInfo t, LoginSession session, IdeAgent[] agents, TunnelProfile[]? profiles = null) =>
         new(workspace, t.Name, SafePublicUrl(t.Url), t.State, t.Actions, session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, t.Name)),
             agents.Any(a => a.Name == t.Name) ? "local" : t.State.Equals("connected", StringComparison.OrdinalIgnoreCase) ? "remote" : "offline", t.RequestsLastMinute,
-            t.CaptureBodies, t.Actions.Contains("captureBodies", StringComparer.Ordinal));
+            t.CaptureBodies, t.Actions.Contains("captureBodies", StringComparer.Ordinal), KnownTarget(t.Name, session.Relay, agents, profiles));
 
     private async Task<object> LoginAsync(CancellationToken ct)
     {
@@ -272,6 +280,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
                 if (grant.State != "approved" || grant.AccessToken is null || grant.ExpiresIn is < 1 or > 28800) { break; }
                 using var signed = _client(relay, grant.AccessToken);
                 var account = await signed.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, ct);
+                await DiscoverCapabilitiesAsync(relay, ct);
                 await _mutations.WaitAsync(ct);
                 try
                 {
@@ -360,19 +369,75 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private static object StartedAgent(IdeAgent agent, bool created) => new
     { agent.Name, agent.Target, agent.Url, agent.State, agent.Source, agent.ProcessId, created };
 
-    private async Task<IdeAgent[]> AgentsAsync(CancellationToken ct)
+    private readonly HashSet<string> _terminalDelivered = new(StringComparer.Ordinal);
+    private readonly Lock _observedGate = new();
+    private readonly Dictionary<string, (SessionRegistration Registration, IdeAgent Agent)> _observedAgents = new(StringComparer.Ordinal);
+
+    private async Task<IdeAgent[]> AgentsAsync(CancellationToken ct, bool includeTerminal = false)
     {
         var agents = new List<IdeAgent>();
+        var live = new Dictionary<string, (SessionRegistration Registration, IdeAgent Agent)>(StringComparer.Ordinal);
         foreach (var r in _registrations())
         {
-            if (await LocalSessions.QueryAsync(r, false, ct) is { } s) { agents.Add(Agent(r, s)); }
+            if (await LocalSessions.QueryAsync(r, false, ct) is { } s)
+            { var agent = Agent(r, s); agents.Add(agent); live[r.Pipe] = (r, agent); }
+        }
+        lock (_observedGate)
+        {
+            if (includeTerminal)
+            {
+                foreach (var (pipe, observed) in _observedAgents.ToArray())
+                {
+                    if (live.ContainsKey(pipe)) { continue; }
+                    if (TerminalStatusStore.Read(pipe, _time) is { } reason)
+                    {
+                        var safe = SafeStopReason(reason);
+                        agents.Add(observed.Agent with { State = "Stopped", ReasonCode = safe.Code, Reason = safe.Text });
+                        if (_terminalDelivered.Count == 256) { _terminalDelivered.Remove(_terminalDelivered.First()); }
+                        _terminalDelivered.Add(pipe);
+                    }
+                    _observedAgents.Remove(pipe);
+                }
+            }
+            foreach (var (pipe, agent) in live)
+            {
+                if (_terminalDelivered.Contains(pipe)) { continue; }
+                if (_observedAgents.Count >= 256 && !_observedAgents.ContainsKey(pipe)) { _observedAgents.Remove(_observedAgents.Keys.First()); }
+                _observedAgents[pipe] = agent;
+            }
         }
         return agents.ToArray();
     }
 
-    private static IdeAgent Agent(SessionRegistration r, SessionSnapshot s) =>
-        new(s.Name, s.Target, s.PublicAddress is null ? null : SafePublicUrl(s.PublicAddress), s.State,
-            r.Host == "Aspire" ? "aspire" : r.Host == "Agent" ? "agent" : "cli", r.ProcessId);
+    private static IdeAgent Agent(SessionRegistration r, SessionSnapshot s)
+    {
+        var safe = SafeStopReason(s.StopReason);
+        return new(s.Name, s.Target, s.PublicAddress is null ? null : SafePublicUrl(s.PublicAddress), s.State,
+            r.Host == "Aspire" ? "aspire" : r.Host == "Agent" ? "agent" : "cli", r.ProcessId, safe.Code, safe.Text);
+    }
+
+    private static (string? Code, string? Text) SafeStopReason(GroundhogAgentStopReason? reason) => reason switch
+    {
+        GroundhogAgentStopReason.CredentialRejected => ("credentialRejected", "The tunnel connection key was rejected, revoked or rotated."),
+        GroundhogAgentStopReason.SessionReplaced => ("replaced", "A newer agent session replaced this one."),
+        GroundhogAgentStopReason.TunnelNotFound => ("tunnelNotFound", "The tunnel was renamed, deleted or is unavailable."),
+        GroundhogAgentStopReason.NotAllowed => ("notAllowed", "This agent is not permitted to host the tunnel."),
+        GroundhogAgentStopReason.UnsupportedProtocol => ("unsupportedProtocol", "The relay does not support this agent protocol."),
+        GroundhogAgentStopReason.VisitorAccessUnsupported => ("visitorAccessUnsupported", "The relay does not support the declared visitor access policy."),
+        GroundhogAgentStopReason.Cancelled => ("cancelled", "The local agent stopped."),
+        _ => (null, null)
+    };
+
+    private static string? KnownTarget(string name, string relay, IdeAgent[] agents, TunnelProfile[]? profiles)
+    {
+        var value = agents.FirstOrDefault(a => a.Name == name)?.Target;
+        var profile = profiles?.SingleOrDefault(p => p.Name == name);
+        if (value is null && profile is not null && Uri.TryCreate(profile.Relay ?? GroundhogService.DefaultRelayAddress, UriKind.Absolute, out var savedRelay)
+            && Uri.TryCreate(relay, UriKind.Absolute, out var activeRelay) && savedRelay == activeRelay) { value = profile.Target; }
+        return Uri.TryCreate(value, UriKind.Absolute, out var target) && target.Scheme is "http" or "https"
+            && target.UserInfo.Length == 0 && target.Query.Length == 0 && target.Fragment.Length == 0 && target.AbsolutePath == "/"
+            ? target.ToString() : null;
+    }
 
     private async Task<object> DoctorAsync(JsonElement p, CancellationToken ct)
     {
@@ -425,7 +490,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
                 catch (Exception ex) when (ex is ManagementException or HttpRequestException) { }
                 var auth = JsonSerializer.Serialize(Auth());
                 if (auth != _lastAuth) { await EmitAuthAsync(); }
-                var agents = await AgentsAsync(_stop.Token);
+                var agents = await AgentsAsync(_stop.Token, includeTerminal: true);
                 var agentState = JsonSerializer.Serialize(agents);
                 if (agentState != _lastAgents)
                 { _lastAgents = agentState; await Notify("agents/changed", new { agents }); }

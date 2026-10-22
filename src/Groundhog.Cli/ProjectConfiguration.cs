@@ -100,6 +100,14 @@ internal sealed class ProjectConfiguration
         return [.. resolved];
     }
 
+    internal static TunnelProfile ProfileForInitialization(TunnelProfile project, ProfileStore store, string directory)
+    {
+        var (parsed, error, _) = HostArguments.Parse(ResolveHostArguments([project.Name], store, directory), _ => ConnectionKey.Generate());
+        if (parsed is null) { throw new UsageException(error ?? "Invalid project profile."); }
+        return new(project.Name, parsed.LocalTarget.ToString(), store.Read().SingleOrDefault(p => p.Name == project.Name)?.Relay,
+            parsed.AccessFlags, parsed.LocalCaFile, parsed.InsecureLocal);
+    }
+
     private static VisitorAccessFlags? MergeAccess(VisitorAccessFlags? defaults, VisitorAccessFlags? overrides)
     {
         if (overrides is null) { return defaults; }

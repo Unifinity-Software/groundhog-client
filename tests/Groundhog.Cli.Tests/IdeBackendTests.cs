@@ -189,14 +189,97 @@ public sealed class IdeBackendTests
     {
         await using var fixture = new Fixture();
         fixture.Handler.RefreshTokens = true;
-        fixture.Store.Save(fixture.Store.Read()! with { Expires = fixture.Time.GetUtcNow().AddMinutes(1), RefreshToken = "private-refresh-token", RefreshSupported = true });
+        fixture.Store.Save(fixture.Store.Read()! with { Expires = fixture.Time.GetUtcNow().AddMinutes(-1), RefreshToken = "private-refresh-token", RefreshSupported = true });
         var initialized = await fixture.InitializeAsync();
         Assert.Contains("refreshToken", initialized.GetRawText(), StringComparison.Ordinal);
         await fixture.CallAsync("tunnels/list", new { workspace = "example" });
         Assert.Equal("private-refreshed-access-token", fixture.Store.Read()!.Token);
         Assert.Equal(1, fixture.Handler.Refreshes);
+        Assert.False(fixture.Handler.AuthenticatedServiceInfo);
         Assert.DoesNotContain("private-refresh-token", fixture.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("private-refreshed-access-token", fixture.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Login_reprobes_anonymous_capabilities_after_initial_discovery_failed()
+    {
+        await using var fixture = new Fixture(signedIn: false);
+        fixture.Handler.Status = HttpStatusCode.ServiceUnavailable;
+        var initialized = await fixture.InitializeAsync();
+        Assert.DoesNotContain("refreshToken", initialized.GetRawText(), StringComparison.Ordinal);
+        fixture.Handler.Status = null;
+        fixture.Handler.RefreshTokens = true;
+        await fixture.CallAsync("auth/login", new { });
+        fixture.Time.Advance(TimeSpan.FromSeconds(1));
+        await fixture.AuthChanged.Task.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.True(fixture.Store.Read()!.RefreshSupported);
+        Assert.Equal("private-login-refresh-token", fixture.Store.Read()!.RefreshToken);
+        Assert.False(fixture.Handler.AuthenticatedServiceInfo);
+    }
+
+    [Fact]
+    public async Task Tunnel_target_metadata_reuses_only_safe_same_relay_saved_profiles()
+    {
+        await using var fixture = new Fixture();
+        fixture.Profiles.Save(new("my-tunnel", "https://localhost:7443"));
+        await fixture.InitializeAsync();
+        var listed = await fixture.CallAsync("tunnels/list", new { workspace = "example" });
+        Assert.Equal("https://localhost:7443/", listed.GetProperty("tunnels")[0].GetProperty("target").GetString());
+        fixture.Profiles.Save(new("my-tunnel", "https://localhost:7443", "https://localhost:8443"));
+        listed = await fixture.CallAsync("tunnels/list", new { workspace = "example" });
+        Assert.Equal(JsonValueKind.Null, listed.GetProperty("tunnels")[0].GetProperty("target").ValueKind);
+    }
+
+    [Fact]
+    public async Task Local_state_and_terminal_reason_survive_pipe_exit_once_without_raw_text_or_stale_discovery()
+    {
+        await using var fixture = new Fixture();
+        using var hostStop = new CancellationTokenSource();
+        var name = "ide-terminal-" + Guid.NewGuid().ToString("N")[..8];
+        var telemetry = new SessionTelemetry(name, new Uri("http://localhost:5173"), fixture.Time);
+        telemetry.OnStatus(new(GroundhogAgentState.Reconnecting, Reason: "private-raw-reason"));
+        var session = new LocalSessions(telemetry, hostStop);
+        var registration = Assert.Single(LocalSessions.Registrations(), r => r.Name == name);
+        fixture.Registrations = [registration];
+        try
+        {
+            await fixture.InitializeAsync();
+            var reconnecting = fixture.NextConnection();
+            var subscribed = await fixture.CallAsync("requests/subscribe", new { workspace = "example", name, source = "local" });
+            Assert.Equal("reconnecting", (await reconnecting.WaitAsync(TestContext.Current.CancellationToken)).GetProperty("state").GetString());
+            telemetry.OnStatus(new(GroundhogAgentState.Connected));
+            var connected = fixture.NextConnection();
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(500));
+            Assert.Equal("live", (await connected.WaitAsync(TestContext.Current.CancellationToken)).GetProperty("state").GetString());
+            telemetry.OnStatus(new(GroundhogAgentState.Stopped, Reason: "private-raw-reason", StopReason: GroundhogAgentStopReason.CredentialRejected));
+            await session.DisposeAsync();
+            fixture.Registrations = [];
+            var stopped = fixture.NextConnection();
+            fixture.Time.Advance(TimeSpan.FromMilliseconds(500));
+            var terminal = await stopped.WaitAsync(TestContext.Current.CancellationToken);
+            Assert.Equal("stopped", terminal.GetProperty("state").GetString());
+            Assert.Equal("credentialRejected", terminal.GetProperty("reasonCode").GetString());
+            var poll = fixture.NextAgentPoll();
+            fixture.Time.Advance(TimeSpan.FromSeconds(1));
+            await poll.WaitAsync(TestContext.Current.CancellationToken);
+            var last = fixture.AgentChanges.Last().GetProperty("agents");
+            Assert.Equal("credentialRejected", Assert.Single(last.EnumerateArray()).GetProperty("reasonCode").GetString());
+            var listed = await fixture.CallAsync("tunnels/list", new { workspace = "example" });
+            Assert.Empty(listed.GetProperty("agents").EnumerateArray());
+            poll = fixture.NextAgentPoll();
+            fixture.Time.Advance(TimeSpan.FromSeconds(2));
+            await poll.WaitAsync(TestContext.Current.CancellationToken);
+            Assert.Empty(fixture.AgentChanges.Last().GetProperty("agents").EnumerateArray());
+            Assert.Equal(1, fixture.AgentChanges.Count(change => change.GetProperty("agents").EnumerateArray()
+                .Any(agent => agent.GetProperty("reasonCode").GetString() == "credentialRejected")));
+            Assert.DoesNotContain("private-raw-reason", fixture.Output, StringComparison.Ordinal);
+            await fixture.CallAsync("requests/unsubscribe", new { subscriptionId = subscribed.GetProperty("subscriptionId").GetString() });
+        }
+        finally
+        {
+            if (File.Exists(Path.Combine(LocalSessions.DirectoryPath, registration.Pipe + ".json"))) { await session.DisposeAsync(); }
+            TerminalStatusStore.Forget(registration.Pipe);
+        }
     }
 
     [Fact]
@@ -416,6 +499,11 @@ public sealed class IdeBackendTests
         private TaskCompletionSource _poll = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Pipe ToServer { get; } = new();
         internal CredentialStore Store { get; }
+        internal ProfileStore Profiles => new(_directory);
+        internal ConcurrentQueue<JsonElement> AgentChanges { get; } = new();
+        private TaskCompletionSource<JsonElement> _connection = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal Task<JsonElement> NextConnection()
+        { _connection = new(TaskCreationOptions.RunContinuationsAsynchronously); return _connection.Task; }
         internal RelayHandler Handler { get; } = new();
         internal FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero));
         internal TaskCompletionSource AuthChanged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -439,10 +527,10 @@ public sealed class IdeBackendTests
             {
                 if (value.GetProperty("state").GetString() == "signedIn") { AuthChanged.TrySetResult(); }
             });
-            Register("agents/changed", _ => _poll.TrySetResult());
+            Register("agents/changed", value => { AgentChanges.Enqueue(value.Clone()); _poll.TrySetResult(); });
             Register("tunnels/changed", _ => { if (++Changes >= 2) { WorkspaceEventReceived.TrySetResult(); } });
             Register("requests/event", value => { Requests.Enqueue(value.Clone()); RequestReceived.TrySetResult(); });
-            Register("connection/event", _ => { });
+            Register("connection/event", value => _connection.TrySetResult(value.Clone()));
             _rpc.StartListening();
             Server = IdeServer.RunAsync(ToServer.Reader.AsStream(), _output, _stop.Token, _services);
         }
@@ -491,6 +579,7 @@ public sealed class IdeBackendTests
         internal bool WorkspaceEvents { get; set; }
         internal bool RefreshTokens { get; set; }
         internal int Refreshes { get; private set; }
+        internal bool AuthenticatedServiceInfo { get; private set; }
         internal bool DetailsTruncated { get; set; }
         internal Task<string> DeviceRequest { get; private set; } = Task.FromResult("");
         internal TaskCompletionSource PollReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -498,6 +587,8 @@ public sealed class IdeBackendTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
+            if (path == "/api/service-info" && request.Headers.Authorization is not null)
+            { AuthenticatedServiceInfo = true; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)); }
             if (path == "/api/cli/device") { DeviceRequest = request.Content!.ReadAsStringAsync(cancellationToken); }
             if (request.RequestUri.Query.Contains("limit=1000", StringComparison.Ordinal))
             { return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)); }
@@ -544,7 +635,7 @@ public sealed class IdeBackendTests
             return Task.FromResult(new HttpResponseMessage(result is null ? HttpStatusCode.NoContent : HttpStatusCode.OK)
             { Content = result is null ? null : JsonContent.Create(result) });
         }
-        private DeviceToken Grant() { PollReached.TrySetResult(); return new("approved", Fixture.Token, 3600); }
+        private DeviceToken Grant() { PollReached.TrySetResult(); return new("approved", Fixture.Token, 3600, RefreshTokens ? "private-login-refresh-token" : null); }
         private DeviceToken Refresh() { Refreshes++; return new("approved", "private-refreshed-access-token", 3600, "private-refreshed-refresh-token"); }
         private TunnelInfo[] List() { Lists++; ListReached.TrySetResult(); return [Tunnel("my-tunnel")]; }
         private static TunnelInfo Tunnel(string name) => new(name, $"https://{name}.groundhog.unifinity.com", "disconnected",

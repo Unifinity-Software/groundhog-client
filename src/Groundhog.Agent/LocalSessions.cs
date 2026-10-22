@@ -147,6 +147,9 @@ internal sealed class LocalSessions : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        var snapshot = _telemetry.Snapshot();
+        if (snapshot.State == "Stopped" && snapshot.StopReason is { } reason)
+        { TerminalStatusStore.Write(_pipe, reason, _telemetry.Clock); }
         await _shutdown.CancelAsync();
         await _server;
         _shutdown.Dispose();
