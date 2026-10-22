@@ -35,7 +35,8 @@ internal sealed class LocalSessions : IAsyncDisposable
     {
         try
         {
-            var registration = JsonSerializer.Deserialize<SessionRegistration>(File.ReadAllText(file));
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var registration = JsonSerializer.Deserialize<SessionRegistration>(stream);
             return registration is not null && registration.Pipe is { Length: 42 } && registration.Pipe.StartsWith("groundhog-", StringComparison.Ordinal)
                 && registration.Pipe[10..].All(char.IsAsciiHexDigit) ? registration : null;
         }
