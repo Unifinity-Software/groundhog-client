@@ -4,7 +4,7 @@ const options = { entryPoints: ['src/extension.ts'], bundle: true, platform: 'no
 if (process.argv.includes('--watch')) await (await context(options)).watch();
 else await build(options);
 await mkdir('../webview/dist', { recursive: true });
-await build({ entryPoints: ['../webview/src/inspector.ts'], bundle: true, platform: 'browser', format: 'iife', target: 'es2022', outfile: '../webview/dist/inspector.js', minify: true });
+await build({ entryPoints: ['../webview/src/inspector.ts', '../webview/src/access.ts'], bundle: true, platform: 'browser', format: 'iife', target: 'es2022', outdir: '../webview/dist', minify: true });
 await copyFile('../webview/src/inspector.css', '../webview/dist/inspector.css');
 await mkdir('dist', { recursive: true });
-for (const file of ['inspector.js', 'inspector.css']) await copyFile(`../webview/dist/${file}`, `dist/${file}`);
+for (const file of ['inspector.js', 'inspector.css', 'access.js']) await copyFile(`../webview/dist/${file}`, `dist/${file}`);

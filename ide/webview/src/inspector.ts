@@ -13,25 +13,36 @@ const status = document.getElementById('status') as HTMLSelectElement;
 const path = document.getElementById('path') as HTMLInputElement;
 const tbody = document.getElementById('rows')!;
 const operation = document.createElement('p'); operation.setAttribute('role', 'status'); operation.id = 'operation'; root.append(operation);
-const qrButton = document.createElement('button'); qrButton.type = 'button'; qrButton.textContent = 'Show QR code'; document.querySelector('header')!.append(qrButton);
+const qrButton = document.createElement('button'); qrButton.type = 'button'; qrButton.textContent = 'Show QR code'; qrButton.hidden = true; document.querySelector('header')!.append(qrButton);
 const qr = document.createElement('img'); qr.alt = 'QR code of the public tunnel URL'; qr.width = 160; qr.height = 160; qr.hidden = true; document.querySelector('header')!.after(qr);
 qrButton.addEventListener('click', () => { qr.hidden = !qr.hidden; qrButton.textContent = qr.hidden ? 'Show QR code' : 'Hide QR code'; });
-interface Detail { requestId: string; method: string; path: string; headers: Record<string, string>; body: string; truncated: boolean; captureBodies: boolean; canCaptureBodies: boolean }
+const captureLabel = document.createElement('label'); captureLabel.className = 'inline'; captureLabel.innerHTML = '<input id="capture" type="checkbox" disabled>Capture bodies'; document.querySelector('header')!.append(captureLabel);
+const capture = document.getElementById('capture') as HTMLInputElement;
+const captureHelp = document.createElement('p'); captureHelp.id = 'capture-help'; captureHelp.textContent = 'Checking body capture permissions…'; document.querySelector('header')!.after(captureHelp);
+capture.addEventListener('change', () => host.postMessage({ type: 'capture', enabled: capture.checked }));
+function captureState(enabled: boolean, canChange: boolean): void { capture.checked = enabled; capture.disabled = !canChange; captureHelp.textContent = canChange ? 'Body capture applies to future requests. Captured data may contain sensitive information.' : 'Only the owner or tunnel creator can change body capture.'; }
+interface Detail { requestId: string; method: string; path: string; headers: Record<string, string>; body: string; truncated: boolean; captureBodies: boolean; canCaptureBodies: boolean; responseHeaders?: Record<string, string>; responseBody?: string; responseTruncated?: boolean; statusCode?: number }
 function renderDetail(detail: Detail, target: string): void {
   const section = document.getElementById('detail')!; section.hidden = false;
-  section.innerHTML = '<h2></h2><label>Body capture<input id="capture" type="checkbox"></label><p id="permission"></p><label>Local target<input id="target" type="url"></label><label>Headers (JSON)<textarea id="headers" maxlength="65536" spellcheck="false"></textarea></label><label>Body<textarea id="body" maxlength="262144" spellcheck="false"></textarea></label><p id="warning"></p><div class="actions"><button id="replay" type="button">Send again</button><button id="curl" type="button">Copy as curl</button><button id="export" type="button">Export as .http</button></div>';
+  section.dataset.capture = String(detail.captureBodies);
+  section.innerHTML = '<h2></h2><label>Local target<input id="target" type="url"></label><label>Request headers (JSON)<textarea id="headers" maxlength="65536" spellcheck="false"></textarea></label><label>Request body<textarea id="body" maxlength="262144" spellcheck="false"></textarea></label><p id="warning"></p><div class="actions"><button id="replay" type="button">Send again</button><button id="curl" type="button">Copy as curl</button><button id="export" type="button">Export as .http</button></div>';
   section.querySelector('h2')!.textContent = detail.method + ' ' + detail.path;
-  const capture = section.querySelector('#capture') as HTMLInputElement; capture.checked = detail.captureBodies; capture.disabled = !detail.canCaptureBodies;
-  section.querySelector('#permission')!.textContent = detail.canCaptureBodies ? 'Body capture changes apply to future requests. Captured data may contain sensitive information.' : 'Only the owner or tunnel creator can change body capture.';
-  capture.addEventListener('change', () => host.postMessage({ type: 'capture', enabled: capture.checked }));
+  captureState(detail.captureBodies, detail.canCaptureBodies);
   const targetInput = section.querySelector('#target') as HTMLInputElement; targetInput.value = target;
   const headers = section.querySelector('#headers') as HTMLTextAreaElement; headers.value = JSON.stringify(detail.headers, null, 2);
   const body = section.querySelector('#body') as HTMLTextAreaElement; body.value = detail.body;
   section.querySelector('#warning')!.textContent = detail.truncated ? 'This capture was truncated. Send again is unavailable.' : Object.keys(detail.headers).some(name => name.toLowerCase().endsWith('-signature')) ? 'Signed webhooks may reject old timestamps when sent again.' : '';
   (section.querySelector('#replay') as HTMLButtonElement).disabled = detail.truncated;
   for (const type of ['replay', 'curl', 'export']) section.querySelector('#' + type)!.addEventListener('click', () => host.postMessage({ type, target: targetInput.value, headers: headers.value, body: body.value }));
+  if (detail.statusCode !== undefined || detail.responseHeaders || detail.responseBody) {
+    const heading = document.createElement('h3'); heading.textContent = `Response · ${detail.statusCode ?? ''}${detail.responseTruncated ? ' · truncated' : ''}`;
+    const response = document.createElement('pre'); response.textContent = JSON.stringify(detail.responseHeaders ?? {}, null, 2) + '\n\n' + (detail.responseBody ?? '');
+    section.append(heading, response);
+  }
 }
 function render(): void {
+  // Keep keyboard focus stable while traffic streams; the next focus change catches the view up.
+  if (tbody.contains(document.activeElement)) return;
   const rows = (paused ? frozenRows : model.rows).filter(row => matches(row, { method: method.value, status: status.value, path: path.value }));
   tbody.replaceChildren(...rows.map(row => {
     const tr = document.createElement('tr');
@@ -48,6 +59,7 @@ function render(): void {
   document.getElementById('empty')!.hidden = rows.length > 0;
 }
 for (const control of [method, status, path]) control.addEventListener('input', render);
+tbody.addEventListener('focusout', () => queueMicrotask(() => { if (!paused) render(); }));
 document.querySelector('form')!.addEventListener('submit', event => event.preventDefault());
 document.getElementById('pause')!.addEventListener('click', () => {
   paused = !paused;
@@ -56,12 +68,13 @@ document.getElementById('pause')!.addEventListener('click', () => {
   if (!paused) render();
 });
 host.onMessage(message => {
-  const data = message as { type?: string; requests?: RequestRow[]; request?: RequestRow; state?: string; source?: string; message?: string; demo?: boolean; detail?: Detail; target?: string; dataUrl?: string };
+  const data = message as { type?: string; requests?: RequestRow[]; request?: RequestRow; state?: string; source?: string; message?: string; demo?: boolean; detail?: Detail; target?: string; dataUrl?: string; enabled?: boolean; canChange?: boolean };
   if (data.type === 'requests' && Array.isArray(data.requests)) { model.add(data.requests); if (!paused) render(); }
   if (data.type === 'request' && data.request) { model.add([data.request]); if (!paused) render(); }
   if (data.type === 'detail' && data.detail) renderDetail(data.detail, data.target ?? 'http://localhost:5173');
+  if (data.type === 'captureState') captureState(data.enabled ?? false, data.canChange ?? false);
   if (data.type === 'operation') operation.textContent = data.message ?? '';
-  if (data.type === 'qr' && data.dataUrl?.startsWith('data:image/png;base64,')) qr.src = data.dataUrl;
+  if (data.type === 'qr' && data.dataUrl?.startsWith('data:image/png;base64,')) { qr.src = data.dataUrl; qrButton.hidden = false; }
   if (data.type === 'connection') {
     if (data.source) currentSource = data.source === 'remote' ? 'Service' : 'Local';
     document.getElementById('source')!.textContent = data.state === 'live' ? `${data.demo ? 'Demo data · ' : ''}${currentSource || 'Source pending'} · live` : data.state === 'reconnecting' ? 'Reconnecting…' : data.message ?? 'Stopped';

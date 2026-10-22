@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { detectCli } from './cli';
+import { selectCli } from './cliSelection';
 import { RpcBackend, spawnSession } from './backend';
 import { MockBackend } from './mockBackend';
 import { Backend, Tunnel } from './protocol';
@@ -11,6 +11,8 @@ import { InspectorPanels } from './inspector';
 import { ActiveRequestStats } from './stats';
 import { NotificationPolicy, tunnelLiterals } from './notifications';
 import { tunnelLocation } from './actions';
+import { VisitorAccessPanels } from './visitorAccess';
+import { GroundhogDiagnostics } from './diagnostics';
 
 async function projectConfig(folder?: vscode.WorkspaceFolder): Promise<ProjectConfig | undefined> {
   if (!folder) return;
@@ -34,7 +36,7 @@ async function targetFor(tunnel: string): Promise<string | undefined> {
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const config = vscode.workspace.getConfiguration('groundhog');
-  const cli = config.get<string>('cliPath', 'groundhog');
+  let cli = config.get<string>('cliPath', 'groundhog');
   context.subscriptions.push(vscode.commands.registerCommand('groundhog.installCli', () => {
     const terminal = vscode.window.createTerminal('Install Groundhog CLI');
     terminal.sendText('dotnet tool update --global Groundhog.Cli --prerelease'); terminal.show();
@@ -43,7 +45,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let backend: Backend;
   if (demo) backend = new MockBackend();
   else {
-    const status = await detectCli(cli, context.extension.packageJSON.groundhog.minimumCliVersion as string);
+    const selected = await selectCli(cli, vscode.Uri.joinPath(context.extensionUri, 'backend', process.platform === 'win32' ? 'groundhog.exe' : 'groundhog').fsPath, context.extension.packageJSON.groundhog.minimumCliVersion as string);
+    cli = selected.path; const status = selected.status;
     if (!status.available) {
       context.subscriptions.push(vscode.window.createTreeView('groundhog.tunnels', { treeDataProvider: { getTreeItem: (item: vscode.TreeItem) => item, getChildren: () => [] } }), vscode.commands.registerCommand('groundhog.signIn', () => vscode.commands.executeCommand('groundhog.installCli')));
       void vscode.window.showWarningMessage(status.reason, 'Install Groundhog CLI').then(action => { if (action) void vscode.commands.executeCommand('groundhog.installCli'); });
@@ -52,6 +55,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     backend = new RpcBackend(() => spawnSession(cli), context.extension.packageJSON.version as string);
   }
   context.subscriptions.push(backend);
+  const mcpChanged = new vscode.EventEmitter<void>();
+  context.subscriptions.push(mcpChanged, vscode.workspace.onDidGrantWorkspaceTrust(() => mcpChanged.fire()),
+    vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('groundhog.enableMcp')) mcpChanged.fire(); }),
+    vscode.lm.registerMcpServerDefinitionProvider('groundhog.mcp', {
+      onDidChangeMcpServerDefinitions: mcpChanged.event,
+      provideMcpServerDefinitions: () => vscode.workspace.isTrusted && !demo && vscode.workspace.getConfiguration('groundhog').get<boolean>('enableMcp', true) ? [new vscode.McpStdioServerDefinition('Groundhog', cli, ['mcp'], {}, context.extension.packageJSON.version as string)] : [],
+      resolveMcpServerDefinition: definition => vscode.workspace.isTrusted ? definition : undefined
+    })
+  );
   const explorer = new TunnelExplorer(backend);
   const auth = new GroundhogAuthentication(backend);
   const tree = vscode.window.createTreeView('groundhog.tunnels', { treeDataProvider: explorer });
@@ -61,7 +73,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let activeTunnel: Tunnel | undefined;
   let requestStats = { requests: 0, failures: 0, disconnected: false };
   const updateStatus = () => {
-    if (!activeTunnel) { status.hide(); return; }
+    if (!activeTunnel || explorer.auth.state !== 'signedIn') { status.hide(); return; }
     const current = explorer.tunnels.find(t => t.name === activeTunnel!.name) ?? activeTunnel;
     const local = explorer.agents.find(a => a.name === current.name);
     const connected = !requestStats.disconnected && (local?.state === 'Connected' || current.state.toLowerCase() === 'connected');
@@ -71,6 +83,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   const stats = new ActiveRequestStats(backend, value => { requestStats = value; if (activeTunnel) explorer.setRequestRate(activeTunnel.name, value.requests); updateStatus(); });
   const panels = new InspectorPanels(backend, context.extensionUri, (tunnel, rows) => { explorer.setRequestRate(tunnel.name, rows.filter(row => Date.parse(row.completed) >= Date.now() - 60000).length); }, targetFor);
+  const access = new VisitorAccessPanels(backend, context.extensionUri);
+  const diagnostics = new GroundhogDiagnostics(backend);
+  context.subscriptions.push(access, diagnostics);
   const actions = new TunnelActions(backend, {
     input: (title, value, password) => Promise.resolve(vscode.window.showInputBox({ title, value, password, ignoreFocusOut: true })),
     confirm: async message => (await vscode.window.showWarningMessage(message, { modal: true }, 'Confirm')) === 'Confirm',
@@ -97,6 +112,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (choice) { await backend.request('workspaces/use', { workspace: choice.workspace }); await explorer.refresh(); }
   });
   command('create', async () => { if (explorer.workspace) { await actions.create(explorer.workspace); await explorer.refresh(); } });
+  command('visitorAccess', async node => { const tunnel = await selectTunnel(node); if (tunnel) await access.open(tunnel); });
+  command('runDiagnostics', async node => { const tunnel = await selectTunnel(node); if (tunnel) await diagnostics.run(vscode.workspace.workspaceFolders?.[0], tunnel, await targetFor(tunnel.name) ?? 'http://localhost:5173'); });
+  command('startApp', async () => { if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before starting your app.'); await vscode.commands.executeCommand('workbench.action.debug.start'); });
+  command('configureLocalCa', async node => {
+    const tunnel = await selectTunnel(node); if (!tunnel) return;
+    if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before changing local certificate settings.');
+    const files = await vscode.window.showOpenDialog({ title: 'Choose a trusted local CA certificate', canSelectMany: false, filters: { Certificates: ['pem', 'crt', 'cer'] } }); if (!files?.[0]) return;
+    if (explorer.agents.some(agent => agent.name === tunnel.name && agent.source === 'aspire')) throw new Error('Configure the local CA through the Aspire AppHost for this tunnel.');
+    await backend.request('agents/restart', { workspace: tunnel.workspace, name: tunnel.name, localCa: files[0].fsPath, projectDirectory: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath });
+    await explorer.refresh(); await diagnostics.run(vscode.workspace.workspaceFolders?.[0], tunnel, await targetFor(tunnel.name) ?? 'http://localhost:5173');
+  });
   command('rotateKey', async node => {
     const tunnel = await selectTunnel(node); if (!tunnel) return;
     if (!backend.capabilities.includes('rotateWithoutDowntime')) throw new Error('Key rotation requires a newer Groundhog CLI or relay.');

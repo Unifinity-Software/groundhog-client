@@ -1,8 +1,8 @@
-import { Agent, AuthStatus, Backend, BackendEvents, Disposable, Methods, Notifications, RequestSummary, Tunnel, TunnelRef } from './protocol';
+import { Agent, AuthStatus, Backend, BackendEvents, Disposable, Methods, Notifications, RequestSummary, Tunnel, TunnelRef, VisitorAccess } from './protocol';
 
 /** Scripted demo backend; never reads credentials or contacts the hosted service. */
 export class MockBackend implements Backend {
-  readonly capabilities = ['deviceLogin', 'localAgents', 'liveRequests', 'requestDetail', 'requestReplay', 'requestExportHttp', 'captureBodies', 'rotateWithoutDowntime', 'demo'];
+  readonly capabilities = ['deviceLogin', 'localAgents', 'liveRequests', 'requestDetail', 'requestReplay', 'requestExportHttp', 'captureBodies', 'rotateWithoutDowntime', 'visitorAccess', 'demo'];
   private readonly events = new BackendEvents();
   private auth: AuthStatus = { state: 'signedIn', workspace: 'example' };
   private tunnels: Tunnel[] = ['my-tunnel', 'service-a', 'service-b'].map((name, i) => ({
@@ -15,6 +15,7 @@ export class MockBackend implements Backend {
   private nextRequest = 0;
   private disposed = false;
   private captureBodies = false;
+  private access: VisitorAccess = { default: { allow: ['members'] }, rules: [{ path: '/webhooks', allow: ['anyone'] }], ipRanges: [], apiKeys: [], managedBy: 'agent' };
   async start(): Promise<void> { if (this.disposed) throw new Error('Mock backend has stopped.'); }
   on<N extends keyof Notifications>(event: N, listener: (value: Notifications[N]) => void): Disposable { return this.events.on(event, listener); }
   async request<M extends keyof Methods>(method: M, params: Methods[M][0]): Promise<Methods[M][1]> {
@@ -37,7 +38,7 @@ export class MockBackend implements Backend {
         break;
       case 'workspaces/list': result = { workspaces: [{ slug: 'example', name: 'Example', role: 'owner' }], selected: this.auth.workspace ?? null }; break;
       case 'workspaces/use': this.auth.workspace = (params as { workspace: string }).workspace; result = { workspace: this.auth.workspace }; this.events.emit('auth/changed', this.auth); break;
-      case 'tunnels/list': result = { tunnels: this.tunnels, agents: this.agents }; break;
+      case 'tunnels/list': result = { tunnels: this.tunnels.map(t => ({ ...t, captureBodies: this.captureBodies, canCaptureBodies: true })), agents: this.agents }; break;
       case 'tunnels/create':
         if (this.tunnels.some(t => t.name === ref.name)) throw new Error('A tunnel with this name already exists.');
         result = { ...ref, url: `https://${ref.name}.groundhog.unifinity.com`, state: 'disconnected', location: 'offline', hasKey: true, actions: ['rename', 'delete'] };
@@ -73,11 +74,17 @@ export class MockBackend implements Backend {
         clearInterval(this.subscriptions.get(id)); this.subscriptions.delete(id); break;
       }
       case 'doctor/run': result = { checks: [{ code: 'targetReachable', status: 'passed', message: 'Demo target responded.' }, { code: 'connectionKey', status: 'passed', message: 'A demo connection key is saved.' }] }; break;
-      case 'requests/detail': result = { requestId: (params as Methods['requests/detail'][0]).requestId, method: 'POST', path: '/webhooks', headers: { 'Content-Type': 'application/json', 'Webhook-Signature': 'demo-signature' }, body: this.captureBodies ? '{"event":"demo.completed"}' : '', truncated: false, captureBodies: this.captureBodies, canCaptureBodies: true }; break;
+      case 'requests/detail': result = { requestId: (params as Methods['requests/detail'][0]).requestId, method: 'POST', path: '/webhooks', headers: { 'Content-Type': 'application/json', 'Webhook-Signature': 'demo-signature' }, body: this.captureBodies ? '{"event":"demo.completed"}' : '', truncated: Number((params as Methods['requests/detail'][0]).requestId.split('-').at(-1)) % 2 === 1, captureBodies: this.captureBodies, canCaptureBodies: true, responseHeaders: { 'Content-Type': 'application/json' }, responseBody: '{"ok":true}', statusCode: 200, responseTruncated: false }; break;
       case 'requests/replay': result = { statusCode: 200, durationMs: 12 }; break;
       case 'requests/exportHttp': result = { text: 'POST ' + (params as Methods['requests/exportHttp'][0]).target + '/webhooks\nContent-Type: application/json\n\n' + ((params as Methods['requests/exportHttp'][0]).body ?? '') }; break;
       case 'captureBodies/set': this.captureBodies = (params as { enabled: boolean }).enabled; result = { enabled: this.captureBodies }; break;
       case 'keys/rotateWithoutDowntime': this.events.emit('tunnels/changed', { workspace: ref.workspace }); break;
+      case 'visitorAccess/get': result = this.access; break;
+      case 'visitorAccess/set': { const draft = params as Methods['visitorAccess/set'][0]; this.access = { ...this.access, default: draft.default, rules: draft.rules, ipRanges: draft.ipRanges, managedBy: 'dashboard' }; result = this.access; break; }
+      case 'visitorAccess/handBack': this.access.managedBy = 'agent'; result = this.access; break;
+      case 'visitorAccess/createKey': { const key = { id: `demo-key-${this.access.apiKeys.length + 1}`, name: (params as Methods['visitorAccess/createKey'][0]).label, created: new Date().toISOString() }; this.access.apiKeys.push(key); result = { ...key, key: 'demo-visitor-key' }; break; }
+      case 'visitorAccess/deleteKey': this.access.apiKeys = this.access.apiKeys.filter(key => key.id !== (params as Methods['visitorAccess/deleteKey'][0]).id); break;
+      case 'visitorAccess/saveKey': break;
       default: throw new Error('This demo does not support that operation.');
     }
     return structuredClone(result) as Methods[M][1];

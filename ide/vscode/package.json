@@ -10,7 +10,7 @@
     "url": "https://github.com/Unifinity-Software/groundhog-client"
   },
   "engines": {
-    "vscode": "^1.95.0"
+    "vscode": "^1.101.0"
   },
   "categories": [
     "Other"
@@ -23,12 +23,13 @@
     "minimumCliVersion": "1.3.0-preview.1"
   },
   "activationEvents": [
-    "onView:groundhog.tunnels"
+    "onView:groundhog.tunnels",
+    "onMcpServerDefinitionProvider:groundhog.mcp"
   ],
   "scripts": {
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "lint": "eslint src test",
+    "lint": "node scripts/lint.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:smoke": "node test/smoke/run.cjs",
@@ -103,6 +104,22 @@
       {
         "command": "groundhog.rotateKey",
         "title": "Groundhog: Rotate connection key"
+      },
+      {
+        "command": "groundhog.visitorAccess",
+        "title": "Groundhog: Edit visitor access"
+      },
+      {
+        "command": "groundhog.runDiagnostics",
+        "title": "Groundhog: Run diagnostics"
+      },
+      {
+        "command": "groundhog.configureLocalCa",
+        "title": "Groundhog: Use local CA"
+      },
+      {
+        "command": "groundhog.startApp",
+        "title": "Groundhog: Start my app"
       }
     ],
     "viewsContainers": {
@@ -165,6 +182,11 @@
           "type": "boolean",
           "default": false,
           "description": "Notify on the first server error after five quiet minutes."
+        },
+        "groundhog.enableMcp": {
+          "type": "boolean",
+          "default": true,
+          "description": "Offer the Groundhog MCP server to VS Code chat in trusted workspaces. Mutations remain subject to MCP confirmation."
         }
       }
     },
@@ -226,12 +248,26 @@
         {
           "command": "groundhog.rotateKey",
           "when": "view == groundhog.tunnels && viewItem =~ /local/ && !(viewItem =~ /aspire/)"
+        },
+        {
+          "command": "groundhog.visitorAccess",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.runDiagnostics",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
         }
       ]
     },
     "authentication": [
       {
         "id": "groundhog",
+        "label": "Groundhog"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "groundhog.mcp",
         "label": "Groundhog"
       }
     ]
@@ -242,7 +278,7 @@
     "@types/node": "^26.6.5",
     "@types/qrcode": "^1.5.6",
     "@types/semver": "^7.8.0",
-    "@types/vscode": "^1.95.0",
+    "@types/vscode": "^1.101.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
@@ -252,11 +288,28 @@
     "playwright-core": "^1.64.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.0",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "yaml": "^2.9.1"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
     "semver": "^7.8.5",
     "vscode-jsonrpc": "^10.0.0"
+  },
+  "icon": "media/icon.png",
+  "homepage": "https://groundhog.unifinity.com/docs",
+  "bugs": {
+    "url": "https://github.com/Unifinity-Software/groundhog-client/issues"
+  },
+  "keywords": [
+    "tunnels",
+    "webhooks",
+    "https",
+    "request inspector",
+    "dev containers"
+  ],
+  "galleryBanner": {
+    "color": "#101010",
+    "theme": "dark"
   }
 }

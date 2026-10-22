@@ -1,13 +1,14 @@
 /** Public, credential-free shapes from docs/ide-protocol.md. */
 export interface Workspace { slug: string; name: string; role: string }
-export interface Tunnel { workspace: string; name: string; url: string; state: string; location?: 'local' | 'remote' | 'offline'; actions: string[]; hasKey: boolean }
+export interface Tunnel { workspace: string; name: string; url: string; state: string; location?: 'local' | 'remote' | 'offline'; actions: string[]; hasKey: boolean; captureBodies?: boolean; canCaptureBodies?: boolean }
 export interface Agent { name: string; target: string; url?: string; state: string; source: 'cli' | 'aspire'; processId: number }
 export interface AuthStatus { state: 'signedIn' | 'signedOut' | 'expired'; workspace?: string | null; expiresAt?: string | null }
 export interface RequestSummary { requestId: string; completed: string; method: string; path: string; statusCode: number; durationMs: number; source: 'local' | 'remote' }
 export interface TunnelRef { workspace: string; name: string }
 export type Empty = Record<string, never>;
 export interface InitializeResult { protocolVersion: number; cliVersion: string; capabilities: string[] }
-export interface RequestDetail { requestId: string; method: string; path: string; headers: Record<string, string>; body: string; truncated: boolean; captureBodies: boolean; canCaptureBodies: boolean }
+export interface RequestDetail { requestId: string; method: string; path: string; headers: Record<string, string>; body: string; truncated: boolean; captureBodies: boolean; canCaptureBodies: boolean; responseHeaders?: Record<string, string>; responseBody?: string; responseTruncated?: boolean; statusCode?: number }
+export interface VisitorAccess { default: { allow: string[] } | null; rules: { path: string; allow: string[] }[]; ipRanges: string[]; apiKeys: { id: string; name: string; created: string }[]; managedBy: 'dashboard' | 'agent' }
 export interface RequestRef extends TunnelRef { requestId: string }
 export interface Methods {
   initialize: [{ clientVersion: string; protocolVersions: number[] }, InitializeResult];
@@ -20,8 +21,8 @@ export interface Methods {
   'tunnels/create': [TunnelRef, Tunnel];
   'tunnels/rename': [TunnelRef & { newName: string; confirm: true }, Tunnel];
   'tunnels/delete': [TunnelRef & { confirm: true }, Empty];
-  'agents/start': [TunnelRef & { target?: string; projectDirectory?: string }, Agent];
-  'agents/restart': [TunnelRef & { target?: string; projectDirectory?: string }, Agent];
+  'agents/start': [TunnelRef & { target?: string; projectDirectory?: string; localCa?: string }, Agent];
+  'agents/restart': [TunnelRef & { target?: string; projectDirectory?: string; localCa?: string }, Agent];
   'agents/stop': [TunnelRef, Empty];
   'keys/set': [TunnelRef & { key: string }, Empty];
   'requests/subscribe': [TunnelRef & { source?: 'auto' | 'local' | 'remote' }, { subscriptionId: string; requests: RequestSummary[]; source?: 'local' | 'remote' }];
@@ -32,6 +33,12 @@ export interface Methods {
   'requests/exportHttp': [RequestRef & { target: string; headers?: Record<string, string>; body?: string }, { text: string }];
   'captureBodies/set': [TunnelRef & { enabled: boolean }, { enabled: boolean }];
   'keys/rotateWithoutDowntime': [TunnelRef & { confirm: true; timeoutSeconds?: number }, Empty];
+  'visitorAccess/get': [TunnelRef, VisitorAccess];
+  'visitorAccess/set': [TunnelRef & { default: { allow: string[] }; rules: VisitorAccess['rules']; ipRanges: string[]; confirm: true }, VisitorAccess];
+  'visitorAccess/createKey': [TunnelRef & { label: string; confirm: true }, { id: string; name: string; created: string; key: string }];
+  'visitorAccess/deleteKey': [TunnelRef & { id: string; confirm: true }, Empty];
+  'visitorAccess/handBack': [TunnelRef & { confirm: true }, VisitorAccess];
+  'visitorAccess/saveKey': [TunnelRef & { project: string; parameter: string; key: string; confirm: true }, Empty];
 }
 export interface Notifications {
   'auth/changed': AuthStatus;

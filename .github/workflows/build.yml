@@ -68,6 +68,11 @@ jobs:
           global-json-file: global.json
       - name: Build
         run: dotnet build Groundhog.Client.slnx -c Release
+      - name: Visual Studio package check
+        if: runner.os == 'Windows'
+        run: |
+          dotnet build ide/visualstudio/Groundhog.VisualStudio.csproj -c Release
+          powershell.exe -NoProfile -File ide/visualstudio/Verify-Vsix.ps1
       - name: Full client tests
         run: dotnet test --solution Groundhog.Client.slnx -c Release --no-build
       - name: Pack

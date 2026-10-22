@@ -1,7 +1,9 @@
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 20px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.inline { flex-direction: row; align-items: center; gap: 6px; }
+#capture-help { color: var(--vscode-descriptionForeground); max-width: 65ch; margin-bottom: 24px; }
 h1 { font-size: 20px; font-weight: 600; margin: 0 0 6px; }
 #source, #count { color: var(--vscode-descriptionForeground); }
 button { border: 1px solid var(--vscode-button-border, transparent); padding: 6px 12px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
@@ -24,5 +26,11 @@ tbody tr:focus { background: var(--vscode-list-focusBackground); }
 pre { overflow: auto; background: var(--vscode-textCodeBlock-background); padding: 12px; }
 textarea { width: 100%; min-height: 120px; font-family: var(--vscode-editor-font-family); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+fieldset { width: 100%; margin: 0 0 20px; padding: 16px; border: 1px solid var(--vscode-panel-border); }
+legend { font-weight: 600; padding: 0 6px; }
+.rule-row { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+#keys { padding: 0; list-style: none; }
+#keys li { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
+section { margin-top: 28px; }
 button:disabled { opacity: .6; cursor: default; }
 @media (max-width: 420px) { body { padding: 12px; } form { align-items: stretch; } label { flex: 1; } }

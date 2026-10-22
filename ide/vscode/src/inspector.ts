@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
-import { randomBytes } from 'node:crypto';
 import { Backend, RequestDetail, RequestSummary, Tunnel } from './protocol';
 import { StreamEvent, SubscriptionBuffer } from './subscription';
 import { asCurl, parseHeaders, RequestActions, signatureWarning } from './requestActions';
 import { toDataURL } from 'qrcode';
+import { webviewHtml } from './webview';
 
 export class InspectorPanels implements vscode.Disposable {
   private readonly panels = new Map<string, vscode.WebviewPanel>();
@@ -62,15 +62,17 @@ export class InspectorPanels implements vscode.Disposable {
     panel.webview.onDidReceiveMessage(async (message: { type?: string; requestId?: unknown; target?: unknown; headers?: unknown; body?: unknown; enabled?: unknown }) => {
       try {
       if (message?.type === 'ready') {
+        post({ type: 'captureState', enabled: tunnel.captureBodies ?? false, canChange: tunnel.canCaptureBodies ?? false });
         post({ type: 'qr', dataUrl: await toDataURL(tunnel.url, { width: 160, margin: 2 }), url: tunnel.url });
         if (subscriptionId) { post({ type: 'requests', requests: rows }); post({ type: 'connection', state: 'live', source, demo: this.backend.capabilities.includes('demo') }); }
         else void subscribe();
       } else if (message?.type === 'detail') {
         if (typeof message.requestId !== 'string' || !rows.some(row => row.requestId === message.requestId)) return;
         await showDetail(message.requestId);
-      } else if (message?.type === 'capture' && detail && typeof message.enabled === 'boolean') {
-        await this.backend.request('captureBodies/set', { workspace: tunnel.workspace, name: tunnel.name, enabled: message.enabled });
-        await showDetail(detail.requestId);
+      } else if (message?.type === 'capture' && typeof message.enabled === 'boolean') {
+        const result = await this.backend.request('captureBodies/set', { workspace: tunnel.workspace, name: tunnel.name, enabled: message.enabled });
+        post({ type: 'captureState', enabled: result.enabled, canChange: true });
+        if (detail) await showDetail(detail.requestId);
       } else if (['replay', 'curl', 'export'].includes(message?.type ?? '') && detail) {
         if (typeof message.target !== 'string' || typeof message.headers !== 'string' || typeof message.body !== 'string' || message.headers.length > 65536 || message.body.length > 262144) throw new Error('The edited request is too large or invalid.');
         const headers = parseHeaders(message.headers); const body = message.body;
@@ -93,10 +95,7 @@ export class InspectorPanels implements vscode.Disposable {
       disposed = true; generation++; this.panels.delete(key); subscriptions.forEach(s => s.dispose());
       if (subscriptionId) void this.backend.request('requests/unsubscribe', { subscriptionId }).catch(() => {});
     });
-    const nonce = randomBytes(18).toString('base64');
-    const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'inspector.js'));
-    const style = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'inspector.css'));
-    panel.webview.html = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>Groundhog requests</title></head><body><main id="app"></main><script nonce="${nonce}" src="${script}"></script></body></html>`;
+    panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'inspector.js');
   }
   dispose(): void { for (const panel of this.panels.values()) panel.dispose(); this.panels.clear(); }
 }

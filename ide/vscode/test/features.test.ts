@@ -5,9 +5,23 @@ import { MockBackend } from '../src/mockBackend';
 import { NotificationPolicy, tunnelLiterals } from '../src/notifications';
 import { asCurl, localTarget, parseHeaders, RequestActions, signatureWarning } from '../src/requestActions';
 import { ActiveRequestStats } from '../src/stats';
+import { selectCli } from '../src/cliSelection';
+import { accessDraft } from '../src/visitorAccess';
 
 afterEach(() => vi.useRealTimers());
 describe('IDE feature behavior', () => {
+  it('selects a newer global CLI, bundled fallback and authoritative configured override', async () => {
+    const detect = vi.fn(async (path: string) => ({ available: true as const, version: path === 'groundhog' ? '1.4.0' : '1.3.0-preview.1' }));
+    expect((await selectCli('groundhog', '/bundle', '1.3.0-preview.1', detect)).path).toBe('groundhog');
+    detect.mockImplementation(async path => path === 'groundhog' ? { available: false, reason: 'missing' } as never : { available: true, version: '1.3.0-preview.1' });
+    expect((await selectCli('groundhog', '/bundle', '1.3.0-preview.1', detect)).path).toBe('/bundle');
+    expect((await selectCli('/custom', '/bundle', '1.3.0-preview.1', detect)).path).toBe('/custom');
+  });
+  it('validates visitor access form data before any mutation', () => {
+    expect(accessDraft({ default: { allow: ['members'] }, rules: [{ path: '/webhooks', allow: ['anyone'] }], ipRanges: [] }).rules).toHaveLength(1);
+    expect(() => accessDraft({ default: { allow: ['anyone', 'members'] }, rules: [], ipRanges: [] })).toThrow('Check');
+    expect(() => accessDraft(null)).toThrow('Enter');
+  });
   it('reuses a connected Aspire agent without requiring a CLI connection key', async () => {
     const backend = new MockBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const request = vi.spyOn(backend, 'request');
     const debug = new DebugHosting(backend); const config = { name: 'App', type: 'coreclr', env: {} };

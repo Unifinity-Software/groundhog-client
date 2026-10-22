@@ -36,5 +36,10 @@ it('webview smoke renders safely, filters, freezes display and resumes buffered 
   expect((dom.window.document.getElementById('replay') as HTMLButtonElement).disabled).toBe(true);
   expect((dom.window.document.getElementById('capture') as HTMLInputElement).disabled).toBe(true);
   dom.window.document.getElementById('curl')!.click(); expect(postMessage).toHaveBeenLastCalledWith({ type: 'curl', target: 'http://localhost:5173', headers: '{}', body: 'captured' });
+  await import('../../webview/src/access.js');
+  send({ type: 'access', access: { default: { allow: ['members'] }, rules: [{ path: '/hooks', allow: ['anyone'] }], ipRanges: ['203.0.113.0/24'], managedBy: 'dashboard', apiKeys: [{ id: 'key-1', name: '<script>key label</script>', created: row.completed }] } });
+  expect(dom.window.document.getElementById('keys')!.textContent).toContain('<script>key label</script>'); expect(dom.window.document.querySelector('#keys script')).toBeNull();
+  dom.window.document.getElementById('policy')!.dispatchEvent(new dom.window.Event('submit', { cancelable: true }));
+  expect(postMessage).toHaveBeenLastCalledWith({ type: 'save', default: { allow: ['members'] }, rules: [{ path: '/hooks', allow: ['anyone'] }], ipRanges: ['203.0.113.0/24'] });
   dom.window.close();
 });
