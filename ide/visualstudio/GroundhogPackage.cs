@@ -86,5 +86,5 @@ public sealed class GroundhogOptions : DialogPage
     public bool HostOnDebug { get; set; } = true;
 
     [Category("Debugging"), DisplayName("Stop after debugging"), Description("Stop only a CLI agent started by this debug session when debugging ends.")]
-    public bool StopOnDebugEnd { get; set; } = true;
+    public bool StopOnDebugEnd { get; set; }
 }

@@ -12,7 +12,8 @@ requires your confirmation and a .NET SDK. A custom executable path is under **T
 Double-click a tunnel to inspect requests. The WebView2 control hosts the same `ide/webview` bundle as VS Code and maps
 Visual Studio theme colors to its existing CSS variables. Request detail, body capture, replay and HTTP export require
 the corresponding backend/relay capability; unavailable actions report that requirement. The public tunnel QR code stays local. Web navigation,
-downloads, permissions and new windows from the inspector are blocked.
+downloads, permissions and new windows from the inspector are blocked. **Copy as curl** produces a `curl.exe` command
+for Windows PowerShell with literal quoting of captured request values.
 
 ## Debugging
 
@@ -22,7 +23,8 @@ tunnel in the tool window and use a launchSettings.json with exactly one Project
 projects or ambiguous launch profiles need explicit project configuration. The extension shows the tunnel, local target
 and source settings path for approval before it starts forwarding public requests.
 
-**Host when debugging** and **Stop after debugging** are configurable under **Tools > Options > Groundhog**. Only a CLI
+**Host when debugging** and **Stop after debugging** are configurable under **Tools > Options > Groundhog**. Hosting
+continues after debugging by default. When **Stop after debugging** is enabled, only a CLI
 agent started by that debug session, still at the same process ID, is stopped automatically. Existing CLI agents and
 Aspire AppHosts stay under their owner's lifecycle. Aspire tunnels direct you back to their AppHost.
 
@@ -55,7 +57,8 @@ Studio 2026. Limit the smoke to one small project and one tunnel; no load or sle
    Check keyboard navigation, body-capture permission, replay confirmation and the request detail/export controls when
    their capabilities are available.
 4. Start/stop debugging once with groundhog.json, once with a single launchSettings applicationUrl, and once with an
-   existing CLI agent. Verify that only the agent created by the current debug session stops automatically.
+   existing CLI agent. Verify hosting continues by default; enable **Stop after debugging** and verify that only the
+   agent created by the current debug session stops automatically.
 5. Start an Aspire AppHost and verify its tunnel is visible, labels Aspire, and cannot be stopped through this extension.
 6. Close the tool window and Visual Studio; verify the stdio child exits while independent hosting agents remain running.
 

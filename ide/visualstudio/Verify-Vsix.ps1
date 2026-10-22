@@ -31,6 +31,12 @@ using System.Text;
 using System.Web.Script.Serialization;
 using System.Collections.Generic;
 public class GroundhogPeer {
+    private static void Send(Stream output, string message) {
+        var payload = Encoding.UTF8.GetBytes(message);
+        var prefix = Encoding.ASCII.GetBytes("Content-Length: " + payload.Length + "\r\n\r\n");
+        foreach (var part in new[] { prefix, payload }) foreach (var b in part) output.WriteByte(b);
+        output.Flush();
+    }
     public static void Main(string[] args) {
         if (args.Length == 1 && args[0] == "--version") { Console.WriteLine("1.3.0-preview.1"); return; }
         var input = Console.OpenStandardInput(); var output = Console.OpenStandardOutput();
@@ -45,11 +51,13 @@ public class GroundhogPeer {
             var bytes = new byte[length]; int count = 0;
             while (count < length) { int read = input.Read(bytes, count, length-count); if (read == 0) return; count += read; }
             var request = json.Deserialize<Dictionary<string, object>>(Encoding.UTF8.GetString(bytes));
-            var result = request["method"].ToString() == "initialize" ? "{\"protocolVersion\":1,\"capabilities\":[\"deviceLogin\"]}" : "{\"state\":\"signedOut\"}";
-            var payload = Encoding.UTF8.GetBytes("{\"jsonrpc\":\"2.0\",\"id\":"+request["id"]+",\"result\":"+result+"}");
-            var prefix = Encoding.ASCII.GetBytes("Content-Length: " + payload.Length + "\r\n\r\n");
-            foreach (var part in new[] { prefix, payload }) foreach (var b in part) output.WriteByte(b);
-            output.Flush();
+            var method = request["method"].ToString();
+            var result = method == "initialize" ? "{\"protocolVersion\":1,\"capabilities\":[\"deviceLogin\"]}" : "{\"state\":\"signedOut\"}";
+            if (method == "requests/subscribe") {
+                Send(output, "{\"jsonrpc\":\"2.0\",\"method\":\"requests/event\",\"params\":{\"subscriptionId\":\"early-sub\",\"request\":{\"requestId\":\"early-request\"}}}");
+                result = "{\"subscriptionId\":\"early-sub\",\"requests\":[],\"source\":\"remote\"}";
+            }
+            Send(output, "{\"jsonrpc\":\"2.0\",\"id\":"+request["id"]+",\"result\":"+result+"}");
         }
     }
 }
@@ -74,6 +82,50 @@ public static class SmokeResolution {
     try {
         if (-not ($resources.GetEnumerator() | Where-Object { $_.Key -eq 'Menus.ctmenu' })) { throw 'The View command resource is missing.' }
     } finally { $resources.Dispose() }
+    Add-Type -ReferencedAssemblies (Join-Path $output 'Newtonsoft.Json.dll') -TypeDefinition @'
+using System;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
+public static class SubscriptionSmoke {
+    public static void Verify(Assembly assembly, object client) {
+        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var type = assembly.GetType("Groundhog.VisualStudio.SubscriptionEvents", true);
+        var buffer = Activator.CreateInstance(type, true);
+        var begin = type.GetMethod("Begin", flags);
+        var complete = type.GetMethod("Complete", flags);
+        var accept = type.GetMethod("Accept", flags);
+        var generation = begin.Invoke(buffer, null);
+        using (var received = new ManualResetEventSlim()) {
+            Action<string,JObject> notification = (method, value) => {
+                if (method == "requests/event") {
+                    if ((bool)accept.Invoke(buffer, new object[] {method,value})) throw new Exception("Early event was not buffered.");
+                    received.Set();
+                }
+            };
+            var eventInfo = client.GetType().GetEvent("Notification", flags);
+            eventInfo.GetAddMethod(true).Invoke(client, new object[] {notification});
+            try {
+                var task = (Task<JObject>)client.GetType().GetMethod("RequestAsync", flags).Invoke(client,
+                    new object[] {"requests/subscribe",new object(),CancellationToken.None});
+                if (!received.Wait(2000)) throw new Exception("The fragmented peer notification did not arrive.");
+                var response = task.GetAwaiter().GetResult();
+                if ((string)response["source"] != "remote" || ((JArray)response["requests"]).Count != 0)
+                    throw new Exception("Empty remote subscription source was lost.");
+                var messages = (Array)complete.Invoke(buffer, new object[] {generation,"early-sub"});
+                if (messages.Length != 1) throw new Exception("Early notification was lost.");
+                var item = messages.GetValue(0);
+                var value = (JObject)item.GetType().GetField("Item2").GetValue(item);
+                if ((string)value["request"]["requestId"] != "early-request") throw new Exception("Wrong buffered notification.");
+                begin.Invoke(buffer, null);
+                if (((Array)complete.Invoke(buffer, new object[] {generation,"early-sub"})).Length != 0)
+                    throw new Exception("A stale subscription reclaimed notification ownership.");
+            } finally { eventInfo.GetRemoveMethod(true).Invoke(client, new object[] {notification}); }
+        }
+    }
+}
+'@
     $type = $assembly.GetType('Groundhog.VisualStudio.BackendClient', $true)
     $client = [Activator]::CreateInstance($type, $true)
     $flags = [Reflection.BindingFlags]'Instance,NonPublic'
@@ -83,6 +135,7 @@ public static class SmokeResolution {
         $request = $type.GetMethod('RequestAsync', $flags).Invoke($client, @('auth/status', (New-Object Object), [Threading.CancellationToken]::None))
         $result = $request.GetAwaiter().GetResult()
         if ($result['state'].ToString() -ne 'signedOut') { throw 'Stdio client did not receive the expected response.' }
+        [SubscriptionSmoke]::Verify($assembly, $client)
     } finally { $client.Dispose() }
     $targetType = $assembly.GetType('Groundhog.VisualStudio.DebugHosting', $true)
     $targetMethod = $targetType.GetMethod('ValidTarget', [Reflection.BindingFlags]'Static,NonPublic')
@@ -94,7 +147,17 @@ public static class SmokeResolution {
     foreach ($case in @(@('https://groundhog.unifinity.com/cli-login', $true), @('https://my-tunnel.groundhog.unifinity.com', $true), @('https://groundhog.unifinity.com.attacker.invalid', $false), @('https://user:secret@groundhog.unifinity.com', $false), @('http://groundhog.unifinity.com', $false))) {
         if ($urlMethod.Invoke($null, @($case[0].ToString())) -ne $case[1]) { throw 'Hosted URL validation smoke failed.' }
     }
-    Write-Output 'VSIX registration, packaged shared inspector and real framed-stdio client smoke passed.'
+    $quote = $assembly.GetType('Groundhog.VisualStudio.InspectorControl', $true).GetMethod('Quote', [Reflection.BindingFlags]'Static,NonPublic')
+    foreach ($payload in @("'; Write-Output PWN; #", '$(Write-Output PWN)', "one`ntwo", '`"; & whoami; #', "https://localhost:5173/a'b?x=`$HOME")) {
+        $literal = $quote.Invoke($null, @($payload.ToString()))
+        $tokens = $null; $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseInput("curl.exe --request 'POST' --header $literal --data-binary $literal $literal", [ref]$tokens, [ref]$errors)
+        $commands = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true))
+        if ($errors.Count -ne 0 -or $commands.Count -ne 1 -or $commands[0].GetCommandName() -ne 'curl.exe' -or $commands[0].CommandElements[-1].Value -cne $payload) {
+            throw 'Copied PowerShell curl command did not preserve the request as literal arguments.'
+        }
+    }
+    Write-Output 'VSIX registration, shared inspector, framed-stdio early events and PowerShell quoting smoke passed.'
 } finally {
     if ($temporary.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $temporary -Recurse -Force }
     if (Test-Path -LiteralPath $temporary) { throw "Smoke cleanup failed: $temporary" }

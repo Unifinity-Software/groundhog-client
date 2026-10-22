@@ -28,7 +28,7 @@ internal sealed class DebugHosting(GroundhogPackage package, DTE dte)
                 {
                     var list = await package.Backend.RequestAsync("tunnels/list", new { workspace = _workspace }, cancellation);
                     if (list["agents"]?.Any(a => (int?)a["processId"] == _ownedProcess && (string?)a["name"] == _name && (string?)a["source"] != "aspire") == true)
-                    { await package.Backend.RequestAsync("agents/stop", new { workspace = _workspace, name = _name }, cancellation); }
+                    { await package.Backend.RequestAsync("agents/stop", new { workspace = _workspace, name = _name, expectedProcessId = _ownedProcess }, cancellation); }
                 }
                 _ownedProcess = null;
                 package.SetStatus("Groundhog: debug session ended.");

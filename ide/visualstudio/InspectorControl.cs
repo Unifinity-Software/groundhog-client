@@ -22,6 +22,7 @@ internal sealed class InspectorControl : UserControl, IDisposable
     private string? _subscription;
     private string? _requestId;
     private JObject? _detail;
+    private readonly SubscriptionEvents _events = new();
     private bool _disposed;
 
     internal InspectorControl(BackendClient backend, TunnelNode tunnel)
@@ -73,16 +74,22 @@ internal sealed class InspectorControl : UserControl, IDisposable
         switch ((string?)message["type"])
         {
             case "ready":
+                var generation = _events.Begin();
                 if (_subscription is { } previous) { await UnsubscribeAsync(previous); _subscription = null; }
                 if (TunnelsControl.IsHosted(_tunnel.Url))
                 {
                     var png = PngByteQRCodeHelper.GetQRCode(_tunnel.Url, QRCodeGenerator.ECCLevel.Q, 4);
                     Post(new { type = "qr", dataUrl = "data:image/png;base64," + Convert.ToBase64String(png), url = _tunnel.Url });
                 }
-                var subscribed = await _backend.RequestAsync("requests/subscribe", new { workspace = _tunnel.Workspace, name = _tunnel.Name, source = "auto" }, _stop.Token);
-                _subscription = (string?)subscribed["subscriptionId"];
+                // Observe the finite backend response even after disposal so its subscription can be released.
+                var subscribed = await _backend.RequestAsync("requests/subscribe", new { workspace = _tunnel.Workspace, name = _tunnel.Name, source = "auto" }, CancellationToken.None);
+                var id = (string?)subscribed["subscriptionId"];
+                if (id is null) { throw new InvalidOperationException("The backend did not identify the request subscription."); }
+                if (_disposed || !_events.IsCurrent(generation)) { await UnsubscribeAsync(id); return; }
+                _subscription = id;
                 Post(new { type = "requests", requests = subscribed["requests"] });
-                Post(new { type = "connection", state = "live", source = subscribed["requests"]?.First?["source"] ?? "local" });
+                Post(new { type = "connection", state = "live", source = subscribed["source"] ?? subscribed["requests"]?.First?["source"] ?? (_tunnel.Source is null ? "remote" : "local") });
+                foreach (var buffered in _events.Complete(generation, id)) { PostNotification(buffered.Method, buffered.Value); }
                 break;
             case "detail" when _backend.Capabilities.Contains("requestDetail"):
                 _requestId = (string?)message["requestId"];
@@ -111,7 +118,7 @@ internal sealed class InspectorControl : UserControl, IDisposable
                 if (!path.StartsWith("/", StringComparison.Ordinal) || path.Any(char.IsControl) || !method.All(c => c is >= 'A' and <= 'Z' or >= 'a' and <= 'z'))
                 { throw new InvalidOperationException("Invalid captured request."); }
                 var url = new Uri((string)edited["target"]!).GetLeftPart(UriPartial.Authority) + path;
-                var command = "curl --request " + Quote(method) + " " + Quote(url);
+                var command = "curl.exe --request " + Quote(method) + " " + Quote(url);
                 foreach (var header in ((JObject)edited["headers"]!).Properties())
                 {
                     if (header.Name.Any(char.IsControl) || header.Value.ToString().Any(char.IsControl)) { throw new InvalidOperationException("Invalid request header."); }
@@ -119,7 +126,7 @@ internal sealed class InspectorControl : UserControl, IDisposable
                 }
                 if ((string?)edited["body"] is { Length: > 0 } body) { command += " --data-binary " + Quote(body); }
                 Clipboard.SetText(command);
-                Post(new { type = "operation", message = "Copied as curl." });
+                Post(new { type = "operation", message = "Copied as curl.exe for Windows PowerShell." });
                 break;
             case "export" when _backend.Capabilities.Contains("requestExportHttp") && _requestId is not null:
                 var exported = await _backend.RequestAsync("requests/exportHttp", EditedRequest(message), _stop.Token);
@@ -132,7 +139,7 @@ internal sealed class InspectorControl : UserControl, IDisposable
         }
     }
 
-    private static string Quote(string value) => "'" + value.Replace("'", "'\"'\"'") + "'";
+    private static string Quote(string value) => "'" + value.Replace("'", "''") + "'";
 
     private JObject EditedRequest(JObject message)
     {
@@ -147,13 +154,18 @@ internal sealed class InspectorControl : UserControl, IDisposable
 
     private void Notification(string name, JObject value)
     {
-        if ((string?)value["subscriptionId"] != _subscription || _subscription is null) { return; }
+        if (!_events.Accept(name, value)) { return; }
         Run(async () =>
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(_stop.Token);
-            if (name == "requests/event") { Post(new { type = "request", request = value["request"] }); }
-            else if (name == "connection/event") { var message = (JObject)value.DeepClone(); message["type"] = "connection"; Post(message); }
+            if ((string?)value["subscriptionId"] == _subscription) { PostNotification(name, value); }
         });
+    }
+
+    private void PostNotification(string name, JObject value)
+    {
+        if (name == "requests/event") { Post(new { type = "request", request = value["request"] }); }
+        else if (name == "connection/event") { var message = (JObject)value.DeepClone(); message["type"] = "connection"; Post(message); }
     }
 
     private void Post(object value)
@@ -199,6 +211,7 @@ internal sealed class InspectorControl : UserControl, IDisposable
     {
         if (_disposed) { return; }
         _disposed = true;
+        _events.Cancel();
         _backend.Notification -= Notification;
         VSColorTheme.ThemeChanged -= ThemeChanged;
         if (_subscription is { } subscription)
