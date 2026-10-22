@@ -54,12 +54,18 @@ export class MockBackend implements Backend {
         if (!(params as Methods['tunnels/delete'][0]).confirm) throw new Error('Confirm deletion first.');
         this.tunnels = this.tunnels.filter(t => t.name !== ref.name); this.events.emit('tunnels/changed', { workspace: ref.workspace }); break;
       case 'agents/start': case 'agents/restart': {
+        const existing = this.agents.find(agent => agent.name === ref.name);
+        if (existing && method === 'agents/start') {
+          if ((params as Methods['agents/start'][0]).target && existing.target !== (params as Methods['agents/start'][0]).target) throw new Error('This tunnel is already hosted with another target.');
+          result = { ...existing, created: false }; break;
+        }
         const tunnel = this.findTunnel(ref); tunnel.state = 'connected'; tunnel.location = 'local';
         const agent: Agent = { name: ref.name, target: (params as Methods['agents/start'][0]).target ?? 'http://localhost:5173', url: tunnel.url, state: 'Connected', source: 'cli', processId: 1234 };
-        this.agents = this.agents.filter(a => a.name !== ref.name).concat(agent); result = agent;
+        this.agents = this.agents.filter(a => a.name !== ref.name).concat(agent); result = { ...agent, created: true };
         this.events.emit('agents/changed', { agents: this.agents }); break;
       }
       case 'agents/stop':
+        if ((params as Methods['agents/stop'][0]).expectedProcessId !== undefined && !this.agents.some(agent => agent.name === ref.name && agent.processId === (params as Methods['agents/stop'][0]).expectedProcessId)) break;
         this.agents = this.agents.filter(a => a.name !== ref.name); this.findTunnel(ref).location = 'offline';
         this.events.emit('agents/changed', { agents: this.agents }); break;
       case 'keys/set': this.findTunnel(ref).hasKey = true; this.events.emit('tunnels/changed', { workspace: ref.workspace }); break;
@@ -67,14 +73,14 @@ export class MockBackend implements Backend {
         if (this.subscriptions.size >= 16) throw new Error('Too many subscriptions.');
         const subscriptionId = `demo-${++this.nextSubscription}`;
         this.subscriptions.set(subscriptionId, setInterval(() => this.events.emit('requests/event', { subscriptionId, request: this.generateRequest() }), 1000));
-        result = { subscriptionId, requests: [this.generateRequest(), this.generateRequest()] }; break;
+        result = { subscriptionId, requests: [{ ...this.generateRequest(), requestId: subscriptionId + '-truncated' }, { ...this.generateRequest(), requestId: subscriptionId + '-complete' }], source: ref.name === 'service-a' ? 'remote' : 'local' }; break;
       }
       case 'requests/unsubscribe': {
         const id = (params as { subscriptionId: string }).subscriptionId;
         clearInterval(this.subscriptions.get(id)); this.subscriptions.delete(id); break;
       }
       case 'doctor/run': result = { checks: [{ code: 'targetReachable', status: 'passed', message: 'Demo target responded.' }, { code: 'connectionKey', status: 'passed', message: 'A demo connection key is saved.' }] }; break;
-      case 'requests/detail': result = { requestId: (params as Methods['requests/detail'][0]).requestId, method: 'POST', path: '/webhooks', headers: { 'Content-Type': 'application/json', 'Webhook-Signature': 'demo-signature' }, body: this.captureBodies ? '{"event":"demo.completed"}' : '', truncated: Number((params as Methods['requests/detail'][0]).requestId.split('-').at(-1)) % 2 === 1, captureBodies: this.captureBodies, canCaptureBodies: true, responseHeaders: { 'Content-Type': 'application/json' }, responseBody: '{"ok":true}', statusCode: 200, responseTruncated: false }; break;
+      case 'requests/detail': result = { requestId: (params as Methods['requests/detail'][0]).requestId, method: 'POST', path: '/webhooks', headers: { 'Content-Type': 'application/json', 'Webhook-Signature': 'demo-signature' }, body: this.captureBodies ? '{"event":"demo.completed"}' : '', truncated: (params as Methods['requests/detail'][0]).requestId.endsWith('-truncated'), captureBodies: this.captureBodies, canCaptureBodies: true, responseHeaders: { 'Content-Type': 'application/json' }, responseBody: '{"ok":true}', statusCode: 200, responseTruncated: false }; break;
       case 'requests/replay': result = { statusCode: 200, durationMs: 12 }; break;
       case 'requests/exportHttp': result = { text: 'POST ' + (params as Methods['requests/exportHttp'][0]).target + '/webhooks\nContent-Type: application/json\n\n' + ((params as Methods['requests/exportHttp'][0]).body ?? '') }; break;
       case 'captureBodies/set': this.captureBodies = (params as { enabled: boolean }).enabled; result = { enabled: this.captureBodies }; break;

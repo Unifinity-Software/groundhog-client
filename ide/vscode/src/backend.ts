@@ -48,7 +48,7 @@ export class RpcBackend implements Backend {
     session.connection.onClose(() => this.disconnected(session));
     session.connection.listen();
     try {
-      const result = await this.send('initialize', { clientVersion: this.version, protocolVersions: [1] });
+      const result = await this.send('initialize', { clientVersion: this.version, protocolVersions: [1], clientName: 'Groundhog for VS Code' });
       if (result.protocolVersion !== 1) throw new ProtocolVersionError();
       this.capabilities = (result as InitializeResult).capabilities;
       this.connectedAt = Date.now();

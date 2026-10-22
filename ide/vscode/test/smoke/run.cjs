@@ -19,7 +19,7 @@ const { runTests } = require('@vscode/test-electron');
     try {
       browser = await chromium.connectOverCDP('http://127.0.0.1:' + debugPort);
       const page = browser.contexts()[0].pages().find(page => page.url().includes('workbench')) ?? browser.contexts()[0].pages()[0];
-      const frame = page.frameLocator('iframe.webview').frameLocator('iframe#active-frame');
+      const frame = page.frameLocator('iframe.webview:visible').frameLocator('iframe#active-frame');
       await fs.mkdir('test-results', { recursive: true });
       if (request.url.endsWith('/access')) {
         await frame.getByRole('heading', { name: 'Visitor access', exact: true }).waitFor();
@@ -35,13 +35,13 @@ const { runTests } = require('@vscode/test-electron');
       assert.equal(await frame.locator('#capture').isDisabled(), false, 'Header capture is available before selecting a request');
       await page.screenshot({ path: 'test-results/groundhog-demo.png' });
       await page.locator('iframe.webview').screenshot({ path: 'test-results/groundhog-inspector-demo.png' });
-      await frame.locator('#rows tr').last().click();
+      await frame.locator('tr[data-id$="-truncated"]').click();
       await frame.locator('#detail').waitFor({ state: 'visible' });
       assert.ok(await frame.locator('#replay').isDisabled(), 'Truncated requests cannot be replayed');
       assert.equal(await frame.locator('#capture').isDisabled(), false, 'Owner can enable capture from the header');
       await frame.locator('#capture').check();
       await frame.locator('#detail[data-capture="true"]').waitFor();
-      await frame.locator('#rows tr').first().click();
+      await frame.locator('tr[data-id$="-complete"]').click();
       await frame.getByText('Signed webhooks may reject old timestamps when sent again.').waitFor();
       await frame.getByRole('button', { name: 'Show QR code' }).click();
       assert.ok(await frame.getByAltText('QR code of the public tunnel URL').isVisible());
@@ -49,7 +49,16 @@ const { runTests } = require('@vscode/test-electron');
       await frame.locator('#detail').scrollIntoViewIfNeeded();
       await page.locator('iframe.webview').screenshot({ path: 'test-results/groundhog-request-detail-demo.png' });
       response.writeHead(200).end('ok');
-    } catch (error) { console.error(error); response.writeHead(500).end(String(error)); }
+    } catch (error) {
+      console.error(error);
+      const page = browser?.contexts()[0].pages()[0];
+      if (page) {
+        await page.screenshot({ path: 'test-results/smoke-failure.png' });
+        console.error(await page.locator('iframe.webview').evaluateAll(frames => frames.map(frame => ({ title: frame.title, hidden: frame.offsetParent === null, src: frame.src }))));
+        console.error(page.frames().map(frame => frame.url()));
+      }
+      response.writeHead(500).end(String(error));
+    }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {

@@ -21,7 +21,10 @@ describe('typed RPC backend', () => {
   it('exchanges requests and notifications over Content-Length streams with the mock', async () => {
     const mock = new MockBackend(); disposables.push(mock);
     const { session, server } = wire(server => {
-      server.onRequest(async (method, params) => mock.request(method as keyof Methods, (params ?? {}) as Methods[keyof Methods][0]));
+      server.onRequest(async (method, params) => {
+        if (method === 'initialize') expect(params).toEqual({ clientVersion: '0.1.0', protocolVersions: [1], clientName: 'Groundhog for VS Code' });
+        return mock.request(method as keyof Methods, (params ?? {}) as Methods[keyof Methods][0]);
+      });
       mock.on('auth/changed', value => { void server.sendNotification('auth/changed', value); });
     });
     const backend = new RpcBackend(() => session, '0.1.0'); disposables.push(backend);

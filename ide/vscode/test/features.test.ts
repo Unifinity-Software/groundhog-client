@@ -10,6 +10,7 @@ import { accessDraft } from '../src/visitorAccess';
 import { execFileSync } from 'node:child_process';
 
 afterEach(() => vi.useRealTimers());
+async function stoppedBackend() { const backend = new MockBackend(); await backend.request('agents/stop', { workspace: 'example', name: 'my-tunnel' }); return backend; }
 describe('IDE feature behavior', () => {
   it('selects a newer global CLI, bundled fallback and authoritative configured override', async () => {
     const detect = vi.fn(async (path: string) => ({ available: true as const, version: path === 'groundhog' ? '1.4.0' : '1.3.0-preview.1' }));
@@ -31,7 +32,7 @@ describe('IDE feature behavior', () => {
     debug.sessionStarted('a', config); await debug.sessionEnded('a', true); expect(request).not.toHaveBeenCalled(); debug.dispose();
   });
   it('preserves same-name concurrent debug session ownership', async () => {
-    const backend = new MockBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const settings = { configurations: [], stopAfterDebugging: true };
+    const backend = await stoppedBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const settings = { configurations: [], stopAfterDebugging: true };
     const a = { name: 'App' }; const b = { name: 'App' };
     await debug.beforeLaunch(a, { tunnel: 'my-tunnel' }, 'example', [], list.tunnels, settings, true);
     await debug.beforeLaunch(b, { tunnel: 'my-tunnel' }, 'example', list.agents, list.tunnels, settings, true);
@@ -39,13 +40,13 @@ describe('IDE feature behavior', () => {
     debug.sessionStarted('b', b); await debug.sessionEnded('b', true); expect(request).toHaveBeenCalledWith('agents/stop', { workspace: 'example', name: 'my-tunnel', expectedProcessId: 1234 }); debug.dispose();
   });
   it('preserves a user replacement agent after debugger-owned PID changes', async () => {
-    const backend = new MockBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const config = { name: 'App' };
+    const backend = await stoppedBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const config = { name: 'App' };
     await debug.beforeLaunch(config, { tunnel: 'my-tunnel' }, 'example', [], list.tunnels, { configurations: [], stopAfterDebugging: true }, true); debug.sessionStarted('first', config);
     const request = vi.spyOn(backend, 'request').mockResolvedValueOnce({ tunnels: list.tunnels, agents: [{ ...list.agents[0], processId: 9999 }] });
     await debug.sessionEnded('first', true); expect(request).not.toHaveBeenCalledWith('agents/stop', expect.anything()); debug.dispose();
   });
   it('does not consume a failed same-name launch and expires its pending ownership with fake time', async () => {
-    vi.useFakeTimers(); const backend = new MockBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const failed = { name: 'App' }; const retry = { name: 'App' }; const settings = { configurations: [], stopAfterDebugging: true };
+    vi.useFakeTimers(); const backend = await stoppedBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const failed = { name: 'App' }; const retry = { name: 'App' }; const settings = { configurations: [], stopAfterDebugging: true };
     await debug.beforeLaunch(failed, { tunnel: 'my-tunnel' }, 'example', [], list.tunnels, settings, true);
     await debug.beforeLaunch(retry, { tunnel: 'my-tunnel' }, 'example', list.agents, list.tunnels, settings, true);
     debug.sessionStarted('retry', retry); const request = vi.spyOn(backend, 'request'); await debug.sessionEnded('retry', true);
@@ -53,6 +54,15 @@ describe('IDE feature behavior', () => {
     await vi.advanceTimersByTimeAsync(120000);
     expect(request).toHaveBeenCalledWith('agents/stop', { workspace: 'example', name: 'my-tunnel', expectedProcessId: 1234 });
     debug.dispose(); expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([['Disconnected', false], ['Connected', false], ['Connected', undefined]] as const)('never owns a reused %s agent when created=%s', async (state, created) => {
+    const backend = new MockBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const config = { name: 'App' };
+    const reused = { ...list.agents[0], state, created };
+    const request = vi.spyOn(backend, 'request').mockResolvedValueOnce(reused);
+    const launch = debug.beforeLaunch(config, { tunnel: 'my-tunnel' }, 'example', state === 'Disconnected' ? [reused] : [], list.tunnels, { configurations: [], stopAfterDebugging: true }, true);
+    if (state === 'Disconnected') await expect(launch).rejects.toThrow('not connected'); else await launch;
+    debug.sessionStarted('race', config); await debug.sessionEnded('race', true);
+    expect(request).not.toHaveBeenCalledWith('agents/stop', expect.anything()); debug.dispose();
   });
   it('completes sign-in if auth changed between status read and listener registration', async () => {
     const backend = new MockBackend(); const auth = new GroundhogAuthentication(backend);

@@ -1,7 +1,7 @@
 /** Public, credential-free shapes from docs/ide-protocol.md. */
 export interface Workspace { slug: string; name: string; role: string }
 export interface Tunnel { workspace: string; name: string; url: string; state: string; location?: 'local' | 'remote' | 'offline'; actions: string[]; hasKey: boolean; captureBodies?: boolean; canCaptureBodies?: boolean }
-export interface Agent { name: string; target: string; url?: string; state: string; source: 'cli' | 'aspire'; processId: number }
+export interface Agent { name: string; target: string; url?: string; state: string; source: 'cli' | 'aspire'; processId: number; created?: boolean }
 export interface AuthStatus { state: 'signedIn' | 'signedOut' | 'expired'; workspace?: string | null; expiresAt?: string | null }
 export interface RequestSummary { requestId: string; completed: string; method: string; path: string; statusCode: number; durationMs: number; source: 'local' | 'remote' }
 export interface TunnelRef { workspace: string; name: string }
@@ -11,7 +11,7 @@ export interface RequestDetail { requestId: string; method: string; path: string
 export interface VisitorAccess { default: { allow: string[] } | null; rules: { path: string; allow: string[] }[]; ipRanges: string[]; apiKeys: { id: string; name: string; created: string }[]; managedBy: 'dashboard' | 'agent' }
 export interface RequestRef extends TunnelRef { requestId: string }
 export interface Methods {
-  initialize: [{ clientVersion: string; protocolVersions: number[] }, InitializeResult];
+  initialize: [{ clientVersion: string; protocolVersions: number[]; clientName?: string }, InitializeResult];
   'auth/status': [Empty, AuthStatus];
   'auth/login': [Empty, { userCode: string; verificationUri: string; expiresAt: string }];
   'auth/logout': [Empty, Empty];

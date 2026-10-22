@@ -16,12 +16,13 @@ export class DebugHosting implements Disposable {
   async beforeLaunch(config: LaunchConfig, project: ProjectConfig | undefined, workspace: string, agents: Agent[], tunnels: Tunnel[], settings: DebugSettings, trusted: boolean): Promise<{ publicUrl?: string; missingKey?: boolean }> {
     if (!project || !trusted || (settings.configurations.length && !settings.configurations.includes(config.name ?? ''))) return {};
     const tunnel = tunnels.find(t => t.name === project.tunnel && t.workspace === workspace);
-    const existing = agents.find(a => a.name === project.tunnel && a.state === 'Connected');
+    const existing = agents.find(a => a.name === project.tunnel);
     if (!tunnel || (!existing && !tunnel.hasKey)) return { missingKey: true };
-    const agent = existing ?? await this.backend.request('agents/start', { workspace, name: project.tunnel, target: project.target ?? 'http://localhost:5173', ...(project.projectDirectory ? { projectDirectory: project.projectDirectory } : {}) });
+    const agent = existing?.state === 'Connected' ? existing : await this.backend.request('agents/start', { workspace, name: project.tunnel, target: project.target ?? 'http://localhost:5173', ...(project.projectDirectory ? { projectDirectory: project.projectDirectory } : {}) });
+    if (agent.state !== 'Connected') throw new Error('Groundhog has an existing local agent that is not connected. Restart hosting before debugging with a tunnel.');
     const ownerKey = workspace + '/' + project.tunnel + '/' + agent.processId;
     let owner = this.owned.get(ownerKey);
-    if (!existing) {
+    if (agent.created === true) {
       owner ??= { workspace, name: project.tunnel, processId: agent.processId, sessions: new Set(), pending: new Set(), stopRequested: false };
       this.owned.set(ownerKey, owner);
     }
