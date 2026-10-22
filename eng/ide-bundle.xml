@@ -1,8 +1,0 @@
-<linker>
-  <!-- Models include compiler-generated/anonymous DTOs and RPC methods discovered by attributes. -->
-  <assembly fullname="Groundhog.Cli" preserve="all" />
-  <assembly fullname="Groundhog.Agent" preserve="all" />
-  <assembly fullname="Groundhog.Protocol" preserve="all" />
-  <assembly fullname="StreamJsonRpc" preserve="all" />
-  <assembly fullname="Nerdbank.Streams" preserve="all" />
-</linker>
