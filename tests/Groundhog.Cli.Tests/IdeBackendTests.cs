@@ -334,6 +334,14 @@ public sealed class IdeBackendTests
         var stopped = await Assert.ThrowsAsync<RemoteInvocationException>(() => fixture.CallAsync("agents/stop", new { workspace = "example", name }));
         Assert.Equal(-32013, stopped.ErrorCode);
         Assert.False(hostStop.IsCancellationRequested);
+        var terminal = fixture.NextConnection();
+        var finalRequest = fixture.NextRequest();
+        telemetry.Record(new(fixture.Time.GetUtcNow(), "POST", "/final-webhook", 202, 2, false, null));
+        telemetry.OnStatus(new(GroundhogAgentState.Stopped, StopReason: GroundhogAgentStopReason.Cancelled));
+        fixture.Time.Advance(TimeSpan.FromMilliseconds(500));
+        Assert.Equal("cancelled", (await terminal.WaitAsync(TestContext.Current.CancellationToken)).GetProperty("reasonCode").GetString());
+        await finalRequest.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("/final-webhook", fixture.Requests.Last().GetProperty("request").GetProperty("path").GetString());
         await fixture.CallAsync("requests/unsubscribe", new { subscriptionId = subscribed.GetProperty("subscriptionId").GetString() });
     }
 
@@ -507,11 +515,13 @@ public sealed class IdeBackendTests
         internal RelayHandler Handler { get; } = new();
         internal FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero));
         internal TaskCompletionSource AuthChanged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal TaskCompletionSource RequestReceived { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource RequestReceived { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource WorkspaceEventReceived { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal ConcurrentQueue<JsonElement> Requests { get; } = new();
         internal int Changes { get; private set; }
         internal SessionRegistration[] Registrations { get; set; } = [];
+        internal Task NextRequest()
+        { RequestReceived = new(TaskCreationOptions.RunContinuationsAsynchronously); return RequestReceived.Task; }
         internal Task Server { get; }
         internal string Output => _output.Text;
 

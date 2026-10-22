@@ -119,6 +119,7 @@ internal sealed partial class IdeServices
         {
             var previous = LocalConnection(initialSnapshot.State, initialSnapshot.StopReason);
             await ConnectionAsync(id, subscription, previous.State, previous.Reason, previous.Code);
+            if (previous.State == "stopped") { return; }
             while (true)
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(500), _time, ct);
@@ -134,6 +135,7 @@ internal sealed partial class IdeServices
                     if (seen.Add(request.RequestId)) { await EventAsync(id, subscription, "requests/event", new { subscriptionId = id, request }); }
                 }
                 seen.IntersectWith(recent.Select(r => r.RequestId));
+                if (current.State == "stopped") { return; }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
