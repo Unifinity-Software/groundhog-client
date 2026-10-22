@@ -56,11 +56,11 @@ jobs:
       - name: Publish to Visual Studio Marketplace
         if: inputs.publish
         env:
-          VS_MARKETPLACE_TOKEN: ${{ secrets.VS_MARKETPLACE_TOKEN }}
+          VS_MARKETPLACE_TOKEN: ${{ secrets.VSCE_PAT }}
           HOST_VALIDATED: ${{ inputs.host_validated }}
         run: |
           if ($env:HOST_VALIDATED -ne 'true') { throw 'Run the experimental-host checklist before publishing.' }
-          if (-not $env:VS_MARKETPLACE_TOKEN) { throw 'VS_MARKETPLACE_TOKEN must be configured for the unifinity publisher.' }
+          if (-not $env:VS_MARKETPLACE_TOKEN) { throw 'VSCE_PAT must be configured for the unifinity publisher.' }
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
           $installation = & $vswhere -latest -products '*' -property installationPath
           $publisher = Join-Path $installation 'VSSDK/VisualStudioIntegration/Tools/Bin/VsixPublisher.exe'
