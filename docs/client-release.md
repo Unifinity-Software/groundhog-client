@@ -112,12 +112,17 @@ print or commit tokens.
 VSCE 4 includes `--oidc`, but Marketplace's trusted-publishing backend is not available as of October 22, 2026.
 The [maintainer's rollout update](https://github.com/microsoft/vscode-vsce/issues/1275#issuecomment-5990771209)
 tracks availability. Once the publisher's trusted policy can be configured for this repository and
-`.github/workflows/release-vscode.yml`, set environment variable `MARKETPLACE_AUTH=oidc` to opt in.
+`.github/workflows/release-vscode.yml`, set the GitHub Actions `vscode` environment variable
+`MARKETPLACE_AUTH` to `oidc` (the workflow reads `vars.MARKETPLACE_AUTH`) to opt in.
 The job has `id-token: write`; an OIDC failure stops publishing without falling back to a token.
 
-Open VSX uses `--trusted-publishing` by default: register this repository and workflow as a trusted publisher
-for the namespace. An optional `OVSX_PAT` environment secret selects token authentication instead.
-See the official [Marketplace CLI](https://github.com/microsoft/vscode-vsce) and
+For the first Open VSX release, add an `OVSX_PAT` secret to the GitHub `vscode` environment and publish with
+ordinary token authentication. Open VSX requires at least one active extension version before a trusted publisher
+can be registered. After that release, register this repository and workflow for the extension
+`unifinity.groundhog`, pin the `vscode` environment, and remove `OVSX_PAT`; subsequent runs use
+`--trusted-publishing`. Keep at least one version active so token exchange remains available.
+See the [Open VSX prerequisites](https://github.com/eclipse-openvsx/openvsx/wiki/Trusted-Publishing#before-you-start),
+the official [Marketplace CLI](https://github.com/microsoft/vscode-vsce) and
 [Open VSX CLI](https://github.com/eclipse/openvsx/tree/master/cli) for publisher configuration.
 
 Before tagging, run the full client checks and extension lint, type checking, unit tests, production build,
