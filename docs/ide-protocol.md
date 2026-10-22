@@ -156,7 +156,10 @@ agent object when the target agrees, and fail with `conflict` otherwise. Closing
 {"jsonrpc":"2.0","id":14,"result":{}}
 ```
 
-Stop is idempotent. Start/restart fail safely if multiple responsive sessions match. Aspire sessions are observable,
+Stop is idempotent. It additionally accepts `expectedProcessId`, a positive integer: if the responsive session is missing
+or has a different process ID, stop succeeds without affecting the replacement. Debug adapters pass the PID of the agent
+they started. The backend stops the captured session's unique pipe rather than looking up another session by name.
+Start/restart fail safely if multiple responsive sessions match. Aspire sessions are observable,
 but cannot be started/restarted/stopped through this protocol; the extension directs the user to the AppHost.
 `keys/set` validates the connection-key format and workspace membership before saving it; it never probes the key
 against a different relay. It emits `tunnels/changed`. Agent mutations emit `agents/changed`.
@@ -273,7 +276,10 @@ Replay requires `confirm: true` and a loopback HTTP(S) target. DNS results are c
 checked loopback addresses. It never follows redirects, uses proxy settings or forwards captured host/connection framing
 headers. Profile local CA/insecure settings are honored only for loopback TLS, and local CA trust still checks hostname
 and certificate validity. Both export and replay accept optional edited header maps and body text, including an empty
-body. Truncated captures cannot be replayed. Signature headers remain visible so the UI can warn about old webhook
+body. Explicitly entered replay authorization/cookie/API-key headers are accepted after syntax validation and sent only
+to the confirmed loopback destination; they never appear in the RPC result or logs. Captured and exported credential
+headers stay redacted. Decoded text is re-encoded as UTF-8 for replay/export: Content-Encoding and framing headers are
+removed, and any Content-Type charset becomes utf-8. Truncated captures cannot be replayed. Signature headers remain visible so the UI can warn about old webhook
 timestamps. The replay response contains only status and elapsed time. Optional response detail fields are absent/null
 when the relay did not capture them. The extension requires trusted workspaces and an explicit user replay gesture.
 

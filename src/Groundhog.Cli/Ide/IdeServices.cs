@@ -293,6 +293,12 @@ internal sealed partial class IdeServices : IAsyncDisposable
             if (await LocalSessions.QueryAsync(registration, false, ct) is { } snapshot) { responsive.Add((registration, snapshot)); }
         }
         if (responsive.Count > 1) { throw Fault(-32017, "conflict", "Multiple local agents match this tunnel."); }
+        if (method == "agents/stop" && p.TryGetProperty("expectedProcessId", out var processId))
+        {
+            if (processId.ValueKind != JsonValueKind.Number || !processId.TryGetInt32(out var expected) || expected <= 0)
+            { throw Fault(-32602, "invalidParams", "Expected process ID must be a positive integer."); }
+            if (responsive.Count == 0 || responsive[0].Registration.ProcessId != expected) { return Empty; }
+        }
         if (responsive.Any(r => Agent(r.Registration, r.Snapshot).Source == "aspire"))
         { throw Fault(-32013, "permissionDenied", "This agent is managed by an Aspire AppHost. Use its dashboard."); }
         if (method == "agents/stop")

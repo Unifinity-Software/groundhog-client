@@ -38,6 +38,23 @@ public sealed class IdeBackendTests
     }
 
     [Fact]
+    public async Task Debug_stop_with_expected_PID_preserves_a_replacement_agent()
+    {
+        await using var fixture = new Fixture();
+        using var hostStop = new CancellationTokenSource();
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var notice = hostStop.Token.Register(() => stopped.TrySetResult());
+        var name = "ide-owned-stop-" + Guid.NewGuid().ToString("N")[..8];
+        await using var session = new LocalSessions(new(name, new Uri("http://localhost:5173"), fixture.Time), hostStop);
+        fixture.Registrations = [Assert.Single(LocalSessions.Registrations(), r => r.Name == name)];
+        await fixture.InitializeAsync();
+        await fixture.CallAsync("agents/stop", new { workspace = "example", name, expectedProcessId = Environment.ProcessId + 1 });
+        Assert.False(hostStop.IsCancellationRequested);
+        await fixture.CallAsync("agents/stop", new { workspace = "example", name, expectedProcessId = Environment.ProcessId });
+        await stopped.Task.WaitAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
     public async Task Visitor_access_validates_policies_and_returns_API_key_only_once_on_creation()
     {
         await using var fixture = new Fixture(); await fixture.InitializeAsync();
@@ -91,6 +108,8 @@ public sealed class IdeBackendTests
         Assert.Equal("signature", detail.GetProperty("headers").GetProperty("Webhook-Signature").GetString());
         var exported = await fixture.CallAsync("requests/exportHttp", new { workspace = "example", name = "my-tunnel", requestId = "request-1", target = "http://localhost:5173" });
         Assert.StartsWith("POST http://localhost:5173/webhooks HTTP/1.1", exported.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Contains("charset=utf-8", exported.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Content-Encoding", exported.GetProperty("text").GetString(), StringComparison.OrdinalIgnoreCase);
         await fixture.CallAsync("captureBodies/set", new { workspace = "example", name = "my-tunnel", enabled = false });
         Assert.DoesNotContain(Fixture.Token, fixture.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("captured-private-authorization", fixture.Output, StringComparison.Ordinal);
@@ -109,34 +128,37 @@ public sealed class IdeBackendTests
         await using var fixture = new Fixture(); await fixture.InitializeAsync();
         using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = new TaskCompletionSource<(string Headers, byte[] Body)>(TaskCreationOptions.RunContinuationsAsynchronously);
         var serve = Task.Run(async () =>
         {
             using var socket = await listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
             await using var stream = socket.GetStream();
-            using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
-            var header = new StringBuilder(); var length = 0;
-            while (await reader.ReadLineAsync(TestContext.Current.CancellationToken) is { Length: > 0 } line)
+            var header = new StringBuilder(); var single = new byte[1];
+            while (!header.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
             {
-                header.AppendLine(line);
-                if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
-                { length = int.Parse(line.Split(':')[1].Trim(), System.Globalization.CultureInfo.InvariantCulture); }
+                await stream.ReadExactlyAsync(single, TestContext.Current.CancellationToken); header.Append((char)single[0]);
             }
-            var body = new char[length]; var offset = 0;
-            while (offset < body.Length)
-            {
-                var count = await reader.ReadAsync(body.AsMemory(offset), TestContext.Current.CancellationToken);
-                if (count == 0) { throw new EndOfStreamException(); } offset += count;
-            }
-            received.SetResult(header.Append(body).ToString());
+            var lengthHeader = header.ToString().Split("\r\n").Single(line => line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase));
+            var length = int.Parse(lengthHeader.Split(':')[1].Trim(), System.Globalization.CultureInfo.InvariantCulture);
+            var body = new byte[length]; await stream.ReadExactlyAsync(body, TestContext.Current.CancellationToken);
+            received.SetResult((header.ToString(), body));
             await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 302 Found\r\nLocation: https://groundhog.unifinity.com/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), TestContext.Current.CancellationToken);
         }, TestContext.Current.CancellationToken);
-        var response = await fixture.CallAsync("requests/replay", new { workspace = "example", name = "my-tunnel", requestId = "request-1", target = $"http://127.0.0.1:{port}", body = "edited-body", confirm = true });
+        var response = await fixture.CallAsync("requests/replay", new { workspace = "example", name = "my-tunnel", requestId = "request-1", target = $"http://127.0.0.1:{port}",
+            headers = new Dictionary<string, string> { ["Authorization"] = "Bearer explicit-local-secret", ["Cookie"] = "local-session=explicit-cookie", ["X-Api-Key"] = "explicit-api-key",
+                ["Content-Type"] = "application/json; charset=iso-8859-1", ["Content-Encoding"] = "gzip" }, body = "café", confirm = true });
         Assert.Equal(302, response.GetProperty("statusCode").GetInt32());
         var sent = await received.Task.WaitAsync(TestContext.Current.CancellationToken); await serve;
-        Assert.Contains("POST /webhooks HTTP/1.1", sent, StringComparison.Ordinal);
-        Assert.Contains("edited-body", sent, StringComparison.Ordinal);
-        Assert.DoesNotContain("captured-private-authorization", sent, StringComparison.Ordinal);
+        Assert.Contains("POST /webhooks HTTP/1.1", sent.Headers, StringComparison.Ordinal);
+        Assert.Equal(Encoding.UTF8.GetBytes("café"), sent.Body);
+        Assert.Contains("Authorization: Bearer explicit-local-secret", sent.Headers, StringComparison.Ordinal);
+        Assert.Contains("local-session=explicit-cookie", sent.Headers, StringComparison.Ordinal);
+        Assert.Contains("explicit-api-key", sent.Headers, StringComparison.Ordinal);
+        Assert.Contains("charset=utf-8", sent.Headers, StringComparison.Ordinal);
+        Assert.DoesNotContain("Content-Encoding", sent.Headers, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("explicit-local-secret", fixture.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("explicit-cookie", fixture.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("explicit-api-key", fixture.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -478,7 +500,8 @@ public sealed class IdeBackendTests
                 _ when path.EndsWith("/requests/request-1", StringComparison.Ordinal) => new
                 {
                     requestId = "request-1", method = "POST", path = "/webhooks",
-                    requestHeaders = new[] { new { name = "Authorization", value = "Bearer captured-private-authorization" }, new { name = "Webhook-Signature", value = "signature" } },
+                    requestHeaders = new[] { new { name = "Authorization", value = "Bearer captured-private-authorization" }, new { name = "Webhook-Signature", value = "signature" },
+                        new { name = "Content-Encoding", value = "gzip" }, new { name = "Content-Type", value = "application/json; charset=iso-8859-1" } },
                     requestBody = new { text = "{\"value\":1}", truncated = DetailsTruncated, omitted = (string?)null }
                 },
                 _ when path.EndsWith("/requests", StringComparison.Ordinal) => new RemoteSearchResult([new(new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero), "GET", "/webhooks", 200, 1, "request-1")], false),

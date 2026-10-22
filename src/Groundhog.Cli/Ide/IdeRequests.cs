@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -46,7 +47,8 @@ internal sealed partial class IdeServices
             if (!requestPath.StartsWith('/') || requestPath.Contains('\\') || requestPath.Any(char.IsControl))
             { throw Fault(-32602, "invalidParams", "The captured request path is invalid."); }
             var destination = new Uri(target.GetLeftPart(UriPartial.Authority) + requestPath);
-            var headers = p.TryGetProperty("headers", out var edited) ? Headers(edited, session) : detail.Headers;
+            var headers = p.TryGetProperty("headers", out var edited) ? Headers(edited, session, redact: method != "requests/replay") : detail.Headers;
+            headers = NormalizeTextHeaders(headers);
             var body = p.TryGetProperty("body", out var editedBody)
                 ? editedBody.ValueKind == JsonValueKind.String ? editedBody.GetString()! : throw Fault(-32602, "invalidParams", "Body must be text.")
                 : detail.Body;
@@ -112,7 +114,7 @@ internal sealed partial class IdeServices
 
     private static bool IsTrue(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object
         && value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.True;
-    private static Dictionary<string, string> Headers(JsonElement value, LoginSession session)
+    private static Dictionary<string, string> Headers(JsonElement value, LoginSession session, bool redact = true)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) { return result; }
@@ -130,10 +132,28 @@ internal sealed partial class IdeServices
                 : throw Fault(-32602, "invalidParams", "Header values must be strings.");
             if (text.Any(c => c is '\r' or '\n' or '\0') || (characters += header.Key.Length + text.Length) > 16_384)
             { throw Fault(-32602, "invalidParams", "A captured header value or collection is invalid."); }
-            var safe = SensitiveHeader(header.Key) ? "[redacted]" : Redact(text, session);
+            var safe = !redact ? text : SensitiveHeader(header.Key) ? "[redacted]" : Redact(text, session);
             result[header.Key] = result.TryGetValue(header.Key, out var existing) ? existing + ", " + safe : safe;
         }
         return result;
+    }
+
+    // Captured bodies are decoded text, not the original compressed bytes. Re-encode that text consistently for
+    // both local replay and the exported HTTP request, without stale compression or source-charset declarations.
+    private static Dictionary<string, string> NormalizeTextHeaders(Dictionary<string, string> headers)
+    {
+        var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, value) in headers)
+        {
+            if (ExcludedHeaders.Contains(name) || name.Equals("Content-Encoding", StringComparison.OrdinalIgnoreCase)) { continue; }
+            if (name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!MediaTypeHeaderValue.TryParse(value, out var type)) { throw Fault(-32602, "invalidParams", "The request content type is invalid."); }
+                type.CharSet = "utf-8"; normalized[name] = type.ToString();
+            }
+            else { normalized[name] = value; }
+        }
+        return normalized;
     }
     private static bool SensitiveHeader(string name) => name.Contains("authorization", StringComparison.OrdinalIgnoreCase)
         || name.Contains("cookie", StringComparison.OrdinalIgnoreCase) || name.EndsWith("-key", StringComparison.OrdinalIgnoreCase)
