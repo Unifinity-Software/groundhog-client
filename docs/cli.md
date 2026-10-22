@@ -564,3 +564,33 @@ The pixel-art groundhog on the boot and help screens is generated from the brand
 Aspire-hosted tunnels also appear in `groundhog ps`, labelled `Aspire`. Use `status` and `requests` with their tunnel
 name to inspect them. `stop` and `restart` refuse Aspire-owned tunnels and name the AppHost process; manage their
 lifecycle from Aspire.
+
+## Project configuration
+
+Check in `groundhog.json` to share a tunnel name, local target and visitor access settings. `host`, `start`, `restart`
+and `init` search the current directory and its parents, using the nearest file. With this file, `groundhog host`
+needs no name or target options:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/Unifinity-Software/groundhog-client/master/schemas/groundhog.schema.json",
+  "tunnel": "my-tunnel",
+  "target": "http://localhost:5173",
+  "allow": ["members"],
+  "rules": [{ "path": "/webhooks", "allow": ["anyone"] }]
+}
+```
+
+This hosts `my-tunnel` at `http://localhost:5173`; workspace members may visit it, and `/webhooks` permits anyone.
+Explicit options take precedence over the saved profile with that tunnel name, which takes precedence over the file.
+A different explicit tunnel name does not inherit this project's settings. `--port` or `--target` replaces the default
+target. Explicit visitor options replace the corresponding default option; repeated path, IP and API key environment
+options replace the corresponding list. `--access-file` replaces default inline rules.
+
+Optional `ipRanges` lists CIDR strings. Optional `apiKeyEnv` lists environment variable names, such as
+`["MYAPP_API_KEY"]`; those variables are read only when hosting. Never put a connection key, API key value or API key
+hash in the file. Unknown properties are rejected. Connection keys still come from `GROUNDHOG_KEY`, `--key`, or the
+key saved on this computer. `groundhog init` with an existing project file validates it and saves a local profile;
+without one, it offers the interactive profile setup.
+
+The editor schema is published as a repository file at the raw GitHub URL above; it requires no dashboard deployment.

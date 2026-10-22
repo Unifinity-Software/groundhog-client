@@ -164,6 +164,34 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
     }
 
     [Fact(Timeout = 30000)]
+    public async Task Background_start_discovers_project_in_parent_and_accepts_explicit_host_options()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "groundhog-project-host-" + Guid.NewGuid().ToString("N"));
+        var nested = Path.Combine(directory, "src");
+        var home = Path.Combine(directory, "home");
+        Directory.CreateDirectory(nested);
+        File.WriteAllText(Path.Combine(directory, "groundhog.json"),
+            """{"tunnel":"project-background","target":"http://localhost:1","allow":["anyone"]}""");
+        Process? process = null;
+        try
+        {
+            var started = await CliProcess.RunAsync(["start", "--target", fixture.LocalApp.ToString(), "--relay", fixture.Relay.Address.ToString(), "--pool", "1"], home, fixture.Key, ct, nested);
+            Assert.Equal(0, started.ExitCode);
+            var status = await CliProcess.RunAsync(["status", "project-background", "--output", "json"], home, fixture.Key, ct, nested);
+            var snapshot = JsonSerializer.Deserialize<SessionSnapshot>(status.Output)!;
+            Assert.Equal(fixture.LocalApp, new Uri(snapshot.Target));
+            process = Process.GetProcessById(snapshot.ProcessId);
+        }
+        finally
+        {
+            await CliProcess.RunAsync(["stop", "project-background"], home, fixture.Key, ct, nested);
+            if (process is not null) { await process.WaitForExitAsync(ct); process.Dispose(); }
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact(Timeout = 30000)]
     public async Task Real_cli_background_start_status_and_stop_use_the_saved_profile()
     {
         var cancellation = TestContext.Current.CancellationToken;
@@ -232,11 +260,12 @@ internal static class CliProcess
     /// with stdout and stderr combined.
     /// </summary>
     internal static async Task<(int ExitCode, string Output)> RunAsync(
-        string[] args, string home, string? key, CancellationToken cancellation)
+        string[] args, string home, string? key, CancellationToken cancellation, string? workingDirectory = null)
     {
         var executable = Environment.GetEnvironmentVariable("GROUNDHOG_CLI_SMOKE_PATH");
         var start = new ProcessStartInfo(executable ?? "dotnet")
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        if (workingDirectory is not null) { start.WorkingDirectory = workingDirectory; }
         if (executable is null) { start.ArgumentList.Add(typeof(GroundhogCommand).Assembly.Location); }
         foreach (var arg in args) { start.ArgumentList.Add(arg); }
         start.Environment["GROUNDHOG_HOME"] = home;

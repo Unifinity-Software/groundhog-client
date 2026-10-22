@@ -45,6 +45,7 @@ internal static class GroundhogCommand
 
         Usage:
           groundhog host <name> (--port <port> | --target <url>) [options]
+          groundhog host [<name>] [options]  (saved profile or groundhog.json)
           groundhog --version
           groundhog --help
           groundhog update [--check | --yes] [--prerelease]
@@ -55,7 +56,7 @@ internal static class GroundhogCommand
           groundhog status|stats <name> [--output json] [--watch]
           groundhog requests <name> [--output json] [--follow] [filters]
           groundhog stop <name>
-          groundhog start|restart <saved-profile>
+          groundhog start|restart [<name>] [host options]
           groundhog logs <name> [--follow] [--output json]
           groundhog wait <name> [--condition connected|ready] [--timeout <seconds>]
           groundhog doctor [--target <url>]
@@ -86,6 +87,8 @@ internal static class GroundhogCommand
         host <profile> and start <profile> need no other options. Profiles never store connection keys
         or API keys (only --api-key-env names); the connection key comes from GROUNDHOG_KEY, --key, or
         the key saved when you created the tunnel, added a key or rotated it here.
+        host, start, restart and init find groundhog.json in this directory or a parent.
+        Explicit options override the same-name saved profile, which overrides the project file.
         Status and traffic commands describe local sessions; history retains the last 1,000 requests.
         Global options: --no-interactive (disable menus), --no-color (disable colors; also NO_COLOR),
                         --no-update-check (skip the periodic update offer; also GROUNDHOG_NO_UPDATE_CHECK=1).
@@ -153,6 +156,12 @@ internal static class GroundhogCommand
 
             if (args is ["init"])
             {
+                if (ProjectConfiguration.Find(Environment.CurrentDirectory) is { } project)
+                {
+                    new ProfileStore(ProfileStore.DefaultDirectory).Save(project.Profile);
+                    output.WriteLine($"Profile saved from {project.Path}. Host it with: groundhog host {project.Profile.Name}");
+                    return 0;
+                }
                 if (!InteractiveCli.Available) { error.WriteLine("groundhog: init requires an interactive terminal. Use profile save instead."); return ExitCodes.BadArguments; }
                 await InteractiveCli.SetupAsync(new(ProfileStore.DefaultDirectory), cancellationToken);
                 return 0;
@@ -216,13 +225,14 @@ internal static class GroundhogCommand
         CancellationToken cancellationToken,
         HostView? view = null)
     {
-        if (args.Length == 1)
+        try
         {
-            var profile = new ProfileStore(ProfileStore.DefaultDirectory).Read().SingleOrDefault(p => p.Name == args[0]);
-            if (profile is not null)
-            {
-                args = profile.ToHostArguments();
-            }
+            args = ProjectConfiguration.ResolveHostArguments(args, new(ProfileStore.DefaultDirectory), Environment.CurrentDirectory);
+        }
+        catch (UsageException ex)
+        {
+            error.WriteLine($"groundhog: {ex.Message}");
+            return ExitCodes.BadArguments;
         }
         var credential = getEnvironmentVariable(HostArguments.KeyVariable);
         if (string.IsNullOrWhiteSpace(credential) && StoredKey(args) is { } storedKey)
