@@ -141,6 +141,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await explorer.refresh(); updateStatus();
   });
   const debug = new DebugHosting(backend);
+  context.subscriptions.push(debug);
   const notices = new NotificationPolicy();
   const lenses = new vscode.EventEmitter<void>();
   const updateNotices = () => {
@@ -178,8 +179,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return configuration;
       }
     }),
-    vscode.debug.onDidStartDebugSession(session => debug.sessionStarted(session.id, session.name)),
-    vscode.debug.onDidTerminateDebugSession(session => { void debug.sessionEnded(session.id, vscode.workspace.getConfiguration('groundhog', session.workspaceFolder?.uri).get<boolean>('stopHostingAfterDebugging', false)).catch(error => vscode.window.showErrorMessage((error as Error).message)); })
+    vscode.debug.onDidStartDebugSession(session => debug.sessionStarted(session.id, session.configuration)),
+    vscode.debug.onDidTerminateDebugSession(session => { void debug.sessionEnded(session.id, vscode.workspace.getConfiguration('groundhog', session.workspaceFolder?.uri).get<boolean>('stopHostingAfterDebugging', false), session.configuration).catch(error => vscode.window.showErrorMessage((error as Error).message)); })
   );
   try {
     await backend.start(); await explorer.refresh();

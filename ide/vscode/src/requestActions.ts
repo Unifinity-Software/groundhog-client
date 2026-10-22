@@ -11,10 +11,11 @@ export function parseHeaders(text: string): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.values(value).some(item => typeof item !== 'string')) throw new Error('Headers must be a JSON object containing string values.');
   return value as Record<string, string>;
 }
-export function asCurl(detail: RequestDetail, target: string, headers: Record<string, string>, body: string): string {
-  const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
+export function asCurl(detail: RequestDetail, target: string, headers: Record<string, string>, body: string, platform: NodeJS.Platform = process.platform): string {
+  const windows = platform === 'win32';
+  const quote = (value: string) => "'" + value.replace(/'/g, windows ? "''" : "'\\''") + "'";
   const url = localTarget(target) + '/' + detail.path.replace(/^\/+/, '');
-  return ['curl', '--request', quote(detail.method), quote(url), ...Object.entries(headers).flatMap(([name, value]) => ['--header', quote(name + ': ' + value)]), ...(body ? ['--data-raw', quote(body)] : [])].join(' ');
+  return [windows ? 'curl.exe' : 'curl', '--request', quote(detail.method), quote(url), ...Object.entries(headers).flatMap(([name, value]) => ['--header', quote(name + ': ' + value)]), ...(body ? ['--data-raw', quote(body)] : [])].join(' ');
 }
 export class RequestActions {
   constructor(private readonly backend: Backend) {}

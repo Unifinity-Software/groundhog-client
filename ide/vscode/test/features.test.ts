@@ -7,6 +7,7 @@ import { asCurl, localTarget, parseHeaders, RequestActions, signatureWarning } f
 import { ActiveRequestStats } from '../src/stats';
 import { selectCli } from '../src/cliSelection';
 import { accessDraft } from '../src/visitorAccess';
+import { execFileSync } from 'node:child_process';
 
 afterEach(() => vi.useRealTimers());
 describe('IDE feature behavior', () => {
@@ -27,14 +28,31 @@ describe('IDE feature behavior', () => {
     const debug = new DebugHosting(backend); const config = { name: 'App', type: 'coreclr', env: {} };
     const result = await debug.beforeLaunch(config, { tunnel: 'my-tunnel' }, 'example', [{ ...list.agents[0], source: 'aspire' }], [{ ...list.tunnels[0], hasKey: false }], { configurations: [], stopAfterDebugging: true }, true);
     expect(result.publicUrl).toBe('https://my-tunnel.groundhog.unifinity.com'); expect(request).not.toHaveBeenCalled();
-    debug.sessionStarted('a', 'App'); await debug.sessionEnded('a', true); expect(request).not.toHaveBeenCalled();
+    debug.sessionStarted('a', config); await debug.sessionEnded('a', true); expect(request).not.toHaveBeenCalled(); debug.dispose();
   });
   it('preserves same-name concurrent debug session ownership', async () => {
     const backend = new MockBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const settings = { configurations: [], stopAfterDebugging: true };
-    await debug.beforeLaunch({ name: 'App' }, { tunnel: 'my-tunnel' }, 'example', [], list.tunnels, settings, true);
-    await debug.beforeLaunch({ name: 'App' }, { tunnel: 'my-tunnel' }, 'example', list.agents, list.tunnels, settings, true);
-    const request = vi.spyOn(backend, 'request'); debug.sessionStarted('a', 'App'); await debug.sessionEnded('a', true); expect(request).not.toHaveBeenCalled();
-    debug.sessionStarted('b', 'App'); await debug.sessionEnded('b', true); expect(request).toHaveBeenCalledWith('agents/stop', { workspace: 'example', name: 'my-tunnel' });
+    const a = { name: 'App' }; const b = { name: 'App' };
+    await debug.beforeLaunch(a, { tunnel: 'my-tunnel' }, 'example', [], list.tunnels, settings, true);
+    await debug.beforeLaunch(b, { tunnel: 'my-tunnel' }, 'example', list.agents, list.tunnels, settings, true);
+    const request = vi.spyOn(backend, 'request'); debug.sessionStarted('a', a); await debug.sessionEnded('a', true); expect(request).not.toHaveBeenCalled();
+    debug.sessionStarted('b', b); await debug.sessionEnded('b', true); expect(request).toHaveBeenCalledWith('agents/stop', { workspace: 'example', name: 'my-tunnel', expectedProcessId: 1234 }); debug.dispose();
+  });
+  it('preserves a user replacement agent after debugger-owned PID changes', async () => {
+    const backend = new MockBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const config = { name: 'App' };
+    await debug.beforeLaunch(config, { tunnel: 'my-tunnel' }, 'example', [], list.tunnels, { configurations: [], stopAfterDebugging: true }, true); debug.sessionStarted('first', config);
+    const request = vi.spyOn(backend, 'request').mockResolvedValueOnce({ tunnels: list.tunnels, agents: [{ ...list.agents[0], processId: 9999 }] });
+    await debug.sessionEnded('first', true); expect(request).not.toHaveBeenCalledWith('agents/stop', expect.anything()); debug.dispose();
+  });
+  it('does not consume a failed same-name launch and expires its pending ownership with fake time', async () => {
+    vi.useFakeTimers(); const backend = new MockBackend(); const list = await backend.request('tunnels/list', { workspace: 'example' }); const debug = new DebugHosting(backend); const failed = { name: 'App' }; const retry = { name: 'App' }; const settings = { configurations: [], stopAfterDebugging: true };
+    await debug.beforeLaunch(failed, { tunnel: 'my-tunnel' }, 'example', [], list.tunnels, settings, true);
+    await debug.beforeLaunch(retry, { tunnel: 'my-tunnel' }, 'example', list.agents, list.tunnels, settings, true);
+    debug.sessionStarted('retry', retry); const request = vi.spyOn(backend, 'request'); await debug.sessionEnded('retry', true);
+    expect(request).not.toHaveBeenCalledWith('agents/stop', expect.anything());
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(request).toHaveBeenCalledWith('agents/stop', { workspace: 'example', name: 'my-tunnel', expectedProcessId: 1234 });
+    debug.dispose(); expect(vi.getTimerCount()).toBe(0);
   });
   it('completes sign-in if auth changed between status read and listener registration', async () => {
     const backend = new MockBackend(); const auth = new GroundhogAuthentication(backend);
@@ -56,7 +74,16 @@ describe('IDE feature behavior', () => {
     const request = vi.spyOn(backend, 'request'); await actions.replay({ workspace: 'example', name: 'my-tunnel' }, detail, 'http://localhost:5173', { Edited: 'yes' }, 'new-body');
     expect(request).toHaveBeenLastCalledWith('requests/replay', { workspace: 'example', name: 'my-tunnel', requestId: 'demo', target: 'http://localhost:5173', headers: { Edited: 'yes' }, body: 'new-body', confirm: true });
     await expect(actions.replay({ workspace: 'example', name: 'my-tunnel' }, { ...detail, truncated: true }, 'http://localhost:5173', {}, '')).rejects.toThrow('truncated');
-    expect(asCurl(detail, 'http://localhost:5173', { Test: "a'b" }, 'body')).toContain("'Test: a'\\''b'");
+    expect(asCurl(detail, 'http://localhost:5173', { Test: "a'b" }, 'body', 'linux')).toContain("'Test: a'\\''b'");
+    expect(asCurl(detail, 'http://localhost:5173', { Test: "a'b" }, 'body', 'win32')).toContain("'Test: a''b'");
+  });
+  it.skipIf(process.platform !== 'win32')('PowerShell parses hostile curl fields as one native command', async () => {
+    const backend = new MockBackend(); const detail = await backend.request('requests/detail', { workspace: 'example', name: 'my-tunnel', requestId: 'demo' });
+    const payload = "'; Write-Output PWN; #";
+    const commands = [asCurl(detail, 'http://localhost:5173', {}, payload, 'win32'), asCurl(detail, 'http://localhost:5173', { Test: payload }, '', 'win32'), asCurl({ ...detail, path: '/' + payload }, 'http://localhost:5173', {}, '', 'win32')];
+    const script = '$commands = $env:GROUNDHOG_CURL_TEST | ConvertFrom-Json; $results = foreach ($command in $commands) { $tokens=$null; $errors=$null; $ast=[System.Management.Automation.Language.Parser]::ParseInput($command,[ref]$tokens,[ref]$errors); $names=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.CommandAst]},$true) | ForEach-Object { $_.GetCommandName() }); @{names=$names;errors=@($errors).Count} }; ConvertTo-Json -InputObject @($results) -Compress';
+    const parsed = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', windowsHide: true, env: { ...process.env, GROUNDHOG_CURL_TEST: JSON.stringify(commands) } }));
+    expect(parsed).toEqual(commands.map(() => ({ names: ['curl.exe'], errors: 0 })));
   });
   it('finds C# tunnel literals and rate-limits error/disconnect notifications with fake time', () => {
     vi.useFakeTimers(); expect(tunnelLiterals('builder.WithGroundhogTunnel("my-tunnel");')).toEqual([{ name: 'my-tunnel', offset: 8 }]);

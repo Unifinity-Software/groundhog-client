@@ -23,7 +23,7 @@ export interface Methods {
   'tunnels/delete': [TunnelRef & { confirm: true }, Empty];
   'agents/start': [TunnelRef & { target?: string; projectDirectory?: string; localCa?: string }, Agent];
   'agents/restart': [TunnelRef & { target?: string; projectDirectory?: string; localCa?: string }, Agent];
-  'agents/stop': [TunnelRef, Empty];
+  'agents/stop': [TunnelRef & { expectedProcessId?: number }, Empty];
   'keys/set': [TunnelRef & { key: string }, Empty];
   'requests/subscribe': [TunnelRef & { source?: 'auto' | 'local' | 'remote' }, { subscriptionId: string; requests: RequestSummary[]; source?: 'local' | 'remote' }];
   'requests/unsubscribe': [{ subscriptionId: string }, Empty];
