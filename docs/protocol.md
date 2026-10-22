@@ -235,3 +235,7 @@ workspace."
   control back to agents.
 - `POST …/api-keys` with `{"name":"<label>"}` returns `{"id","name","created","key"}`; the plaintext `key` is
   shown once. `DELETE …/api-keys/<id>` revokes one.
+
+## IDE integrations
+
+The local CLI-to-IDE JSON-RPC contract is versioned separately in [IDE backend protocol](ide-protocol.md).
