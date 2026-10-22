@@ -199,7 +199,8 @@ supporting CLI login. Management endpoints exist only on the relay's own host, n
    expected defaults are 30 days since last use and 90 days since sign-in; relay settings may shorten them.
 7. `POST /api/cli/logout` with the access credential revokes the session and returns 204. Refresh-capable clients
    also include `{"refreshToken":"<secret>"}` so the whole refresh chain can be revoked. Login replaces the CLI's
-   saved local session.
+   saved local session. Logout always removes the client's local credentials and saved tunnel keys. Clients treat
+   HTTP 401 as already signed out and report successful logout; other remote failures remain visible as errors.
 
 Refresh is an optional additive contract; a relay that omits its capability retains the fixed eight-hour session.
 The client refreshes before a management call when fewer than five minutes remain, and on a 401 it refreshes and
