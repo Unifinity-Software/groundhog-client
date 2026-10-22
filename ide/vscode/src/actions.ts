@@ -7,6 +7,7 @@ export interface ActionUI {
   open(url: string): Promise<void>;
   copy(value: string): Promise<void>;
   target(tunnel: string): Promise<string | undefined>;
+  projectDirectory?(): string | undefined;
 }
 export function hostedUrl(value: string): boolean {
   try {
@@ -22,7 +23,8 @@ export class TunnelActions {
     if (!tunnel.hasKey && !await this.enterKey(tunnel)) return;
     const target = await this.ui.input('Local app URL', await this.ui.target(tunnel.name) ?? 'http://localhost:5173');
     if (!target) return;
-    return this.backend.request(restart ? 'agents/restart' : 'agents/start', { workspace: tunnel.workspace, name: tunnel.name, target });
+    const projectDirectory = this.ui.projectDirectory?.();
+    return this.backend.request(restart ? 'agents/restart' : 'agents/start', { workspace: tunnel.workspace, name: tunnel.name, target, ...(projectDirectory ? { projectDirectory } : {}) });
   }
   async stop(tunnel: Tunnel): Promise<void> { await this.backend.request('agents/stop', this.ref(tunnel)); }
   async open(tunnel: Tunnel): Promise<void> { if (!hostedUrl(tunnel.url)) throw new Error('Groundhog returned an invalid public URL.'); await this.ui.open(tunnel.url); }

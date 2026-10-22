@@ -2,7 +2,7 @@ import { Agent, AuthStatus, Backend, BackendEvents, Disposable, Methods, Notific
 
 /** Scripted demo backend; never reads credentials or contacts the hosted service. */
 export class MockBackend implements Backend {
-  readonly capabilities = ['deviceLogin', 'localAgents', 'liveRequests', 'demo'];
+  readonly capabilities = ['deviceLogin', 'localAgents', 'liveRequests', 'requestDetail', 'requestReplay', 'requestExportHttp', 'captureBodies', 'rotateWithoutDowntime', 'demo'];
   private readonly events = new BackendEvents();
   private auth: AuthStatus = { state: 'signedIn', workspace: 'example' };
   private tunnels: Tunnel[] = ['my-tunnel', 'service-a', 'service-b'].map((name, i) => ({
@@ -14,6 +14,7 @@ export class MockBackend implements Backend {
   private nextSubscription = 0;
   private nextRequest = 0;
   private disposed = false;
+  private captureBodies = false;
   async start(): Promise<void> { if (this.disposed) throw new Error('Mock backend has stopped.'); }
   on<N extends keyof Notifications>(event: N, listener: (value: Notifications[N]) => void): Disposable { return this.events.on(event, listener); }
   async request<M extends keyof Methods>(method: M, params: Methods[M][0]): Promise<Methods[M][1]> {
@@ -53,7 +54,7 @@ export class MockBackend implements Backend {
         this.tunnels = this.tunnels.filter(t => t.name !== ref.name); this.events.emit('tunnels/changed', { workspace: ref.workspace }); break;
       case 'agents/start': case 'agents/restart': {
         const tunnel = this.findTunnel(ref); tunnel.state = 'connected'; tunnel.location = 'local';
-        const agent: Agent = { name: ref.name, target: (params as Methods['agents/start'][0]).target, url: tunnel.url, state: 'Connected', source: 'cli', processId: 1234 };
+        const agent: Agent = { name: ref.name, target: (params as Methods['agents/start'][0]).target ?? 'http://localhost:5173', url: tunnel.url, state: 'Connected', source: 'cli', processId: 1234 };
         this.agents = this.agents.filter(a => a.name !== ref.name).concat(agent); result = agent;
         this.events.emit('agents/changed', { agents: this.agents }); break;
       }
@@ -72,6 +73,11 @@ export class MockBackend implements Backend {
         clearInterval(this.subscriptions.get(id)); this.subscriptions.delete(id); break;
       }
       case 'doctor/run': result = { checks: [{ code: 'targetReachable', status: 'passed', message: 'Demo target responded.' }, { code: 'connectionKey', status: 'passed', message: 'A demo connection key is saved.' }] }; break;
+      case 'requests/detail': result = { requestId: (params as Methods['requests/detail'][0]).requestId, method: 'POST', path: '/webhooks', headers: { 'Content-Type': 'application/json', 'Webhook-Signature': 'demo-signature' }, body: this.captureBodies ? '{"event":"demo.completed"}' : '', truncated: false, captureBodies: this.captureBodies, canCaptureBodies: true }; break;
+      case 'requests/replay': result = { statusCode: 200, durationMs: 12 }; break;
+      case 'requests/exportHttp': result = { text: 'POST ' + (params as Methods['requests/exportHttp'][0]).target + '/webhooks\nContent-Type: application/json\n\n' + ((params as Methods['requests/exportHttp'][0]).body ?? '') }; break;
+      case 'captureBodies/set': this.captureBodies = (params as { enabled: boolean }).enabled; result = { enabled: this.captureBodies }; break;
+      case 'keys/rotateWithoutDowntime': this.events.emit('tunnels/changed', { workspace: ref.workspace }); break;
       default: throw new Error('This demo does not support that operation.');
     }
     return structuredClone(result) as Methods[M][1];

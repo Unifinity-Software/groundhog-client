@@ -1,19 +1,25 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
-import { Backend, RequestSummary, Tunnel } from './protocol';
+import { Backend, RequestDetail, RequestSummary, Tunnel } from './protocol';
 import { StreamEvent, SubscriptionBuffer } from './subscription';
+import { asCurl, parseHeaders, RequestActions, signatureWarning } from './requestActions';
+import { toDataURL } from 'qrcode';
 
 export class InspectorPanels implements vscode.Disposable {
   private readonly panels = new Map<string, vscode.WebviewPanel>();
-  constructor(private readonly backend: Backend, private readonly extensionUri: vscode.Uri, private readonly onRequests: (tunnel: Tunnel, rows: RequestSummary[]) => void) {}
+  constructor(private readonly backend: Backend, private readonly extensionUri: vscode.Uri, private readonly onRequests: (tunnel: Tunnel, rows: RequestSummary[]) => void, private readonly target: (name: string) => Promise<string | undefined> = async () => undefined) {}
   async open(tunnel: Tunnel): Promise<void> {
     const key = `${tunnel.workspace}/${tunnel.name}`;
     const previous = this.panels.get(key); if (previous) { previous.reveal(); return; }
     const panel = vscode.window.createWebviewPanel('groundhog.requests', `Groundhog requests: ${tunnel.name}`, vscode.ViewColumn.Beside, { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist')] });
     this.panels.set(key, panel);
     let subscriptionId: string | undefined;
+    let subscribing: Promise<void> | undefined;
+    let generation = 0;
+    let source: 'local' | 'remote' | undefined;
     let disposed = false;
     const rows: RequestSummary[] = [];
+    let detail: RequestDetail | undefined;
     const buffer = new SubscriptionBuffer();
     const post = (message: unknown) => { if (!disposed) void panel.webview.postMessage(message); };
     const deliver = (event: StreamEvent) => {
@@ -27,33 +33,70 @@ export class InspectorPanels implements vscode.Disposable {
       this.backend.on('requests/event', event => buffer.receive({ type: 'request', value: event }).forEach(deliver)),
       this.backend.on('connection/event', event => buffer.receive({ type: 'connection', value: event }).forEach(deliver)),
       this.backend.on('backend/state', event => {
-        if (event.state === 'ready') { subscriptionId = undefined; buffer.reset(); void subscribe(); }
+        if (event.state === 'ready') { generation++; subscriptionId = undefined; buffer.reset(); void subscribe(); }
         else post({ type: 'connection', state: event.state, message: event.message });
       })
     ];
-    const subscribe = async () => {
+    const subscribe = (): Promise<void> => {
+      if (disposed) return Promise.resolve();
+      if (subscribing) return subscribing;
+      const startedGeneration = generation;
+      subscribing = loadSubscription(startedGeneration).finally(() => { subscribing = undefined; if (!disposed && generation !== startedGeneration) void subscribe(); });
+      return subscribing;
+    };
+    const loadSubscription = async (startedGeneration: number) => {
       try {
         const result = await this.backend.request('requests/subscribe', { workspace: tunnel.workspace, name: tunnel.name, source: 'auto' });
-        if (disposed) { await this.backend.request('requests/unsubscribe', { subscriptionId: result.subscriptionId }); return; }
-        subscriptionId = result.subscriptionId; rows.splice(0, rows.length, ...result.requests); this.onRequests(tunnel, rows);
-        post({ type: 'requests', requests: rows }); post({ type: 'connection', state: 'live', source: rows[0]?.source ?? 'local', demo: this.backend.capabilities.includes('demo') });
+        if (disposed || generation !== startedGeneration) { await this.backend.request('requests/unsubscribe', { subscriptionId: result.subscriptionId }); return; }
+        subscriptionId = result.subscriptionId; source = result.source ?? result.requests[0]?.source;
+        rows.splice(0, rows.length, ...result.requests.sort((a, b) => b.completed.localeCompare(a.completed))); this.onRequests(tunnel, rows);
+        post({ type: 'requests', requests: rows }); post({ type: 'connection', state: 'live', source, demo: this.backend.capabilities.includes('demo') });
         buffer.bind(subscriptionId).forEach(deliver);
       } catch { buffer.reset(); post({ type: 'connection', state: 'stopped', message: 'Request stream unavailable. Close this panel and try again.' }); }
     };
-    panel.webview.onDidReceiveMessage((message: { type?: string }) => {
+    const showDetail = async (requestId: string) => {
+      if (!this.backend.capabilities.includes('requestDetail')) throw new Error('Request detail requires a newer Groundhog CLI or relay.');
+      detail = await this.backend.request('requests/detail', { workspace: tunnel.workspace, name: tunnel.name, requestId });
+      post({ type: 'detail', detail, target: await this.target(tunnel.name) ?? 'http://localhost:5173' });
+    };
+    panel.webview.onDidReceiveMessage(async (message: { type?: string; requestId?: unknown; target?: unknown; headers?: unknown; body?: unknown; enabled?: unknown }) => {
+      try {
       if (message?.type === 'ready') {
-        if (subscriptionId) { post({ type: 'requests', requests: rows }); post({ type: 'connection', state: 'live', source: rows[0]?.source ?? 'local', demo: this.backend.capabilities.includes('demo') }); }
+        post({ type: 'qr', dataUrl: await toDataURL(tunnel.url, { width: 160, margin: 2 }), url: tunnel.url });
+        if (subscriptionId) { post({ type: 'requests', requests: rows }); post({ type: 'connection', state: 'live', source, demo: this.backend.capabilities.includes('demo') }); }
         else void subscribe();
+      } else if (message?.type === 'detail') {
+        if (typeof message.requestId !== 'string' || !rows.some(row => row.requestId === message.requestId)) return;
+        await showDetail(message.requestId);
+      } else if (message?.type === 'capture' && detail && typeof message.enabled === 'boolean') {
+        await this.backend.request('captureBodies/set', { workspace: tunnel.workspace, name: tunnel.name, enabled: message.enabled });
+        await showDetail(detail.requestId);
+      } else if (['replay', 'curl', 'export'].includes(message?.type ?? '') && detail) {
+        if (typeof message.target !== 'string' || typeof message.headers !== 'string' || typeof message.body !== 'string' || message.headers.length > 65536 || message.body.length > 262144) throw new Error('The edited request is too large or invalid.');
+        const headers = parseHeaders(message.headers); const body = message.body;
+        if (message.type === 'curl') { await vscode.env.clipboard.writeText(asCurl(detail, message.target, headers, body)); post({ type: 'operation', message: 'Copied as curl.' }); }
+        if (message.type === 'export') {
+          const result = await this.backend.request('requests/exportHttp', { workspace: tunnel.workspace, name: tunnel.name, requestId: detail.requestId, target: message.target, headers, body });
+          await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ language: 'http', content: result.text }));
+        }
+        if (message.type === 'replay') {
+          if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before sending requests to a local app.');
+          const warning = signatureWarning(headers) ? ' A signature header is present. Signed webhooks often reject old timestamps.' : '';
+          if (await vscode.window.showWarningMessage('Send this request again to your local app?' + warning, { modal: true }, 'Send again') !== 'Send again') return;
+          const result = await new RequestActions(this.backend).replay(tunnel, detail, message.target, headers, body);
+          post({ type: 'operation', message: `Local app returned ${result.statusCode} in ${result.durationMs} ms.` });
+        }
       }
+      } catch (error) { post({ type: 'operation', message: (error as Error).message }); }
     });
     panel.onDidDispose(() => {
-      disposed = true; this.panels.delete(key); subscriptions.forEach(s => s.dispose());
+      disposed = true; generation++; this.panels.delete(key); subscriptions.forEach(s => s.dispose());
       if (subscriptionId) void this.backend.request('requests/unsubscribe', { subscriptionId }).catch(() => {});
     });
     const nonce = randomBytes(18).toString('base64');
     const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'inspector.js'));
     const style = panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'inspector.css'));
-    panel.webview.html = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>Groundhog requests</title></head><body><main id="app"></main><script nonce="${nonce}" src="${script}"></script></body></html>`;
+    panel.webview.html = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>Groundhog requests</title></head><body><main id="app"></main><script nonce="${nonce}" src="${script}"></script></body></html>`;
   }
   dispose(): void { for (const panel of this.panels.values()) panel.dispose(); this.panels.clear(); }
 }

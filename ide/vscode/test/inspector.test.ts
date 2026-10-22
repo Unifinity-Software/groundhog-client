@@ -32,5 +32,9 @@ it('webview smoke renders safely, filters, freezes display and resumes buffered 
   dom.window.document.getElementById('pause')!.click(); expect(dom.window.document.querySelectorAll('tbody tr')).toHaveLength(2);
   const method = dom.window.document.getElementById('method') as HTMLSelectElement; method.value = 'GET'; method.dispatchEvent(new dom.window.Event('input')); expect(dom.window.document.querySelectorAll('tbody tr')).toHaveLength(0);
   send({ type: 'connection', state: 'reconnecting' }); expect(dom.window.document.getElementById('source')!.textContent).toBe('Reconnecting…');
+  send({ type: 'detail', detail: { requestId: '1', method: 'POST', path: '/webhooks', headers: {}, body: 'captured', truncated: true, captureBodies: false, canCaptureBodies: false } });
+  expect((dom.window.document.getElementById('replay') as HTMLButtonElement).disabled).toBe(true);
+  expect((dom.window.document.getElementById('capture') as HTMLInputElement).disabled).toBe(true);
+  dom.window.document.getElementById('curl')!.click(); expect(postMessage).toHaveBeenLastCalledWith({ type: 'curl', target: 'http://localhost:5173', headers: '{}', body: 'captured' });
   dom.window.close();
 });

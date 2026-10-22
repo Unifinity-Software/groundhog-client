@@ -7,6 +7,8 @@ export interface RequestSummary { requestId: string; completed: string; method: 
 export interface TunnelRef { workspace: string; name: string }
 export type Empty = Record<string, never>;
 export interface InitializeResult { protocolVersion: number; cliVersion: string; capabilities: string[] }
+export interface RequestDetail { requestId: string; method: string; path: string; headers: Record<string, string>; body: string; truncated: boolean; captureBodies: boolean; canCaptureBodies: boolean }
+export interface RequestRef extends TunnelRef { requestId: string }
 export interface Methods {
   initialize: [{ clientVersion: string; protocolVersions: number[] }, InitializeResult];
   'auth/status': [Empty, AuthStatus];
@@ -18,20 +20,25 @@ export interface Methods {
   'tunnels/create': [TunnelRef, Tunnel];
   'tunnels/rename': [TunnelRef & { newName: string; confirm: true }, Tunnel];
   'tunnels/delete': [TunnelRef & { confirm: true }, Empty];
-  'agents/start': [TunnelRef & { target: string }, Agent];
-  'agents/restart': [TunnelRef & { target: string }, Agent];
+  'agents/start': [TunnelRef & { target?: string; projectDirectory?: string }, Agent];
+  'agents/restart': [TunnelRef & { target?: string; projectDirectory?: string }, Agent];
   'agents/stop': [TunnelRef, Empty];
   'keys/set': [TunnelRef & { key: string }, Empty];
-  'requests/subscribe': [TunnelRef & { source?: 'auto' | 'local' | 'remote' }, { subscriptionId: string; requests: RequestSummary[] }];
+  'requests/subscribe': [TunnelRef & { source?: 'auto' | 'local' | 'remote' }, { subscriptionId: string; requests: RequestSummary[]; source?: 'local' | 'remote' }];
   'requests/unsubscribe': [{ subscriptionId: string }, Empty];
   'doctor/run': [TunnelRef & { target: string }, { checks: { code: string; status: 'passed' | 'warning' | 'failed'; message: string }[] }];
+  'requests/detail': [RequestRef, RequestDetail];
+  'requests/replay': [RequestRef & { target: string; headers?: Record<string, string>; body?: string; confirm: true }, { statusCode: number; durationMs: number }];
+  'requests/exportHttp': [RequestRef & { target: string; headers?: Record<string, string>; body?: string }, { text: string }];
+  'captureBodies/set': [TunnelRef & { enabled: boolean }, { enabled: boolean }];
+  'keys/rotateWithoutDowntime': [TunnelRef & { confirm: true; timeoutSeconds?: number }, Empty];
 }
 export interface Notifications {
   'auth/changed': AuthStatus;
   'tunnels/changed': { workspace: string };
   'agents/changed': { agents: Agent[] };
   'requests/event': { subscriptionId: string; request: RequestSummary };
-  'connection/event': { subscriptionId: string; state: 'live' | 'reconnecting' | 'stopped'; reason?: string };
+  'connection/event': { subscriptionId: string; state: 'live' | 'reconnecting' | 'stopped'; reason?: string; source?: 'local' | 'remote' };
   /** Client lifecycle event; never sent over the protocol. */
   'backend/state': { state: 'ready' | 'reconnecting' | 'stopped'; message?: string };
 }

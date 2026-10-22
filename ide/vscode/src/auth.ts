@@ -8,14 +8,20 @@ export class GroundhogAuthentication implements vscode.AuthenticationProvider, v
   readonly onDidChangeSessions = this.changes.event;
   private status: AuthStatus = { state: 'signedOut' };
   private cancelWait?: () => void;
+  private statusRevision = 0;
   private readonly subscription;
   constructor(private readonly backend: Backend) {
     this.subscription = backend.on('auth/changed', status => {
+      this.statusRevision++;
       const previous = this.sessions(); this.status = status;
       this.changes.fire({ added: this.sessions(), removed: previous, changed: [] });
     });
   }
-  async getSessions(): Promise<vscode.AuthenticationSession[]> { this.status = await this.backend.request('auth/status', {}); return this.sessions(); }
+  async getSessions(): Promise<vscode.AuthenticationSession[]> {
+    const revision = this.statusRevision; const status = await this.backend.request('auth/status', {});
+    if (revision === this.statusRevision) this.status = status;
+    return this.sessions();
+  }
   private sessions(): vscode.AuthenticationSession[] {
     return this.status.state === 'signedIn' ? [{ id: 'groundhog-cli', accessToken: '', account: { id: this.status.workspace ?? 'groundhog', label: this.status.workspace ?? 'Groundhog' }, scopes: [] }] : [];
   }
@@ -36,6 +42,8 @@ export class GroundhogAuthentication implements vscode.AuthenticationProvider, v
         if (event.added?.[0]) { finish(); resolve(event.added[0]); }
       });
       this.cancelWait = () => { finish(); reject(new vscode.CancellationError()); };
+      // An auth notification may have arrived after the awaited status read.
+      const current = this.sessions()[0]; if (current) { finish(); resolve(current); }
     });
   }
   async removeSession(): Promise<void> { await this.backend.request('auth/logout', {}); }

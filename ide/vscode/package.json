@@ -99,6 +99,10 @@
       {
         "command": "groundhog.requests",
         "title": "Groundhog: Inspect requests"
+      },
+      {
+        "command": "groundhog.rotateKey",
+        "title": "Groundhog: Rotate connection key"
       }
     ],
     "viewsContainers": {
@@ -151,6 +155,16 @@
           "type": "boolean",
           "default": false,
           "description": "Stop agents started by debugging after the last related session ends. Existing agents are preserved."
+        },
+        "groundhog.notifyOnDisconnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when a tunnel disconnects."
+        },
+        "groundhog.notifyOn5xx": {
+          "type": "boolean",
+          "default": false,
+          "description": "Notify on the first server error after five quiet minutes."
         }
       }
     },
@@ -208,6 +222,10 @@
         {
           "command": "groundhog.requests",
           "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.rotateKey",
+          "when": "view == groundhog.tunnels && viewItem =~ /local/ && !(viewItem =~ /aspire/)"
         }
       ]
     },
@@ -222,6 +240,7 @@
     "@eslint/js": "^10.0.1",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.5",
+    "@types/qrcode": "^1.5.6",
     "@types/semver": "^7.8.0",
     "@types/vscode": "^1.95.0",
     "@vscode/test-electron": "^3.1.0",
@@ -229,12 +248,14 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.13.0",
     "jsdom": "^30.1.3",
+    "ovsx": "^1.3.0",
     "playwright-core": "^1.64.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.0",
     "vitest": "^5.0.5"
   },
   "dependencies": {
+    "qrcode": "^1.5.4",
     "semver": "^7.8.5",
     "vscode-jsonrpc": "^10.0.0"
   }
