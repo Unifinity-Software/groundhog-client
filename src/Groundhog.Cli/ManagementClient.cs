@@ -131,6 +131,21 @@ internal sealed class ManagementClient : IDisposable
         }
     }
 
+    internal async Task<WorkspaceEventStream> OpenWorkspaceEventStreamAsync(string workspace, CancellationToken cancellation)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/w/{Uri.EscapeDataString(workspace)}/events");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+        try
+        {
+            ThrowIfFailed(response);
+            if (response.Content.Headers.ContentType?.MediaType != "text/event-stream")
+            { throw new ManagementException("Workspace events are not enabled.", HttpStatusCode.NotFound); }
+            return new(response, await response.Content.ReadAsStreamAsync(cancellation));
+        }
+        catch { response.Dispose(); throw; }
+    }
+
     private static void ThrowIfFailed(HttpResponseMessage response)
     {
         if (response.IsSuccessStatusCode)

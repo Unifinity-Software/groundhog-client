@@ -1,0 +1,498 @@
+using System.Collections.Concurrent;
+using System.Net;
+using System.Text.Json;
+using Groundhog.Agent;
+using Groundhog.Protocol;
+using StreamJsonRpc;
+
+namespace Groundhog.Cli.Ide;
+
+internal sealed record IdeAuth(string State, string? Workspace = null, DateTimeOffset? ExpiresAt = null);
+internal sealed record IdeAgent(string Name, string Target, string? Url, string State, string Source, int ProcessId);
+internal sealed record IdeTunnel(string Workspace, string Name, string Url, string State, string[] Actions, bool HasKey,
+    string Location);
+internal sealed record IdeRequest(string RequestId, DateTimeOffset Completed, string Method, string Path, int StatusCode,
+    double DurationMs, string Source);
+internal sealed record IdeCheck(string Code, string Status, string Message);
+
+/// <summary>Credential-owning service layer used by the stdio backend and host adapters.</summary>
+internal sealed partial class IdeServices : IAsyncDisposable
+{
+    internal static readonly string[] Methods = ["initialize", "auth/status", "auth/login", "auth/logout", "workspaces/list",
+        "workspaces/use", "tunnels/list", "tunnels/create", "tunnels/rename", "tunnels/delete", "agents/start", "agents/stop",
+        "agents/restart", "keys/set", "requests/subscribe", "requests/unsubscribe", "doctor/run", "requests/detail",
+        "requests/replay", "requests/exportHttp", "captureBodies/set", "keys/rotateWithoutDowntime"];
+    private static readonly object Empty = new { };
+    private readonly string _directory;
+    private readonly CredentialStore _credentials;
+    private readonly Func<string, string?, ManagementClient> _client;
+    private readonly TimeProvider _time;
+    private readonly Func<SessionRegistration[]> _registrations;
+    private readonly CancellationTokenSource _stop = new();
+    private readonly SemaphoreSlim _mutations = new(1, 1);
+    private readonly ConcurrentDictionary<string, Subscription> _subscriptions = new();
+    private readonly SemaphoreSlim _subscriptionSlots = new(16, 16);
+    private readonly List<Task> _background = [];
+    private CancellationTokenSource? _login;
+    private CancellationTokenSource? _workspaceEvents;
+    private bool _workspaceEventsSupported;
+    private bool _initialized;
+    private string? _lastAuth;
+    private string? _lastTunnels;
+    private string? _lastAgents;
+    private readonly List<string> _capabilities = ["deviceLogin", "localAgents", "liveRequests"];
+    internal Func<string, object, Task> Notify { get; set; } = (_, _) => Task.CompletedTask;
+
+    internal IdeServices(string? directory = null, Func<string, string?, ManagementClient>? client = null,
+        TimeProvider? time = null, Func<SessionRegistration[]>? registrations = null)
+    {
+        _directory = directory ?? ProfileStore.DefaultDirectory;
+        _credentials = new(_directory);
+        _client = client ?? ((relay, token) => new(relay, token));
+        _time = time ?? TimeProvider.System;
+        _registrations = registrations ?? LocalSessions.Registrations;
+    }
+
+    internal async Task<object> InvokeAsync(string method, JsonElement p, CancellationToken cancellation)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellation, _stop.Token);
+        var ct = linked.Token;
+        try
+        {
+            if (p.ValueKind is not (JsonValueKind.Object or JsonValueKind.Undefined or JsonValueKind.Null))
+            { throw Fault(-32602, "invalidParams", "Parameters must be an object."); }
+            if (method == "initialize") { return await InitializeAsync(p, ct); }
+            if (!_initialized) { throw Fault(-32000, "notInitialized", "Initialize the backend first."); }
+            if (method is "auth/status") { return Auth(); }
+            if (method == "requests/unsubscribe") { return await UnsubscribeAsync(Required(p, "subscriptionId")); }
+            if (method == "auth/login") { return await LoginAsync(ct); }
+            if (method is "requests/detail" or "requests/replay" or "requests/exportHttp" or "captureBodies/set" or "keys/rotateWithoutDowntime")
+            { throw Fault(-32014, "featureNotEnabled", "This backend does not support this feature."); }
+            if (method == "doctor/run") { return await DoctorAsync(p, ct); }
+            if (method == "requests/subscribe") { return await SubscribeAsync(p, ct); }
+            // Serialize account/key mutations so two overlapping UI operations cannot overwrite saved keys.
+            await _mutations.WaitAsync(ct);
+            try { return await AccountMethodAsync(method, p, ct); }
+            finally { _mutations.Release(); }
+        }
+        catch (LocalRpcException) { throw; }
+        catch (OperationCanceledException) { throw; }
+        catch (ManagementException ex) { throw FromManagement(ex); }
+        catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidOperationException or JsonException)
+        { throw Fault(-32602, "invalidParams", "The supplied parameters or stored configuration are invalid."); }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException
+            or System.Security.Cryptography.CryptographicException)
+        { throw Fault(-32015, "relayUnreachable", "The service or local configuration is unavailable."); }
+    }
+
+    private async Task<object> InitializeAsync(JsonElement p, CancellationToken ct)
+    {
+        if (_initialized) { throw Fault(-32000, "notInitialized", "The backend is already initialized."); }
+        _ = Required(p, "clientVersion");
+        if (!p.TryGetProperty("protocolVersions", out var versions) || versions.ValueKind != JsonValueKind.Array
+            || !versions.EnumerateArray().Any(v => v.TryGetInt32(out var version) && version == 1))
+        {
+            throw new LocalRpcException("No supported protocol version.")
+            { ErrorCode = -32001, ErrorData = new { kind = "unsupportedVersion", supportedVersions = new[] { 1 } } };
+        }
+        // Optional service-info discovery must not prevent a signed-out or offline IDE from starting.
+        try
+        {
+            var session = _credentials.Read();
+            using var client = _client(session?.Relay ?? GroundhogService.DefaultRelayAddress, session?.Token);
+            var info = await client.SendAsync<JsonElement>(HttpMethod.Get, "/api/service-info", null, ct);
+            if (info.TryGetProperty("capabilities", out var caps) && caps.ValueKind == JsonValueKind.Array)
+            {
+                _workspaceEventsSupported = caps.EnumerateArray().Any(c => c.ValueKind == JsonValueKind.String && c.GetString() == "workspaceEvents");
+                if (_workspaceEventsSupported) { _capabilities.Add("workspaceEvents"); }
+            }
+        }
+        catch (Exception ex) when (ex is ManagementException or HttpRequestException or TaskCanceledException or JsonException) { ct.ThrowIfCancellationRequested(); }
+        _initialized = true;
+        _lastAuth = JsonSerializer.Serialize(Auth());
+        Track(PollAsync());
+        Track(PollRemoteAsync());
+        return new { protocolVersion = 1, cliVersion = UpdateCommands.Version, capabilities = _capabilities };
+    }
+
+    private IdeAuth Auth()
+    {
+        var session = _credentials.Read();
+        return session is null ? new("signedOut") : new(session.Expires <= _time.GetUtcNow() ? "expired" : "signedIn", session.Workspace, session.Expires);
+    }
+
+    private LoginSession Session()
+    {
+        var session = _credentials.Read() ?? throw Fault(-32010, "signedOut", "Sign in to Groundhog first.");
+        if (session.Expires <= _time.GetUtcNow()) { throw Fault(-32011, "sessionExpired", "Your Groundhog sign-in has expired."); }
+        return session;
+    }
+
+    private async Task<object> AccountMethodAsync(string method, JsonElement p, CancellationToken ct)
+    {
+        if (method == "auth/logout")
+        {
+            _login?.Cancel();
+            var saved = _credentials.Read();
+            try
+            {
+                if (saved is not null)
+                {
+                    using var revoke = _client(saved.Relay, saved.Token);
+                    await revoke.SendAsync<object>(HttpMethod.Post, "/api/cli/logout", null, ct);
+                }
+            }
+            catch (Exception ex) when (ex is ManagementException or HttpRequestException or TaskCanceledException) { }
+            finally { _credentials.Delete(); }
+            foreach (var id in _subscriptions.Keys) { await UnsubscribeAsync(id); }
+            await EmitAuthAsync();
+            return Empty;
+        }
+        var session = Session();
+        using var client = _client(session.Relay, session.Token);
+        if (method is "workspaces/list" or "workspaces/use")
+        {
+            var account = await client.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, ct);
+            if (method == "workspaces/list") { return new { workspaces = account.Workspaces, selected = session.Workspace }; }
+            var workspace = Required(p, "workspace");
+            if (!account.Workspaces.Any(w => w.Slug == workspace)) { throw Fault(-32013, "permissionDenied", "This workspace is not accessible."); }
+            _credentials.Save(session with { Workspace = workspace });
+            await EmitAuthAsync();
+            return new { workspace };
+        }
+        var slug = Workspace(p, session);
+        var name = method == "tunnels/list" ? null : Name(p);
+        var path = name is null ? $"/api/w/{Uri.EscapeDataString(slug)}/tunnels" : ManagementClient.TunnelPath(slug, name);
+        if (method == "tunnels/list")
+        {
+            var tunnels = await client.SendAsync<TunnelInfo[]>(HttpMethod.Get, path, null, ct);
+            var agents = await AgentsAsync(ct);
+            return new { tunnels = tunnels.Select(t => Tunnel(slug, t, session, agents)).ToArray(), agents };
+        }
+        if (method is "agents/start" or "agents/stop" or "agents/restart") { return await AgentAsync(method, p, session, slug, name!, ct); }
+        if (method == "keys/set")
+        {
+            var key = Required(p, "key");
+            if (!ConnectionKey.IsWellFormed(key)) { throw Fault(-32602, "invalidParams", "A connection key must be 43 base64url characters."); }
+            var account = await client.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, ct);
+            if (!account.Workspaces.Any(w => w.Slug == slug)) { throw Fault(-32013, "permissionDenied", "This workspace is not accessible."); }
+            session.TunnelKeys[RemoteCommands.KeyId(slug, name!)] = key;
+            _credentials.Save(session);
+            await Notify("tunnels/changed", new { workspace = slug });
+            return Empty;
+        }
+        object result;
+        switch (method)
+        {
+            case "tunnels/create":
+                var created = await client.SendAsync<TunnelCreated>(HttpMethod.Post, path[..path.LastIndexOf('/')], new { Name = name }, ct);
+                session.TunnelKeys[RemoteCommands.KeyId(slug, created.Tunnel.Name)] = created.ConnectionKey;
+                _credentials.Save(session);
+                result = Tunnel(slug, created.Tunnel, session, []);
+                break;
+            case "tunnels/rename":
+                Confirm(p);
+                var newName = Required(p, "newName");
+                if (!TunnelName.IsValid(newName)) { throw Fault(-32602, "invalidParams", "Invalid tunnel name."); }
+                var renamed = await client.SendAsync<TunnelInfo>(HttpMethod.Patch, path, new { Name = newName }, ct);
+                if (session.TunnelKeys.Remove(RemoteCommands.KeyId(slug, name!), out var saved))
+                { session.TunnelKeys[RemoteCommands.KeyId(slug, renamed.Name)] = saved; _credentials.Save(session); }
+                result = Tunnel(slug, renamed, session, []);
+                break;
+            case "tunnels/delete":
+                Confirm(p);
+                await client.SendAsync<object>(HttpMethod.Delete, path, null, ct);
+                session.TunnelKeys.Remove(RemoteCommands.KeyId(slug, name!)); _credentials.Save(session);
+                result = Empty;
+                break;
+            default: throw Fault(-32601, "methodNotFound", "Method not found.");
+        }
+        await Notify("tunnels/changed", new { workspace = slug });
+        return result;
+    }
+
+    private static IdeTunnel Tunnel(string workspace, TunnelInfo t, LoginSession session, IdeAgent[] agents) =>
+        new(workspace, t.Name, SafePublicUrl(t.Url), t.State, t.Actions, session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, t.Name)),
+            agents.Any(a => a.Name == t.Name) ? "local" : t.State.Equals("connected", StringComparison.OrdinalIgnoreCase) ? "remote" : "offline");
+
+    private async Task<object> LoginAsync(CancellationToken ct)
+    {
+        _login?.Cancel();
+        _login?.Dispose();
+        _login = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        var relay = GroundhogService.DefaultRelayAddress;
+        using var client = _client(relay, null);
+        var auth = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device", new { }, ct);
+        if (!Uri.TryCreate(auth.VerificationUri, UriKind.Absolute, out var verification)
+            || verification.GetLeftPart(UriPartial.Authority) != relay.TrimEnd('/') || verification.AbsolutePath != "/cli-login"
+            || verification.UserInfo.Length > 0 || auth.ExpiresIn is < 1 or > 600 || auth.Interval is < 1 or > 30
+            || string.IsNullOrWhiteSpace(auth.UserCode) || auth.UserCode.Any(char.IsControl))
+        { throw Fault(-32015, "relayUnreachable", "The service returned an invalid sign-in challenge."); }
+        var expires = _time.GetUtcNow().AddSeconds(auth.ExpiresIn);
+        Track(CompleteLoginAsync(relay, auth, expires, _login.Token));
+        return new { userCode = auth.UserCode, verificationUri = verification.ToString(), expiresAt = expires };
+    }
+
+    private async Task CompleteLoginAsync(string relay, DeviceAuthorization auth, DateTimeOffset expires, CancellationToken ct)
+    {
+        try
+        {
+            using var client = _client(relay, null);
+            while (_time.GetUtcNow() < expires)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(auth.Interval), _time, ct);
+                var grant = await client.SendAsync<DeviceToken>(HttpMethod.Post, "/api/cli/token", new { auth.DeviceCode }, ct);
+                if (grant.State == "pending") { continue; }
+                if (grant.State != "approved" || grant.AccessToken is null || grant.ExpiresIn is < 1 or > 28800) { break; }
+                using var signed = _client(relay, grant.AccessToken);
+                var account = await signed.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, ct);
+                await _mutations.WaitAsync(ct);
+                try
+                {
+                    ct.ThrowIfCancellationRequested();
+                    // Preserve saved keys when renewing an existing login for the same relay.
+                    var old = _credentials.Read();
+                    _credentials.Save(new(relay, grant.AccessToken, _time.GetUtcNow().AddSeconds(grant.ExpiresIn),
+                        old?.Workspace ?? (account.Workspaces.Length == 1 ? account.Workspaces[0].Slug : null),
+                        old?.Relay == relay ? old.TunnelKeys : new()));
+                }
+                finally { _mutations.Release(); }
+                await EmitAuthAsync();
+                return;
+            }
+            await Notify("auth/changed", new IdeAuth("expired"));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is ManagementException or HttpRequestException or IOException)
+        { await Notify("auth/changed", new IdeAuth("signedOut")); }
+    }
+
+    private async Task<object> AgentAsync(string method, JsonElement p, LoginSession session, string workspace, string name, CancellationToken ct)
+    {
+        var registrations = _registrations().Where(r => r.Name == name).ToArray();
+        var responsive = new List<(SessionRegistration Registration, SessionSnapshot Snapshot)>();
+        foreach (var registration in registrations)
+        {
+            if (await LocalSessions.QueryAsync(registration, false, ct) is { } snapshot) { responsive.Add((registration, snapshot)); }
+        }
+        if (responsive.Count > 1) { throw Fault(-32017, "conflict", "Multiple local agents match this tunnel."); }
+        if (responsive.Any(r => Agent(r.Registration, r.Snapshot).Source == "aspire"))
+        { throw Fault(-32013, "permissionDenied", "This agent is managed by an Aspire AppHost. Use its dashboard."); }
+        if (method == "agents/stop")
+        {
+            foreach (var r in responsive) { await LocalSessions.QueryAsync(r.Registration, true, ct); }
+            await Notify("agents/changed", new { agents = await AgentsAsync(ct) });
+            return Empty;
+        }
+        var target = Target(p);
+        if (method == "agents/start" && responsive.Count == 1)
+        {
+            var existing = Agent(responsive[0].Registration, responsive[0].Snapshot);
+            if (new Uri(existing.Target) != target) { throw Fault(-32017, "conflict", "The local agent has a different target."); }
+            return existing;
+        }
+        if (!session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, name)))
+        { throw Fault(-32012, "noConnectionKey", "No connection key is saved for this tunnel."); }
+        new ProfileStore(_directory).Save(new(name, target.ToString(), session.Relay));
+        var code = await AgentLifecycle.RunAsync([method == "agents/start" ? "start" : "restart", name], TextWriter.Null, TextWriter.Null, ct);
+        if (code != 0) { throw Fault(-32017, "conflict", "The local agent could not start. Run groundhog doctor."); }
+        var agents = await AgentsAsync(ct);
+        await Notify("agents/changed", new { agents });
+        return agents.SingleOrDefault(a => a.Name == name) ?? throw Fault(-32018, "notFound", "The local agent stopped before it could be observed.");
+    }
+
+    private async Task<IdeAgent[]> AgentsAsync(CancellationToken ct)
+    {
+        var agents = new List<IdeAgent>();
+        foreach (var r in _registrations())
+        {
+            if (await LocalSessions.QueryAsync(r, false, ct) is { } s) { agents.Add(Agent(r, s)); }
+        }
+        return agents.ToArray();
+    }
+
+    private static IdeAgent Agent(SessionRegistration r, SessionSnapshot s) =>
+        new(s.Name, s.Target, s.PublicAddress is null ? null : SafePublicUrl(s.PublicAddress), s.State,
+            r.Host == "Aspire" ? "aspire" : r.Host == "Agent" ? "agent" : "cli", r.ProcessId);
+
+    private async Task<object> DoctorAsync(JsonElement p, CancellationToken ct)
+    {
+        var target = Target(p);
+        var name = Name(p);
+        var session = _credentials.Read();
+        var workspace = Optional(p, "workspace") ?? session?.Workspace;
+        var checks = new List<IdeCheck>
+        {
+            new("connectionKey", session is not null && workspace is not null && session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, name)) ? "passed" : "failed",
+                session is not null && workspace is not null && session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, name)) ? "A connection key is saved." : "Enter a connection key before hosting.")
+        };
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+        try
+        {
+            using var response = await http.SendAsync(new(HttpMethod.Head, target), HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            checks.Add(new("targetReachable", "passed", "Local target responded."));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        { ct.ThrowIfCancellationRequested(); checks.Add(new("targetReachable", "failed", "Local target did not respond or its certificate is not trusted.")); }
+        try
+        {
+            using var client = _client(session?.Relay ?? GroundhogService.DefaultRelayAddress, session?.Token);
+            _ = await client.SendAsync<JsonElement>(HttpMethod.Get, "/health", null, timeout.Token);
+            checks.Add(new("relayReachable", "passed", "Groundhog service responded."));
+        }
+        catch (Exception ex) when (ex is ManagementException or HttpRequestException or TaskCanceledException or JsonException)
+        { ct.ThrowIfCancellationRequested(); checks.Add(new("relayReachable", "failed", "Groundhog service did not respond successfully.")); }
+        return new { checks };
+    }
+
+    private async Task PollAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), _time, _stop.Token);
+                var auth = JsonSerializer.Serialize(Auth());
+                if (auth != _lastAuth) { await EmitAuthAsync(); }
+                var agents = await AgentsAsync(_stop.Token);
+                var agentState = JsonSerializer.Serialize(agents);
+                if (agentState != _lastAgents)
+                { _lastAgents = agentState; await Notify("agents/changed", new { agents }); }
+            }
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+    }
+
+    private async Task PollRemoteAsync()
+    {
+        try
+        {
+            while (true)
+            {
+                if (_workspaceEventsSupported && Auth() is { State: "signedIn", Workspace: not null })
+                {
+                    await FollowWorkspaceAsync();
+                    continue;
+                }
+                await Task.Delay(TimeSpan.FromSeconds(30), _time, _stop.Token);
+                if (Auth().State != "signedIn") { continue; }
+                var session = Session();
+                if (session.Workspace is not { } workspace) { continue; }
+                try
+                {
+                    using var client = _client(session.Relay, session.Token);
+                    var tunnels = await client.SendAsync<TunnelInfo[]>(HttpMethod.Get, $"/api/w/{Uri.EscapeDataString(workspace)}/tunnels", null, _stop.Token);
+                    var state = JsonSerializer.Serialize(tunnels.Select(t => Tunnel(workspace, t, session, [])));
+                    if (state != _lastTunnels) { _lastTunnels = state; await Notify("tunnels/changed", new { workspace }); }
+                }
+                catch (ManagementException ex) when (ex.Status == HttpStatusCode.Unauthorized)
+                { await Notify("auth/changed", new IdeAuth("expired", session.Workspace, session.Expires)); }
+                catch (Exception ex) when (ex is ManagementException or HttpRequestException or IOException) { }
+            }
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
+    }
+
+    private async Task EmitAuthAsync()
+    {
+        _workspaceEvents?.Cancel();
+        var status = Auth(); _lastAuth = JsonSerializer.Serialize(status);
+        await Notify("auth/changed", status);
+    }
+
+    private void Track(Task task) { lock (_background) { _background.Add(task); } }
+    private static string Workspace(JsonElement p, LoginSession session) => Optional(p, "workspace") ?? session.Workspace
+        ?? throw Fault(-32602, "invalidParams", "Choose a workspace.");
+    private static string Name(JsonElement p)
+    {
+        var name = Required(p, "name");
+        if (!TunnelName.IsValid(name)) { throw Fault(-32602, "invalidParams", "Invalid tunnel name."); }
+        return name;
+    }
+    private static Uri Target(JsonElement p)
+    {
+        var target = Required(p, "target");
+        if (!Uri.TryCreate(target, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")
+            || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0)
+        { throw Fault(-32602, "invalidParams", "Target must be an HTTP or HTTPS URL without credentials, query or fragment."); }
+        return uri;
+    }
+    private static string SafePublicUrl(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.UserInfo.Length > 0
+            || uri.Query.Length > 0 || uri.Fragment.Length > 0)
+        { throw Fault(-32015, "relayUnreachable", "The service returned an invalid public URL."); }
+        return uri.ToString().TrimEnd('/');
+    }
+    private static string Required(JsonElement p, string name) => Optional(p, name)
+        ?? throw Fault(-32602, "invalidParams", $"Parameter '{name}' is required.");
+    private static string? Optional(JsonElement p, string name) => p.ValueKind == JsonValueKind.Object
+        && p.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
+        ? value.GetString() : null;
+    private static void Confirm(JsonElement p)
+    {
+        if (!p.TryGetProperty("confirm", out var confirm) || confirm.ValueKind != JsonValueKind.True)
+        { throw Fault(-32013, "permissionDenied", "Confirm this operation before sending it to the backend."); }
+    }
+    internal static LocalRpcException Fault(int code, string kind, string message) =>
+        new(message) { ErrorCode = code, ErrorData = new { kind } };
+    private static LocalRpcException FromManagement(ManagementException ex) => ex.Status switch
+    {
+        HttpStatusCode.Unauthorized => Fault(-32011, "sessionExpired", "Your Groundhog sign-in has expired."),
+        HttpStatusCode.Forbidden => Fault(-32013, "permissionDenied", "This operation is not permitted."),
+        HttpStatusCode.NotFound => Fault(-32018, "notFound", "The requested resource is unavailable."),
+        HttpStatusCode.Conflict => Fault(-32017, "conflict", "The operation conflicts with existing state."),
+        HttpStatusCode.TooManyRequests => new("Rate limited. Wait before retrying.")
+            { ErrorCode = -32016, ErrorData = new { kind = "rateLimited", retryAfterSeconds = Math.Max(0, ex.RetryAfter?.TotalSeconds ?? 5) } },
+        _ => Fault(-32015, "relayUnreachable", "Groundhog service is unavailable.")
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        await _stop.CancelAsync();
+        _login?.Cancel();
+        foreach (var id in _subscriptions.Keys) { await UnsubscribeAsync(id); }
+        Task[] tasks; lock (_background) { tasks = _background.ToArray(); }
+        try { await Task.WhenAll(tasks); }
+        catch (Exception ex) when (ex is OperationCanceledException or ConnectionLostException or ObjectDisposedException or IOException) { }
+        _login?.Dispose(); _workspaceEvents?.Dispose(); _stop.Dispose(); _mutations.Dispose(); _subscriptionSlots.Dispose();
+    }
+
+    private async Task FollowWorkspaceAsync()
+    {
+        _workspaceEvents?.Dispose();
+        _workspaceEvents = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+        var ct = _workspaceEvents.Token;
+        var wait = TimeSpan.FromSeconds(1);
+        try
+        {
+            var session = Session();
+            if (session.Workspace is not { } workspace) { return; }
+            using var client = _client(session.Relay, session.Token);
+            await using var stream = await client.OpenWorkspaceEventStreamAsync(workspace, ct);
+            // Re-fetch after every connection so disconnect gaps do not leave stale explorer state.
+            await Notify("tunnels/changed", new { workspace });
+            await foreach (var name in stream.ReadAllAsync(ct))
+            {
+                _ = name;
+                await Notify("tunnels/changed", new { workspace });
+            }
+            wait = stream.Retry ?? wait;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+        catch (ManagementException ex) when (ex.Status == HttpStatusCode.NotFound)
+        { _workspaceEventsSupported = false; return; }
+        catch (ManagementException ex) when (ex.Status == HttpStatusCode.TooManyRequests)
+        { wait = ex.RetryAfter is { } after && after > TimeSpan.Zero ? after : TimeSpan.FromSeconds(5); }
+        catch (ManagementException ex) when (ex.Status == HttpStatusCode.Unauthorized)
+        {
+            var session = _credentials.Read();
+            await Notify("auth/changed", new IdeAuth("expired", session?.Workspace, session?.Expires));
+            wait = TimeSpan.FromSeconds(30);
+        }
+        catch (Exception ex) when (ex is ManagementException or HttpRequestException or IOException) { }
+        await Task.Delay(wait, _time, _stop.Token);
+    }
+}

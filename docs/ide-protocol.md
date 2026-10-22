@@ -50,10 +50,11 @@ Reserved methods return `-32014` until their capability is advertised; clients m
 
 A workspace is `{ "slug": "example", "name": "Example", "role": "owner" }`.
 A tunnel is `{ "workspace": "example", "name": "my-tunnel", "url": "https://my-tunnel.groundhog.unifinity.com",
-"state": "connected", "actions": ["rename", "delete"], "hasKey": true }`.
+"state": "connected", "actions": ["rename", "delete"], "hasKey": true, "location": "local" }`.
+`location` merges relay status and responsive local sessions: `local`, `remote` (connected elsewhere), or `offline`.
 Relay state/action strings are passed through; clients handle unknown values without offering unknown actions.
 An agent is `{ "name": "my-tunnel", "target": "http://localhost:5173", "url": "https://my-tunnel.groundhog.unifinity.com",
-"state": "Connected", "source": "cli", "processId": 1234 }`. `source` is `cli` or `aspire`; agent states follow
+"state": "Connected", "source": "cli", "processId": 1234 }`. `source` is `cli`, `aspire` or `agent` (library-hosted); agent states follow
 `GroundhogAgentState` (`Connecting`, `Connected`, `Reconnecting`, `Disconnected`, `Stopped`, `Failed`).
 Agent objects omit URL until known. A request summary is `{ "requestId": "request-1", "completed":
 "2026-10-22T12:00:00Z", "method": "GET", "path": "/webhooks", "statusCode": 200, "durationMs": 12,
@@ -163,8 +164,9 @@ against a different relay. It emits `tunnels/changed`. Agent mutations emit `age
 request stream. The backend sends future metadata through `requests/event`, and transport changes through
 `connection/event`. Request IDs deduplicate remote reconnect backfill; local IDs remain stable within a subscription.
 Re-subscribing creates an independent subscription. The backend bounds active subscriptions to 16 and retained
-metadata to 1,000 per subscription. Slow consumers must not grow an unbounded queue; terminate their subscription
-with a `connection/event` state `stopped` and safe reason, so the client can resubscribe and backfill.
+metadata to 1,000 per subscription. Delivery applies backpressure to the follower when stdout is blocked; it never
+creates an unbounded queue of notification tasks. EOF/unsubscribe cancels blocked delivery. Notifications may precede
+the subscribe response; clients buffer events until the returned subscription ID is registered.
 
 ```json
 {"jsonrpc":"2.0","id":15,"method":"requests/subscribe","params":{"workspace":"example","name":"my-tunnel","source":"auto"}}

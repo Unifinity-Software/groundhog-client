@@ -29,6 +29,10 @@ args = args.Where(arg => arg is not ("--no-interactive" or "--no-color" or "--no
 
 try
 {
+    if (args is ["ide", "--stdio"])
+    {
+        return await Groundhog.Cli.Ide.IdeServer.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(), stop.Token);
+    }
     if (checkForUpdates)
     {
         // A broken cache or unavailable NuGet feed must never prevent the requested command from running.
