@@ -26,6 +26,7 @@ async function main() {
     const output = execFileSync(executable, ['--version'], { env, windowsHide: true, encoding: 'utf8', timeout: 15000 });
     const version = output.match(/\b\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?/)?.[0];
     assert.ok(version && semver.gte(version, manifest.groundhog.minimumCliVersion), 'Bundle version supports this extension');
+    assert.ok(semver.eq(version, manifest.groundhog.bundledCliVersion), 'Bundle version exactly matches the release manifest');
     await childSession(['ide', '--stdio'], async child => {
       const connection = createMessageConnection(new StreamMessageReader(child.stdout), new StreamMessageWriter(child.stdin));
       connection.listen();

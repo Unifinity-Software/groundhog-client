@@ -1,0 +1,166 @@
+name: Release VS Code
+
+on:
+  push:
+    tags: ['vscode-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-vscode-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Require a tested master merge
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await exec.exec('git', ['merge-base', '--is-ancestor', context.sha, 'origin/master']);
+            const prs = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, { ...context.repo, commit_sha: context.sha });
+            const pr = prs.find(p => p.merged_at && p.base.ref === 'master' && p.merge_commit_sha === context.sha);
+            if (!pr) throw new Error('Tag a tested pull request merge commit on master.');
+            const { data } = await github.rest.actions.listWorkflowRuns({ ...context.repo, workflow_id: 'build.yml', head_sha: pr.head.sha, event: 'pull_request' });
+            const latest = data.workflow_runs.filter(run => run.head_sha === pr.head.sha).sort((a, b) => b.id - a.id)[0];
+            if (!latest || latest.status !== 'completed' || latest.conclusion !== 'success') throw new Error('The latest merged PR Build run must have passed.');
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ide/vscode/package-lock.json
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Validate release and full affected suites
+        working-directory: ide/vscode
+        run: |
+          npm ci --no-audit --no-fund
+          node scripts/check-release.mjs
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run package
+          xvfb-run -a npm run test:smoke
+          dotnet build ../../Groundhog.Client.slnx -c Release
+          dotnet test --solution ../../Groundhog.Client.slnx -c Release --no-build
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: release-vscode-check-failures
+          path: |
+            ide/vscode/.vscode-test/user-data/logs
+            ide/vscode/test-results
+          if-no-files-found: ignore
+
+  # Native hosts execute every bundled runtime. This matrix is release-only; PR CI stays one job.
+  bundle:
+    needs: verify
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - { os: windows-latest, rid: win-x64, target: win32-x64, suffix: .exe }
+          - { os: windows-11-arm, rid: win-arm64, target: win32-arm64, suffix: .exe }
+          - { os: ubuntu-latest, rid: linux-x64, target: linux-x64, suffix: '' }
+          - { os: ubuntu-24.04-arm, rid: linux-arm64, target: linux-arm64, suffix: '' }
+          - { os: macos-15-intel, rid: osx-x64, target: darwin-x64, suffix: '' }
+          - { os: macos-latest, rid: osx-arm64, target: darwin-arm64, suffix: '' }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ide/vscode/package-lock.json
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Publish supported self-contained backend
+        env:
+          RID: ${{ matrix.rid }}
+        run: |
+          dotnet publish src/Groundhog.Cli/Groundhog.Cli.csproj -c Release -r "$RID" \
+            -p:PublishProfileFullPath="$GITHUB_WORKSPACE/eng/ide-bundle.pubxml" -o artifacts/backend
+      - name: Package and exercise platform VSIX
+        working-directory: ide/vscode
+        env:
+          TARGET: ${{ matrix.target }}
+          SUFFIX: ${{ matrix.suffix }}
+        run: |
+          npm ci --no-audit --no-fund
+          mkdir -p backend
+          cp "../../artifacts/backend/Groundhog.Cli$SUFFIX" "backend/groundhog$SUFFIX"
+          node scripts/smoke-backend.cjs "backend/groundhog$SUFFIX"
+          extra=()
+          if node -e 'process.exit(require("./package.json").groundhog.preRelease === false ? 1 : 0)'; then extra+=(--pre-release); fi
+          npx vsce package --no-dependencies --target "$TARGET" "${extra[@]}" --out "groundhog-$TARGET.vsix"
+      - name: Exercise real bundled extension host
+        if: matrix.target == 'linux-x64'
+        working-directory: ide/vscode
+        env:
+          GROUNDHOG_SMOKE_REAL_BACKEND: '1'
+          GROUNDHOG_HOME: ${{ runner.temp }}/groundhog-bundle-home
+          DOTNET_BUNDLE_EXTRACT_BASE_DIR: ${{ runner.temp }}/groundhog-bundle-extract
+        run: xvfb-run -a npm run test:smoke
+      - uses: actions/upload-artifact@v6
+        with:
+          name: groundhog-${{ matrix.target }}
+          path: ide/vscode/groundhog-${{ matrix.target }}.vsix
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: groundhog-${{ matrix.target }}-failure-logs
+          path: |
+            ide/vscode/.vscode-test/user-data/logs
+            ide/vscode/test-results
+          if-no-files-found: ignore
+
+  publish:
+    needs: [verify, bundle]
+    runs-on: ubuntu-latest
+    environment: vscode
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ide/vscode/package-lock.json
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: groundhog-*
+          merge-multiple: true
+          path: ide/vscode/release-packages
+      - name: Publish the verified packages through trusted identities
+        working-directory: ide/vscode
+        shell: bash
+        run: |
+          npm ci --no-audit --no-fund
+          node scripts/check-release.mjs
+          node -e 'const fs=require("fs"); for(const target of ["win32-x64","win32-arm64","linux-x64","linux-arm64","darwin-x64","darwin-arm64"]) if(!fs.existsSync("release-packages/groundhog-"+target+".vsix")) throw new Error("Missing verified target: "+target)'
+          extra=()
+          if node -e 'process.exit(require("./package.json").groundhog.preRelease === false ? 1 : 0)'; then extra+=(--pre-release); fi
+          npx vsce publish --packagePath release-packages/*.vsix --oidc --skip-duplicate "${extra[@]}"
+          npx ovsx publish --packagePath release-packages/*.vsix --trusted-publishing --skip-duplicate "${extra[@]}"

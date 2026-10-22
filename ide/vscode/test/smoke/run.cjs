@@ -44,7 +44,7 @@ const { runTests } = require('@vscode/test-electron');
     await runTests({
       version: '1.143.0',
       extensionDevelopmentPath: path.resolve(__dirname, '../..'),
-      extensionTestsPath: path.resolve(__dirname, 'suite.cjs'),
+      extensionTestsPath: path.resolve(__dirname, process.env.GROUNDHOG_SMOKE_REAL_BACKEND ? 'real-suite.cjs' : 'suite.cjs'),
       launchArgs: ['--disable-extensions', '--disable-gpu', '--no-sandbox', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=' + debugPort],
       extensionTestsEnv: { GROUNDHOG_SMOKE_CAPTURE_URL: 'http://127.0.0.1:' + server.address().port + '/' + token }
     });

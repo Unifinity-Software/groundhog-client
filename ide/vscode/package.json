@@ -20,7 +20,9 @@
   ],
   "main": "./dist/extension.cjs",
   "groundhog": {
-    "minimumCliVersion": "1.3.0-preview.1"
+    "minimumCliVersion": "1.3.0-preview.1",
+    "bundledCliVersion": "1.3.0-preview.1",
+    "preRelease": true
   },
   "activationEvents": [
     "onView:groundhog.tunnels",
@@ -311,5 +313,11 @@
   "galleryBanner": {
     "color": "#101010",
     "theme": "dark"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Groundhog starts local processes and accesses project targets; trust the workspace to enable it."
+    }
   }
 }
