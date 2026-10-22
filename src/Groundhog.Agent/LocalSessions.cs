@@ -100,15 +100,16 @@ internal sealed class LocalSessions : IAsyncDisposable
 
     private async Task ServeAsync()
     {
-        // Keep the listener alive across requests. On Unix, disposing it also discards clients already queued
-        // behind the current request; Disconnect closes only the accepted connection.
-        await using var pipe = new NamedPipeServerStream(_pipe, PipeDirection.InOut, 1,
-            PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        // Unix disposal drops queued clients, so keep its listener alive and close only accepted sockets.
+        // Windows Disconnect discards unread response bytes; preserve its per-request handle disposal instead.
+        await using var listener = OperatingSystem.IsWindows() ? null : CreatePipe();
         while (!_shutdown.IsCancellationRequested)
         {
             var accepted = false;
+            NamedPipeServerStream? pipe = null;
             try
             {
+                pipe = listener ?? CreatePipe();
                 await pipe.WaitForConnectionAsync(_shutdown.Token);
                 accepted = true;
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
@@ -148,14 +149,21 @@ internal sealed class LocalSessions : IAsyncDisposable
             catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
             finally
             {
-                if (accepted)
+                if (listener is null)
                 {
-                    try { pipe.Disconnect(); }
+                    if (pipe is not null) { await pipe.DisposeAsync(); }
+                }
+                else if (accepted)
+                {
+                    try { pipe!.Disconnect(); }
                     catch (IOException) { }
                 }
             }
         }
     }
+
+    private NamedPipeServerStream CreatePipe() => new(_pipe, PipeDirection.InOut, 1,
+        PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
     public async ValueTask DisposeAsync()
     {

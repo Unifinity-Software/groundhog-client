@@ -6,7 +6,7 @@ namespace Groundhog.Agent.Tests;
 
 public sealed class LocalPipeTests
 {
-    [Fact]
+    [Fact(Timeout = 30_000)]
     public async Task Queued_snapshot_client_survives_previous_client_disconnect()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -25,6 +25,7 @@ public sealed class LocalPipeTests
         using var firstReader = new StreamReader(first, leaveOpen: true);
         var firstSnapshot = JsonSerializer.Deserialize<SessionSnapshot>((await firstReader.ReadLineAsync(ct))!);
         Assert.Equal(name, firstSnapshot!.Name);
+        await first.DisposeAsync();
         await connected;
         await queued.WriteAsync(Encoding.UTF8.GetBytes("snapshot\n"), ct);
         using var queuedReader = new StreamReader(queued, leaveOpen: true);

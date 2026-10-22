@@ -270,5 +270,6 @@ It contains no names, targets, credentials or traffic, is written atomically bef
 live discovery. Writes prune expired markers and retain at most 64; the IDE bounds its observed identities to 256.
 See the IDE contract for state transitions and terminal notice behavior.
 
-The current-user local session pipe keeps its listener alive for the lifetime of the agent. Each bounded request uses
-a separate accepted connection; disconnecting one client does not discard other clients queued for status snapshots.
+On Unix, the current-user local session pipe keeps its listener alive for the lifetime of the agent. Each bounded request
+uses a separate accepted connection, so closing one client does not discard queued status clients. Windows keeps its
+per-request handle lifecycle; both platforms retain the same two-second request deadline, including response I/O.
