@@ -183,7 +183,8 @@ groundhog whoami
 groundhog logout
 ```
 
-Logout revokes the saved remote credential and removes local credentials and saved connection keys.
+Logout revokes the saved remote credential and removes local credentials and saved connection keys. It also succeeds
+when that remote session has already expired or been revoked; other relay failures remain errors.
 If the relay cannot be reached, the local copy is still removed, but remote revocation cannot be confirmed;
 the credential expires at its original eight-hour deadline.
 

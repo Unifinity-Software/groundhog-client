@@ -105,6 +105,8 @@ internal sealed class SessionAuthentication(CredentialStore store,
                     session.RefreshSupported && session.RefreshToken is not null ? new { session.RefreshToken } : null, cancellation).ConfigureAwait(false);
             }
         }
+        catch (ManagementException ex) when (ex.Status == HttpStatusCode.Unauthorized)
+        { /* An expired or revoked remote session is already signed out. */ }
         finally { store.Write(null); }
         return true;
     }, cancellation);

@@ -76,6 +76,36 @@ public sealed class SessionAuthenticationTests : IDisposable
         Assert.Null(_store.Read());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Logout_succeeds_when_the_session_is_already_unauthorized_including_after_refresh_rejection(bool refreshRejected)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var relay = new RefreshHandler { LogoutStatus = HttpStatusCode.Unauthorized, RejectRefresh = refreshRejected };
+        var auth = Authentication(relay);
+        if (refreshRejected)
+        {
+            _store.Save(Session() with { Expires = s_now });
+            var rejected = await Assert.ThrowsAsync<ManagementException>(() => auth.GetSessionAsync(ct));
+            Assert.Equal(HttpStatusCode.Unauthorized, rejected.Status);
+            Assert.Null(_store.Read()!.RefreshToken);
+        }
+        await auth.LogoutAsync(ct);
+        Assert.Equal(refreshRejected ? null : "old-refresh", relay.LogoutRefresh);
+        Assert.Null(_store.Read());
+    }
+
+    [Fact]
+    public async Task Logout_reports_non_authorization_failures_while_still_removing_local_credentials()
+    {
+        var relay = new RefreshHandler { LogoutStatus = HttpStatusCode.InternalServerError };
+        var failure = await Assert.ThrowsAsync<ManagementException>(() => Authentication(relay).LogoutAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(HttpStatusCode.InternalServerError, failure.Status);
+        Assert.Equal("old-refresh", relay.LogoutRefresh);
+        Assert.Null(_store.Read());
+    }
+
     [Fact]
     public async Task Credential_mutation_waits_for_refresh_and_reads_its_successor()
     {
@@ -167,6 +197,8 @@ public sealed class SessionAuthenticationTests : IDisposable
         internal bool RejectAllManagement;
         internal bool SupportsRefresh = true;
         internal bool HoldRefresh;
+        internal bool RejectRefresh;
+        internal HttpStatusCode LogoutStatus = HttpStatusCode.NoContent;
         internal string? CounterFile;
         internal List<string> ManagementTokens { get; } = [];
         internal TaskCompletionSource RefreshStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -183,10 +215,12 @@ public sealed class SessionAuthenticationTests : IDisposable
                     RefreshStarted.TrySetResult();
                     if (HoldRefresh) { await ReleaseRefresh.Task.WaitAsync(cancellation); }
                     if (CounterFile is not null) { File.AppendAllText(CounterFile, "refresh\n"); }
+                    if (RejectRefresh) { return new(HttpStatusCode.Unauthorized); }
                     return Json(new { accessToken = "next-access", refreshToken = "next-refresh", expiresIn = 28800 });
                 case "/api/cli/logout":
-                    LogoutRefresh = (await request.Content!.ReadFromJsonAsync<JsonElement>(cancellation)).GetProperty("refreshToken").GetString();
-                    return new(HttpStatusCode.NoContent);
+                    LogoutRefresh = request.Content is null ? null
+                        : (await request.Content.ReadFromJsonAsync<JsonElement>(cancellation)).GetProperty("refreshToken").GetString();
+                    return new(LogoutStatus);
                 default:
                     ManagementTokens.Add(request.Headers.Authorization!.ToString());
                     return RejectAllManagement ? new(HttpStatusCode.Unauthorized) : Json(new { });
