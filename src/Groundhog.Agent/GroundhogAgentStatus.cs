@@ -99,4 +99,8 @@ public sealed record GroundhogCompletedRequest(
     int StatusCode,
     TimeSpan Duration,
     bool IsWebSocket,
-    string? Error);
+    string? Error)
+{
+    /// <summary>The relay's opaque request ID, when present, for looking up captured detail through management APIs.</summary>
+    public string? RequestId { get; init; }
+}

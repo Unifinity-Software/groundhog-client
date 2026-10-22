@@ -1,7 +1,7 @@
 namespace Groundhog.Agent;
 
 internal sealed record RequestRecord(DateTimeOffset Time, string Method, string Path, int Status,
-    double DurationMs, bool WebSocket, string? Error);
+    double DurationMs, bool WebSocket, string? Error, string? RequestId = null);
 internal sealed record SessionLog(DateTimeOffset Time, string State, string? Reason);
 internal sealed record SessionSnapshot(string Name, string Target, string? PublicAddress, string State,
     DateTimeOffset Started, long Requests, long Errors, int Reconnects, double? P95Ms,
@@ -58,7 +58,7 @@ internal sealed class SessionTelemetry(string name, Uri target, TimeProvider? cl
     internal void OnRequest(GroundhogCompletedRequest request)
     {
         Record(new(_clock.GetUtcNow(), request.Method, request.Path, request.StatusCode,
-            request.Duration.TotalMilliseconds, request.IsWebSocket, request.Error));
+            request.Duration.TotalMilliseconds, request.IsWebSocket, request.Error, request.RequestId));
     }
 
     internal void Record(RequestRecord request)

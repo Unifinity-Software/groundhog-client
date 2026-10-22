@@ -92,6 +92,9 @@ internal sealed class ProjectConfiguration
         if (!hasTarget && (profile?.Target ?? defaults?.Target) is { } target) { resolved.AddRange(["--target", target]); }
         if (!rest.Any(a => a == "--relay" || a.StartsWith("--relay=", StringComparison.Ordinal)) && profile?.Relay is { } relay)
         { resolved.AddRange(["--relay", relay]); }
+        var hasLocalTls = rest.Any(a => a is "--local-ca" or "--insecure-local" || a.StartsWith("--local-ca=", StringComparison.Ordinal));
+        if (!hasLocalTls && profile?.LocalCaFile is { } ca) { resolved.AddRange(["--local-ca", ca]); }
+        if (!hasLocalTls && profile?.InsecureLocal == true) { resolved.Add("--insecure-local"); }
         resolved.AddRange(rest);
         resolved.AddRange(access?.ToArguments() ?? []);
         return [.. resolved];

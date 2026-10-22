@@ -12,7 +12,7 @@ internal sealed record AccountInfo(string DisplayName, string Email, WorkspaceIn
 /// </summary>
 internal sealed record TunnelInfo(string Name, string Url, string State, DateTimeOffset Since,
     long RequestsLastMinute, long RequestsLastHour, long BytesInToday, long BytesOutToday, string[] Actions,
-    ConnectionKeyInfo[]? Keys = null);
+    ConnectionKeyInfo[]? Keys = null, bool CaptureBodies = false);
 
 /// <summary>
 /// One live connection key of a tunnel. The relay never returns the key itself, and the ID can't be worked out from the

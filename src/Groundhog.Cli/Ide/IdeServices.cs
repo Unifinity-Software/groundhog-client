@@ -10,7 +10,7 @@ namespace Groundhog.Cli.Ide;
 internal sealed record IdeAuth(string State, string? Workspace = null, DateTimeOffset? ExpiresAt = null);
 internal sealed record IdeAgent(string Name, string Target, string? Url, string State, string Source, int ProcessId);
 internal sealed record IdeTunnel(string Workspace, string Name, string Url, string State, string[] Actions, bool HasKey,
-    string Location, long RequestsLastMinute);
+    string Location, long RequestsLastMinute, bool CaptureBodies, bool CanCaptureBodies);
 internal sealed record IdeRequest(string RequestId, DateTimeOffset Completed, string Method, string Path, int StatusCode,
     double DurationMs, string Source);
 internal sealed record IdeCheck(string Code, string Status, string Message);
@@ -21,7 +21,8 @@ internal sealed partial class IdeServices : IAsyncDisposable
     internal static readonly string[] Methods = ["initialize", "auth/status", "auth/login", "auth/logout", "workspaces/list",
         "workspaces/use", "tunnels/list", "tunnels/create", "tunnels/rename", "tunnels/delete", "agents/start", "agents/stop",
         "agents/restart", "keys/set", "requests/subscribe", "requests/unsubscribe", "doctor/run", "requests/detail",
-        "requests/replay", "requests/exportHttp", "captureBodies/set", "keys/rotateWithoutDowntime"];
+        "requests/replay", "requests/exportHttp", "captureBodies/set", "keys/rotateWithoutDowntime",
+        "visitorAccess/get", "visitorAccess/set", "visitorAccess/createKey", "visitorAccess/deleteKey", "visitorAccess/handBack", "visitorAccess/saveKey"];
     private static readonly object Empty = new { };
     private readonly string _directory;
     private readonly CredentialStore _credentials;
@@ -42,7 +43,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private string? _lastAuth;
     private string? _lastTunnels;
     private string? _lastAgents;
-    private readonly List<string> _capabilities = ["deviceLogin", "localAgents", "liveRequests"];
+    private readonly List<string> _capabilities = ["deviceLogin", "localAgents", "liveRequests", "requestDetail", "requestReplay", "requestExportHttp", "captureBodies", "visitorAccess"];
     internal Func<string, object, Task> Notify { get; set; } = (_, _) => Task.CompletedTask;
 
     internal IdeServices(string? directory = null, Func<string, string?, ManagementClient>? client = null,
@@ -69,7 +70,9 @@ internal sealed partial class IdeServices : IAsyncDisposable
             if (method is "auth/status") { return Auth(); }
             if (method == "requests/unsubscribe") { return await UnsubscribeAsync(Required(p, "subscriptionId")); }
             if (method == "auth/login") { return await LoginAsync(ct); }
-            if (method is "requests/detail" or "requests/replay" or "requests/exportHttp" or "captureBodies/set" or "keys/rotateWithoutDowntime")
+            if (method is "requests/detail" or "requests/replay" or "requests/exportHttp" or "captureBodies/set")
+            { return await RequestMethodAsync(method, p, ct); }
+            if (method is "keys/rotateWithoutDowntime")
             { throw Fault(-32014, "featureNotEnabled", "This backend does not support this feature."); }
             if (method == "doctor/run") { return await DoctorAsync(p, ct); }
             if (method == "requests/subscribe") { return await SubscribeAsync(p, ct); }
@@ -170,6 +173,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
         var slug = Workspace(p, session);
         var name = method == "tunnels/list" ? null : Name(p);
         var path = name is null ? $"/api/w/{Uri.EscapeDataString(slug)}/tunnels" : ManagementClient.TunnelPath(slug, name);
+        if (method.StartsWith("visitorAccess/", StringComparison.Ordinal)) { return await VisitorAccessMethodAsync(method, p, client, slug, name!, ct); }
         if (method == "tunnels/list")
         {
             var tunnels = await client.SendAsync<TunnelInfo[]>(HttpMethod.Get, path, null, ct);
@@ -221,7 +225,8 @@ internal sealed partial class IdeServices : IAsyncDisposable
 
     private static IdeTunnel Tunnel(string workspace, TunnelInfo t, LoginSession session, IdeAgent[] agents) =>
         new(workspace, t.Name, SafePublicUrl(t.Url), t.State, t.Actions, session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, t.Name)),
-            agents.Any(a => a.Name == t.Name) ? "local" : t.State.Equals("connected", StringComparison.OrdinalIgnoreCase) ? "remote" : "offline", t.RequestsLastMinute);
+            agents.Any(a => a.Name == t.Name) ? "local" : t.State.Equals("connected", StringComparison.OrdinalIgnoreCase) ? "remote" : "offline", t.RequestsLastMinute,
+            t.CaptureBodies, t.Actions.Contains("captureBodies", StringComparer.Ordinal));
 
     private async Task<object> LoginAsync(CancellationToken ct)
     {
@@ -292,7 +297,26 @@ internal sealed partial class IdeServices : IAsyncDisposable
             await Notify("agents/changed", new { agents = await AgentsAsync(ct) });
             return Empty;
         }
-        var target = Target(p);
+        var projectDirectory = Optional(p, "projectDirectory") ?? Environment.CurrentDirectory;
+        if (!Path.IsPathFullyQualified(projectDirectory)) { throw Fault(-32602, "invalidParams", "Project directory must be an absolute path."); }
+        var profileStore = new ProfileStore(_directory);
+        var explicitTarget = Optional(p, "target");
+        var overrides = new List<string> { name };
+        if (explicitTarget is not null) { overrides.AddRange(["--target", explicitTarget]); }
+        if (Optional(p, "localCa") is { } localCa)
+        {
+            if (!Path.IsPathFullyQualified(localCa)) { throw Fault(-32602, "invalidParams", "Local CA must be an absolute file path."); }
+            overrides.AddRange(["--local-ca", localCa]);
+        }
+        var hostArguments = ProjectConfiguration.ResolveHostArguments([.. overrides], profileStore, projectDirectory);
+        var parsed = HostArguments.Parse(hostArguments, variable => variable == HostArguments.KeyVariable
+            ? session.TunnelKeys.GetValueOrDefault(RemoteCommands.KeyId(workspace, name)) : Environment.GetEnvironmentVariable(variable));
+        if (parsed.Arguments is null)
+        {
+            if (!session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, name))) { throw Fault(-32012, "noConnectionKey", "No connection key is saved for this tunnel."); }
+            throw Fault(-32602, "invalidParams", "The local target or project hosting settings are invalid.");
+        }
+        var target = parsed.Arguments.LocalTarget;
         if (method == "agents/start" && responsive.Count == 1)
         {
             var existing = Agent(responsive[0].Registration, responsive[0].Snapshot);
@@ -301,7 +325,8 @@ internal sealed partial class IdeServices : IAsyncDisposable
         }
         if (!session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, name)))
         { throw Fault(-32012, "noConnectionKey", "No connection key is saved for this tunnel."); }
-        new ProfileStore(_directory).Save(new(name, target.ToString(), session.Relay));
+        profileStore.Save(new(name, target.ToString(), session.Relay, parsed.Arguments.AccessFlags,
+            parsed.Arguments.LocalCaFile, parsed.Arguments.InsecureLocal));
         var code = await AgentLifecycle.RunAsync([method == "agents/start" ? "start" : "restart", name], TextWriter.Null, TextWriter.Null, ct);
         if (code != 0) { throw Fault(-32017, "conflict", "The local agent could not start. Run groundhog doctor."); }
         var agents = await AgentsAsync(ct);
@@ -336,19 +361,27 @@ internal sealed partial class IdeServices : IAsyncDisposable
         };
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(5));
-        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+        using var http = target.IsLoopback
+            ? new HttpClient(ReplayHandler(target, new ProfileStore(_directory).Read().SingleOrDefault(profile => profile.Name == name)))
+            : new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
         try
         {
             using var response = await http.SendAsync(new(HttpMethod.Head, target), HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             checks.Add(new("targetReachable", "passed", "Local target responded."));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        { ct.ThrowIfCancellationRequested(); checks.Add(new("targetReachable", "failed", "Local target did not respond or its certificate is not trusted.")); }
+        {
+            ct.ThrowIfCancellationRequested(); checks.Add(new("targetReachable", "failed", "Local target did not respond or its certificate is not trusted."));
+            if (ex is HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError })
+            { checks.Add(new("localCertificate", "failed", "The local HTTPS certificate is not trusted. Choose a local CA certificate.")); }
+        }
         try
         {
             using var client = _client(session?.Relay ?? GroundhogService.DefaultRelayAddress, session?.Token);
-            _ = await client.SendAsync<JsonElement>(HttpMethod.Get, "/health", null, timeout.Token);
+            var health = await client.SendAsync<HealthResponse>(HttpMethod.Get, GroundhogProtocol.HealthPath, null, timeout.Token);
             checks.Add(new("relayReachable", "passed", "Groundhog service responded."));
+            checks.Add(new("protocolVersion", health.Protocol.Contains(1) ? "passed" : "failed",
+                health.Protocol.Contains(1) ? "Relay supports protocol 1." : "The relay does not support protocol 1."));
         }
         catch (Exception ex) when (ex is ManagementException or HttpRequestException or TaskCanceledException or JsonException)
         { ct.ThrowIfCancellationRequested(); checks.Add(new("relayReachable", "failed", "Groundhog service did not respond successfully.")); }

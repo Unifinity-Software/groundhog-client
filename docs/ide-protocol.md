@@ -44,7 +44,9 @@ backend support. `refreshToken` and `workspaceEvents` additionally require relay
 refresh remote workspace/tunnel state every 30 seconds while initialized and signed in, and after mutations.
 Without `refreshToken`, expired credentials require sign-in again. Optional phase 2/3 capability names are
 `requestDetail`, `requestReplay`, `requestExportHttp`, `captureBodies`, `rotateWithoutDowntime` and `visitorAccess`.
-Reserved methods return `-32014` until their capability is advertised; clients must not infer support from CLI version.
+The implemented request-detail, capture and visitor-access methods are advertised by the backend; a relay that lacks
+an optional endpoint returns `-32014`. Reserved methods return `-32014` until their capability is advertised; clients
+must not infer support from CLI version.
 
 ## Shared objects and security
 
@@ -60,12 +62,14 @@ Agent objects omit URL until known. A request summary is `{ "requestId": "reques
 "2026-10-22T12:00:00Z", "method": "GET", "path": "/webhooks", "statusCode": 200, "durationMs": 12,
 "source": "local" }`; `source` is `local` or `remote`. IDs are opaque and may be synthesized for local metadata.
 
-Connection keys, visitor API keys, access tokens, refresh tokens and device codes never appear in responses,
+Connection keys, access tokens, refresh tokens and device codes never appear in responses,
 notifications, errors, logs or exported settings. `keys/set` accepts a connection key and never returns it.
 Tunnel creation and rotation save returned keys inside the backend and project only safe tunnel metadata.
 `hasKey` reveals presence only. Authentication status excludes the stored session object. Device *user* codes
 and the hosted verification URL are intended for display; the private device code stays inside the backend.
 Never serialize relay responses wholesale. Error messages are fixed, safe messages; never echo server error bodies.
+Visitor API keys appear only in the explicit one-time `visitorAccess/createKey` result. They never appear in list/get
+results, notifications, logs or diagnostics. The extension offers copy/save actions without retaining the value in settings.
 
 Stdio is an OS-user-local trust boundary, not a network endpoint. Extensions request workspace trust before starting
 agents or accessing project targets. They confirm destructive actions before sending rename/delete requests; the
@@ -156,6 +160,11 @@ Stop is idempotent. Start/restart fail safely if multiple responsive sessions ma
 but cannot be started/restarted/stopped through this protocol; the extension directs the user to the AppHost.
 `keys/set` validates the connection-key format and workspace membership before saving it; it never probes the key
 against a different relay. It emits `tunnels/changed`. Agent mutations emit `agents/changed`.
+Start/restart additionally accept `projectDirectory` (an absolute workspace directory) and `localCa` (an absolute
+certificate file). An omitted target is resolved from the saved profile and nearest `groundhog.json`. Explicit target
+and TLS options override the profile; profile values override the project defaults. Project visitor access rules remain
+effective when the IDE supplies a target. The merged settings, including local CA trust, are saved for background hosting
+and replay. Agent lifecycle mutations run serially so simultaneous debug sessions cannot spawn duplicate agents.
 
 ### Request subscriptions and doctor
 
@@ -175,6 +184,9 @@ the subscribe response; clients buffer events until the returned subscription ID
 {"jsonrpc":"2.0","id":16,"result":{}}
 ```
 
+The subscribe result additionally includes `source: "local"` or `source: "remote"`, even when its request list is empty.
+The remote snapshot uses the relay API's limit of 200; the local ring retains up to 1,000. Local records preserve the
+relay request ID when available. Older agents without it receive synthesized IDs and cannot fetch relay detail by that ID.
 Unsubscribe is idempotent and stops the follower/pipe poller. No events for that subscription are sent after the
 unsubscribe response. Request summaries contain metadata only; bodies/headers belong to phase 2.
 
@@ -237,6 +249,63 @@ Application errors contain a stable `data.kind`:
 Clients respect retry-after, do not retry destructive requests automatically and show sign-in for signedOut/expired.
 A 404 is `notFound` for resources; known optional endpoints returning 404 mean `featureNotEnabled`.
 
+## Request detail, capture, replay and export
+
+`requests/detail` fetches the relay's captured request and safe tunnel permissions. Relay request/response header arrays
+are projected into header maps. Body objects become text prefixes and truncation flags. Omitted or unsupported request
+bodies count as truncated so replay cannot silently send incomplete data. Detail text is bounded to 65,536 characters per
+body and 16,384 per header collection. Authorization, cookie, API-key and token headers are redacted, as are known saved
+credentials embedded in text. `captureBodies` and `canCaptureBodies` are also included on tunnel objects, so an empty
+request list can still show the toggle; permission follows the relay action `captureBodies`.
+
+```json
+{"jsonrpc":"2.0","id":18,"method":"requests/detail","params":{"workspace":"example","name":"my-tunnel","requestId":"request-1"}}
+{"jsonrpc":"2.0","id":18,"result":{"requestId":"request-1","method":"POST","path":"/webhooks","headers":{"Content-Type":"application/json","Webhook-Signature":"signature"},"body":"{\"value\":1}","truncated":false,"captureBodies":true,"canCaptureBodies":true,"responseHeaders":{"Content-Type":"application/json"},"responseBody":"{}","responseTruncated":false,"statusCode":202}}
+{"jsonrpc":"2.0","id":19,"method":"captureBodies/set","params":{"workspace":"example","name":"my-tunnel","enabled":true}}
+{"jsonrpc":"2.0","id":19,"result":{"enabled":true}}
+{"jsonrpc":"2.0","id":20,"method":"requests/replay","params":{"workspace":"example","name":"my-tunnel","requestId":"request-1","target":"http://localhost:5173","headers":{"Content-Type":"application/json"},"body":"{\"value\":2}","confirm":true}}
+{"jsonrpc":"2.0","id":20,"result":{"statusCode":202,"durationMs":12}}
+{"jsonrpc":"2.0","id":21,"method":"requests/exportHttp","params":{"workspace":"example","name":"my-tunnel","requestId":"request-1","target":"http://localhost:5173"}}
+{"jsonrpc":"2.0","id":21,"result":{"text":"POST http://localhost:5173/webhooks HTTP/1.1\nContent-Type: application/json\nWebhook-Signature: signature\n\n{\"value\":1}"}}
+```
+
+Replay requires `confirm: true` and a loopback HTTP(S) target. DNS results are checked and sockets connect only to the
+checked loopback addresses. It never follows redirects, uses proxy settings or forwards captured host/connection framing
+headers. Profile local CA/insecure settings are honored only for loopback TLS, and local CA trust still checks hostname
+and certificate validity. Both export and replay accept optional edited header maps and body text, including an empty
+body. Truncated captures cannot be replayed. Signature headers remain visible so the UI can warn about old webhook
+timestamps. The replay response contains only status and elapsed time. Optional response detail fields are absent/null
+when the relay did not capture them. The extension requires trusted workspaces and an explicit user replay gesture.
+
+The relay endpoints are `GET …/tunnels/<name>/requests/<requestId>` and `PUT …/tunnels/<name>/capture-bodies`
+with `{ "enabled": true }`. Capture changes are authorized by the relay and return featureNotEnabled on a missing API.
+
+## Visitor access
+
+The `visitorAccess` capability adds the following requests. A tunnel reference contains `workspace` and `name`.
+All changes require `confirm: true`. Policies use the shared visitor access validator before being sent to the relay.
+
+```json
+{"jsonrpc":"2.0","id":22,"method":"visitorAccess/get","params":{"workspace":"example","name":"my-tunnel"}}
+{"jsonrpc":"2.0","id":22,"result":{"default":{"allow":["members"]},"rules":[],"ipRanges":[],"apiKeys":[],"managedBy":"agent"}}
+{"jsonrpc":"2.0","id":23,"method":"visitorAccess/set","params":{"workspace":"example","name":"my-tunnel","default":{"allow":["members"]},"rules":[{"path":"/webhooks","allow":["anyone"]}],"ipRanges":[],"confirm":true}}
+{"jsonrpc":"2.0","id":23,"result":{"default":{"allow":["members"]},"rules":[{"path":"/webhooks","allow":["anyone"]}],"ipRanges":[],"apiKeys":[],"managedBy":"dashboard"}}
+{"jsonrpc":"2.0","id":24,"method":"visitorAccess/createKey","params":{"workspace":"example","name":"my-tunnel","label":"Webhook","confirm":true}}
+{"jsonrpc":"2.0","id":24,"result":{"id":"0123456789abcdef0123456789abcdef","name":"Webhook","created":"2026-10-22T12:00:00Z","key":"<one-time-visitor-api-key>"}}
+{"jsonrpc":"2.0","id":25,"method":"visitorAccess/deleteKey","params":{"workspace":"example","name":"my-tunnel","id":"0123456789abcdef0123456789abcdef","confirm":true}}
+{"jsonrpc":"2.0","id":25,"result":{}}
+{"jsonrpc":"2.0","id":26,"method":"visitorAccess/handBack","params":{"workspace":"example","name":"my-tunnel","confirm":true}}
+{"jsonrpc":"2.0","id":26,"result":{"default":{"allow":["members"]},"rules":[],"ipRanges":[],"apiKeys":[],"managedBy":"agent"}}
+{"jsonrpc":"2.0","id":27,"method":"visitorAccess/saveKey","params":{"workspace":"example","name":"my-tunnel","project":"/workspace/AppHost/AppHost.csproj","parameter":"groundhog-api-key","key":"<one-time-visitor-api-key>","confirm":true}}
+{"jsonrpc":"2.0","id":27,"result":{}}
+```
+
+`saveKey` requires an absolute .NET project path with an existing `UserSecretsId`; it writes
+`Parameters:groundhog-api-key` (or the supplied parameter) and `Parameters:groundhog-tunnel-name` to that project's user
+secrets. It never puts the key on a command line or writes it into the project. The key value is supplied only from the
+one-time creation result. `handBack` retains the stored rules while setting `managedBy` to `agent`, allowing future agent
+declarations to replace them. Missing visitor access endpoints return featureNotEnabled.
+
 ## Reserved methods and implementation ownership
 
 The following methods are reserved until their corresponding capability is advertised. Their eventual request/result
@@ -244,10 +313,6 @@ shapes must be documented here alongside implementation; phase 1 clients must ha
 
 | Method | Capability | Owner issue |
 | --- | --- | --- |
-| `requests/detail` | requestDetail | #46 |
-| `requests/replay` | requestReplay | #46 |
-| `requests/exportHttp` | requestExportHttp | #46 |
-| `captureBodies/set` | captureBodies | #46 |
 | `keys/rotateWithoutDowntime` | rotateWithoutDowntime | #47 |
 
 The contract was checked against the following existing implementation boundaries; #39 adds the stdio transport,

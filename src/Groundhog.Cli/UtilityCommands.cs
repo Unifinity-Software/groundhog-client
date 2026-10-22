@@ -29,7 +29,7 @@ internal static class UtilityCommands
 
         if (command == "profile")
         {
-            options.RequireKnown("--target", "--relay", "--output");
+            options.RequireKnown("--target", "--relay", "--output", "--local-ca", "--insecure-local");
             var store = new ProfileStore(ProfileStore.DefaultDirectory);
             if (options.Positional is ["list"])
             {
@@ -49,7 +49,8 @@ internal static class UtilityCommands
             {
                 // A background host runs elsewhere, so the access file is saved as a full path.
                 access = access?.AccessFile is { } file ? access with { AccessFile = Path.GetFullPath(file) } : access;
-                store.Save(new(name, options.Get("--target") ?? throw new ArgumentException("Target required."), options.Get("--relay"), access));
+                store.Save(new(name, options.Get("--target") ?? throw new ArgumentException("Target required."), options.Get("--relay"), access,
+                    options.Get("--local-ca") is { } ca ? Path.GetFullPath(ca) : null, options.Has("--insecure-local")));
                 output.WriteLine($"Profile saved (connection keys and API keys are never stored). Host it with: groundhog host {name}"); return 0;
             }
             if (options.Positional is ["delete", var removed])
@@ -359,7 +360,7 @@ internal sealed class Options
             var split = args[i].Split('=', 2);
             var key = split[0];
             string? value = null;
-            if (key is "--watch" or "--follow" or "--yes" or "--remote" or "--agent-managed")
+            if (key is "--watch" or "--follow" or "--yes" or "--remote" or "--agent-managed" or "--insecure-local")
             {
                 if (split.Length != 1)
                 {

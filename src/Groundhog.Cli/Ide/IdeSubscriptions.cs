@@ -66,7 +66,7 @@ internal sealed partial class IdeServices
         subscription.Running = local is not null
             ? FollowLocalAsync(id, subscription, local, initial)
             : FollowRemoteAsync(id, subscription, client!, workspace, name, recent);
-        return new { subscriptionId = id, requests = initial };
+        return new { subscriptionId = id, requests = initial, source = local is not null ? "local" : "remote" };
     }
 
     private async Task FollowLocalAsync(string id, Subscription subscription, SessionRegistration registration, IdeRequest[] initial)
@@ -146,8 +146,8 @@ internal sealed partial class IdeServices
     }
 
     private static string SearchPath(string workspace, string name) =>
-        $"/api/w/{Uri.EscapeDataString(workspace)}/requests?tunnel={Uri.EscapeDataString(name)}&limit=1000";
-    private static IdeRequest LocalRequest(RequestRecord request) => new(StableId(request.Time, request.Method, request.Path,
+        $"/api/w/{Uri.EscapeDataString(workspace)}/requests?tunnel={Uri.EscapeDataString(name)}&limit=200";
+    private static IdeRequest LocalRequest(RequestRecord request) => new(request.RequestId ?? StableId(request.Time, request.Method, request.Path,
         request.Status, request.DurationMs), request.Time, request.Method, request.Path, request.Status, request.DurationMs, "local");
     private static IdeRequest RemoteRequest(RemoteRequest request) => new(request.RequestId
         ?? StableId(request.Completed, request.Method, request.Path, request.StatusCode, request.DurationMs),

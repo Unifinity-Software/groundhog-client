@@ -4,6 +4,10 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using System.Net.Sockets;
+using System.Net.Security;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using Groundhog.Agent;
 using Groundhog.Cli.Ide;
 using Groundhog.Protocol;
@@ -14,6 +18,108 @@ namespace Groundhog.Cli.Tests;
 
 public sealed class IdeBackendTests
 {
+    [Fact]
+    public async Task Visitor_access_validates_policies_and_returns_API_key_only_once_on_creation()
+    {
+        await using var fixture = new Fixture(); await fixture.InitializeAsync();
+        var access = await fixture.CallAsync("visitorAccess/get", new { workspace = "example", name = "my-tunnel" });
+        Assert.Equal("agent", access.GetProperty("managedBy").GetString());
+        await fixture.CallAsync("visitorAccess/set", new { workspace = "example", name = "my-tunnel", @default = new { allow = new[] { "members" } }, rules = Array.Empty<object>(), ipRanges = Array.Empty<string>(), confirm = true });
+        var created = await fixture.CallAsync("visitorAccess/createKey", new { workspace = "example", name = "my-tunnel", label = "Webhook", confirm = true });
+        Assert.Equal("one-time-visitor-key", created.GetProperty("key").GetString());
+        var length = fixture.Output.Length;
+        await fixture.CallAsync("visitorAccess/get", new { workspace = "example", name = "my-tunnel" });
+        await fixture.CallAsync("visitorAccess/handBack", new { workspace = "example", name = "my-tunnel", confirm = true });
+        await fixture.CallAsync("visitorAccess/deleteKey", new { workspace = "example", name = "my-tunnel", id = "0123456789abcdef0123456789abcdef", confirm = true });
+        Assert.DoesNotContain("one-time-visitor-key", fixture.Output[length..], StringComparison.Ordinal);
+        Assert.Equal(1, fixture.Output.Split("one-time-visitor-key", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void Replay_uses_saved_local_CA_and_insecure_settings_without_disabling_hostname_checks()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "groundhog-replay-ca-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            using var signing = ECDsa.Create();
+            var request = new CertificateRequest("CN=localhost", signing, HashAlgorithmName.SHA256);
+            using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+            var file = Path.Combine(directory, "local-ca.pem"); File.WriteAllText(file, certificate.ExportCertificatePem());
+            var profile = new TunnelProfile("my-tunnel", "https://localhost:5173", LocalCaFile: file);
+            new ProfileStore(directory).Save(profile);
+            var saved = Assert.Single(new ProfileStore(directory).Read());
+            using var trusted = IdeServices.ReplayHandler(new Uri(saved.Target), saved);
+            var validate = Assert.IsType<RemoteCertificateValidationCallback>(trusted.SslOptions.RemoteCertificateValidationCallback);
+            Assert.True(validate(this, certificate, null, SslPolicyErrors.RemoteCertificateChainErrors));
+            Assert.False(validate(this, certificate, null, SslPolicyErrors.RemoteCertificateNameMismatch));
+            using var insecure = IdeServices.ReplayHandler(new Uri(saved.Target), saved with { LocalCaFile = null, InsecureLocal = true });
+            Assert.True(insecure.SslOptions.RemoteCertificateValidationCallback!(this, certificate, null, SslPolicyErrors.RemoteCertificateChainErrors));
+            var resolved = ProjectConfiguration.ResolveHostArguments(["my-tunnel"], new(directory), directory);
+            Assert.Contains("--local-ca", resolved); Assert.Contains(file, resolved);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task Captured_detail_and_http_export_project_relay_arrays_and_redact_credentials()
+    {
+        await using var fixture = new Fixture(); await fixture.InitializeAsync();
+        var detail = await fixture.CallAsync("requests/detail", new { workspace = "example", name = "my-tunnel", requestId = "request-1" });
+        Assert.True(detail.GetProperty("captureBodies").GetBoolean());
+        Assert.True(detail.GetProperty("canCaptureBodies").GetBoolean());
+        Assert.Equal("[redacted]", detail.GetProperty("headers").GetProperty("Authorization").GetString());
+        Assert.Equal("signature", detail.GetProperty("headers").GetProperty("Webhook-Signature").GetString());
+        var exported = await fixture.CallAsync("requests/exportHttp", new { workspace = "example", name = "my-tunnel", requestId = "request-1", target = "http://localhost:5173" });
+        Assert.StartsWith("POST http://localhost:5173/webhooks HTTP/1.1", exported.GetProperty("text").GetString(), StringComparison.Ordinal);
+        await fixture.CallAsync("captureBodies/set", new { workspace = "example", name = "my-tunnel", enabled = false });
+        Assert.DoesNotContain(Fixture.Token, fixture.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("captured-private-authorization", fixture.Output, StringComparison.Ordinal);
+        fixture.Handler.DetailsTruncated = true;
+        var truncated = await Assert.ThrowsAsync<RemoteInvocationException>(() => fixture.CallAsync("requests/replay", new
+        { workspace = "example", name = "my-tunnel", requestId = "request-1", target = "http://localhost:5173", confirm = true }));
+        Assert.Equal(-32017, truncated.ErrorCode);
+        var external = await Assert.ThrowsAnyAsync<RemoteRpcException>(() => fixture.CallAsync("requests/replay", new
+        { workspace = "example", name = "my-tunnel", requestId = "request-1", target = "https://groundhog.unifinity.com", confirm = true }));
+        Assert.Equal(-32602, (int)external.ErrorCode!.Value);
+    }
+
+    [Fact]
+    public async Task Replay_sends_edited_body_to_loopback_and_never_follows_redirects()
+    {
+        await using var fixture = new Fixture(); await fixture.InitializeAsync();
+        using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var serve = Task.Run(async () =>
+        {
+            using var socket = await listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+            await using var stream = socket.GetStream();
+            using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+            var header = new StringBuilder(); var length = 0;
+            while (await reader.ReadLineAsync(TestContext.Current.CancellationToken) is { Length: > 0 } line)
+            {
+                header.AppendLine(line);
+                if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
+                { length = int.Parse(line.Split(':')[1].Trim(), System.Globalization.CultureInfo.InvariantCulture); }
+            }
+            var body = new char[length]; var offset = 0;
+            while (offset < body.Length)
+            {
+                var count = await reader.ReadAsync(body.AsMemory(offset), TestContext.Current.CancellationToken);
+                if (count == 0) { throw new EndOfStreamException(); } offset += count;
+            }
+            received.SetResult(header.Append(body).ToString());
+            await stream.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 302 Found\r\nLocation: https://groundhog.unifinity.com/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), TestContext.Current.CancellationToken);
+        }, TestContext.Current.CancellationToken);
+        var response = await fixture.CallAsync("requests/replay", new { workspace = "example", name = "my-tunnel", requestId = "request-1", target = $"http://127.0.0.1:{port}", body = "edited-body", confirm = true });
+        Assert.Equal(302, response.GetProperty("statusCode").GetInt32());
+        var sent = await received.Task.WaitAsync(TestContext.Current.CancellationToken); await serve;
+        Assert.Contains("POST /webhooks HTTP/1.1", sent, StringComparison.Ordinal);
+        Assert.Contains("edited-body", sent, StringComparison.Ordinal);
+        Assert.DoesNotContain("captured-private-authorization", sent, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Backend_refreshes_shared_session_before_management_calls_and_keeps_secrets_local()
     {
@@ -317,11 +423,14 @@ public sealed class IdeBackendTests
         internal bool WorkspaceEvents { get; set; }
         internal bool RefreshTokens { get; set; }
         internal int Refreshes { get; private set; }
+        internal bool DetailsTruncated { get; set; }
         internal TaskCompletionSource PollReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ListReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
+            if (request.RequestUri.Query.Contains("limit=1000", StringComparison.Ordinal))
+            { return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)); }
             if (path.EndsWith("/requests/stream", StringComparison.Ordinal))
             {
                 return Task.FromResult(Stream("event: request\ndata: {\"requestId\":\"request-1\",\"completed\":\"2026-10-22T12:00:00Z\",\"method\":\"GET\",\"path\":\"/webhooks\",\"statusCode\":200,\"durationMs\":1}\n\nevent: request\ndata: {\"requestId\":\"request-2\",\"completed\":\"2026-10-22T12:00:01Z\",\"method\":\"POST\",\"path\":\"/webhooks\",\"statusCode\":202,\"durationMs\":2}\n\n"));
@@ -345,7 +454,17 @@ public sealed class IdeBackendTests
                 "/api/cli/token" => Grant(),
                 "/api/me" => new AccountInfo("Example", "person@example.com", [new("example", "Example", "owner")]),
                 "/api/cli/logout" => null,
+                _ when path.EndsWith("/visitor-access", StringComparison.Ordinal) => new VisitorAccessInfo(new(["members"]), [], [], [new("0123456789abcdef0123456789abcdef", "Webhook", DateTimeOffset.UnixEpoch)], "agent"),
+                _ when path.EndsWith("/api-keys", StringComparison.Ordinal) && request.Method == HttpMethod.Post => new ApiKeyCreated("0123456789abcdef0123456789abcdef", "Webhook", DateTimeOffset.UnixEpoch, "one-time-visitor-key"),
+                _ when path.EndsWith("/requests/request-1", StringComparison.Ordinal) => new
+                {
+                    requestId = "request-1", method = "POST", path = "/webhooks",
+                    requestHeaders = new[] { new { name = "Authorization", value = "Bearer captured-private-authorization" }, new { name = "Webhook-Signature", value = "signature" } },
+                    requestBody = new { text = "{\"value\":1}", truncated = DetailsTruncated, omitted = (string?)null }
+                },
                 _ when path.EndsWith("/requests", StringComparison.Ordinal) => new RemoteSearchResult([new(new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero), "GET", "/webhooks", 200, 1, "request-1")], false),
+                _ when request.Method == HttpMethod.Put => Tunnel("my-tunnel"),
+                _ when request.Method == HttpMethod.Get && path.EndsWith("/tunnels/my-tunnel", StringComparison.Ordinal) => Tunnel("my-tunnel"),
                 _ when request.Method == HttpMethod.Delete => null,
                 _ when request.Method == HttpMethod.Post => new TunnelCreated(Tunnel("my-tunnel"), Key),
                 _ when request.Method == HttpMethod.Patch => Tunnel("my-tunnel-renamed"),
@@ -358,11 +477,10 @@ public sealed class IdeBackendTests
         private DeviceToken Refresh() { Refreshes++; return new("approved", "private-refreshed-access-token", 3600, "private-refreshed-refresh-token"); }
         private TunnelInfo[] List() { Lists++; ListReached.TrySetResult(); return [Tunnel("my-tunnel")]; }
         private static TunnelInfo Tunnel(string name) => new(name, $"https://{name}.groundhog.unifinity.com", "disconnected",
-            DateTimeOffset.UnixEpoch, 0, 0, 0, 0, ["rename", "delete"]);
+            DateTimeOffset.UnixEpoch, 0, 0, 0, 0, ["rename", "delete", "captureBodies"], CaptureBodies: true);
         private static HttpResponseMessage Stream(string value) => new(HttpStatusCode.OK)
         { Content = new StringContent(value, Encoding.UTF8, "text/event-stream") };
         // ManagementClient owns its handler; this fixture deliberately shares one cheap fake across calls.
         protected override void Dispose(bool disposing) { }
     }
 }
-

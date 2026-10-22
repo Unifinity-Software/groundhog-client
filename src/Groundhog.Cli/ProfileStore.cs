@@ -4,7 +4,8 @@ using Groundhog.Protocol;
 namespace Groundhog.Cli;
 
 /// <summary>A saved <c>host</c> setup. <paramref name="Access"/> keeps visitor access options, never key values.</summary>
-internal sealed record TunnelProfile(string Name, string Target, string? Relay = null, VisitorAccessFlags? Access = null)
+internal sealed record TunnelProfile(string Name, string Target, string? Relay = null, VisitorAccessFlags? Access = null,
+    string? LocalCaFile = null, bool InsecureLocal = false)
 {
     /// <summary>The <c>host</c> arguments this profile stands for.</summary>
     internal string[] ToHostArguments()
@@ -16,6 +17,8 @@ internal sealed record TunnelProfile(string Name, string Target, string? Relay =
         }
 
         args.AddRange(Access?.ToArguments() ?? []);
+        if (LocalCaFile is not null) { args.AddRange(["--local-ca", LocalCaFile]); }
+        if (InsecureLocal) { args.Add("--insecure-local"); }
         return [.. args];
     }
 }
@@ -65,6 +68,8 @@ internal sealed class ProfileStore(string directory)
             LocalTarget = parsed.LocalTarget,
             RelayAddress = parsed.Relay,
             Credential = new Groundhog.Agent.TunnelKeyCredential(parsed.Key),
+            LocalCaFile = parsed.LocalCaFile,
+            InsecureLocal = parsed.InsecureLocal,
         });
     }
 

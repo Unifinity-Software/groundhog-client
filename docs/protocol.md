@@ -254,3 +254,8 @@ workspace."
 ## IDE integrations
 
 The local CLI-to-IDE JSON-RPC contract is versioned separately in [IDE backend protocol](ide-protocol.md).
+
+Local completed-request telemetry may include the relay's validated `X-Groundhog-Request-Id`. This opaque identifier
+links a request in an IDE's local inspector to the relay's captured detail; it exposes no bodies, headers or credentials.
+IDE detail uses the existing request-detail and capture-body management endpoints, applies safe projections and
+redaction, and replays only to explicitly approved loopback targets. See the IDE contract for frame limits and fields.
