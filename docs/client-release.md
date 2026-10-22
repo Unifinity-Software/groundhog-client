@@ -104,8 +104,10 @@ VSIX still requires the global CLI; platform release VSIX files include their ba
 
 Owner setup: create the `unifinity` Marketplace publisher and Open VSX namespace and accept Open VSX's publisher
 agreement. Add a Marketplace publishing token as the `VSCE_PAT` secret in GitHub environment `vscode`;
-the workflow defaults to this mode and fails before publication if the token is missing. Scope the token to the
-publisher and extension publishing. Keep environment protections in place and never print or commit tokens.
+the workflow defaults to this mode and fails before publication if the token is missing. Grant only Marketplace
+Manage and keep the publishing identity's membership limited to the intended publisher. Both VS Code and native
+Visual Studio release workflows use this same `VSCE_PAT` secret. Keep environment protections in place and never
+print or commit tokens.
 
 VSCE 4 includes `--oidc`, but Marketplace's trusted-publishing backend is not available as of October 22, 2026.
 The [maintainer's rollout update](https://github.com/microsoft/vscode-vsce/issues/1275#issuecomment-5990771209)
