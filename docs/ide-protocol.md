@@ -339,7 +339,7 @@ safe projections, device-login orchestration, subscription IDs and structured di
 | local discovery, stop, request metadata | `LocalSessions`, `SessionTelemetry`; public Agent-owned sessions/Aspire registration #36 |
 | remote live metadata and reconnect backfill | `ManagementClient.OpenRequestStreamAsync`, `RequestFollower` |
 | doctor checks | `UtilityCommands.DoctorAsync`; structured adapter #39 |
-| relay service capabilities and workspace invalidation | #39; relay workspace events Unifinity-Software/groundhog#237 |
+| relay service capabilities and workspace invalidation | #39; capability-negotiated relay workspace events |
 | VS Code client, mock backend and tests | #40 |
 | host-neutral request inspector | #44; capture/detail/replay/export #46 |
 | Visual Studio debugger/WebView2 integration | spike #38, extension #49 |
