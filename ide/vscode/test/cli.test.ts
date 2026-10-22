@@ -15,4 +15,10 @@ describe('CLI detection', () => {
     expect((await detectCli('missing', '1.2.0', async () => { throw new Error('ENOENT'); })).available).toBe(false);
     expect((await detectCli('groundhog', '1.2.0', async () => 'unknown')).available).toBe(false);
   });
+  it('compares preview versions using semantic version ordering', async () => {
+    expect((await detectCli('groundhog', '1.3.0-preview.1', async () => '1.3.0-preview.10')).available).toBe(true);
+    expect((await detectCli('groundhog', '1.3.0-preview.2', async () => '1.3.0-preview.1')).available).toBe(false);
+    expect((await detectCli('groundhog', '1.3.0-preview.1', async () => '1.3.0')).available).toBe(true);
+    expect((await detectCli('groundhog', 'invalid', async () => '1.3.0')).available).toBe(false);
+  });
 });

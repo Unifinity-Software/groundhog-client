@@ -69,7 +69,7 @@ jobs:
           source="$GITHUB_WORKSPACE/artifacts/packages"
           cache="$RUNNER_TEMP/groundhog-consumer-packages"
           dotnet build samples/AspireQuickstart/AppHost/AppHost.csproj -c Release \
-            -p:RestoreAdditionalProjectSources="$source" -p:RestorePackagesPath="$cache"
+            -p:ClientPackageVersion="$version" -p:RestoreAdditionalProjectSources="$source" -p:RestorePackagesPath="$cache"
           dotnet test --project tests/Groundhog.Aspire.Hosting.Tests/Groundhog.Aspire.Hosting.Tests.csproj -c Release \
             -p:UsePublishedClientPackages=true -p:ClientPackageVersion="$version" \
             -p:RestoreAdditionalProjectSources="$source" -p:RestorePackagesPath="$cache"
