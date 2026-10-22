@@ -134,7 +134,7 @@ internal sealed class TunnelsControl : UserControl
                     var source = (string?)agent?["source"];
                     var node = new TunnelNode(slug, name, (string?)tunnel["url"] ?? "", (bool?)tunnel["hasKey"] == true, (string?)agent?["target"], source);
                     var state = source == "aspire" ? "Aspire" : agent is not null ? "on this computer" : (string?)tunnel["location"] == "remote" ? "hosted elsewhere" : (string?)tunnel["state"] ?? "offline";
-                    var item = new TreeViewItem { Header = name + " Ã‚Â· " + state, Tag = node, ToolTip = node.Url };
+                    var item = new TreeViewItem { Header = name + "  -  " + state, Tag = node, ToolTip = node.Url };
                     item.ContextMenu = Menu(node, tunnel["actions"]?.Values<string>().OfType<string>().ToArray() ?? []);
                     group.Items.Add(item);
                 }
@@ -209,7 +209,7 @@ internal sealed class TunnelsControl : UserControl
         if (!Confirm($"Forward public requests for {tunnel.Name} to {target}?")) { return; }
         var agent = await Package.Backend.RequestAsync(restart ? "agents/restart" : "agents/start", new { workspace = tunnel.Workspace, name = tunnel.Name, target }, _stop.Token);
         await Package.JoinableTaskFactory.SwitchToMainThreadAsync(_stop.Token);
-        Package.SetStatus("Groundhog: " + (string?)agent["url"] + " Ã¢â€ â€™ " + target);
+        Package.SetStatus("Groundhog: " + (string?)agent["url"] + " > " + target);
         await RefreshAsync();
     }
 
@@ -233,9 +233,9 @@ internal sealed class TunnelsControl : UserControl
     private async Task InstallAsync()
     {
         if (!Confirm("Install or update the Groundhog CLI preview as a global .NET tool on this computer?")) { return; }
-        _notice.Text = "Installing Groundhog CLIÃ¢â‚¬Â¦";
+        _notice.Text = "Installing Groundhog CLI...";
         await BackendClient.RunAsync("dotnet", "tool update --global Groundhog.Cli --prerelease", _stop.Token);
-        _notice.Text = "CLI installed. Choose Refresh. A custom path can be set under Tools Ã¢â€ â€™ Options Ã¢â€ â€™ Groundhog.";
+        _notice.Text = "CLI installed. Choose Refresh. A custom path can be set under Tools > Options > Groundhog.";
     }
 
     internal static bool Confirm(string message) => MessageBox.Show(message, "Groundhog", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;

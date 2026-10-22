@@ -1,13 +1,13 @@
 # Groundhog for Visual Studio
 
 This preview targets Visual Studio 2022 17.14 or newer on Windows x64. The VSIX also declares the Visual Studio 2026
-installation range; that host has not been exercised in this development environment. Use **View â†’ Groundhog Tunnels**.
+installation range; that host has not been exercised in this development environment. Use **View > Groundhog Tunnels**.
 The tool window groups tunnels by workspace and labels local CLI, Aspire and remote hosting. Its context menu offers
 hosting, stopping, restarting, opening/copying URLs, key entry and authorized rename/delete actions.
 
 Choose **Sign in**, compare the displayed user code, then **Open browser**. Connection keys and login tokens remain in
 the CLI credential store. If the CLI is missing or older than 1.3.0-preview.1, choose **Install / update CLI**; installation
-requires your confirmation and a .NET SDK. A custom executable path is under **Tools â†’ Options â†’ Groundhog**.
+requires your confirmation and a .NET SDK. A custom executable path is under **Tools > Options > Groundhog**.
 
 Double-click a tunnel to inspect requests. The WebView2 control hosts the same `ide/webview` bundle as VS Code and maps
 Visual Studio theme colors to its existing CSS variables. Request detail, body capture, replay and HTTP export require
@@ -22,7 +22,7 @@ tunnel in the tool window and use a launchSettings.json with exactly one Project
 projects or ambiguous launch profiles need explicit project configuration. The extension shows the tunnel, local target
 and source settings path for approval before it starts forwarding public requests.
 
-**Host when debugging** and **Stop after debugging** are configurable under **Tools â†’ Options â†’ Groundhog**. Only a CLI
+**Host when debugging** and **Stop after debugging** are configurable under **Tools > Options > Groundhog**. Only a CLI
 agent started by that debug session, still at the same process ID, is stopped automatically. Existing CLI agents and
 Aspire AppHosts stay under their owner's lifecycle. Aspire tunnels direct you back to their AppHost.
 
@@ -48,7 +48,7 @@ Studio installation. The normal Groundhog .NET solution does not require Node or
 Before publishing, install the built VSIX in an experimental Visual Studio 2022 17.14+ instance and repeat on Visual
 Studio 2026. Limit the smoke to one small project and one tunnel; no load or sleep-based test loops are required.
 
-1. Open **View â†’ Groundhog Tunnels**, sign in, compare the user code and select a workspace.
+1. Open **View > Groundhog Tunnels**, sign in, compare the user code and select a workspace.
 2. Create/rename/delete a disposable tunnel, verify the confirmation dialogs, and enter a connection key with the masked
    field. Confirm that no token, connection key or device secret appears in IDE output or saved project files.
 3. Host a loopback app, inspect one HTTP request and one WebSocket completion, and change the IDE theme/high contrast.

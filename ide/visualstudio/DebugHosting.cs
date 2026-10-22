@@ -57,12 +57,12 @@ internal sealed class DebugHosting(GroundhogPackage package, DTE dte)
             { package.SetStatus("Groundhog: this tunnel belongs to the Aspire AppHost. Manage it from Aspire."); return; }
             var agent = await package.Backend.RequestAsync("agents/start", new { workspace = _workspace, name, target, projectDirectory = Path.GetDirectoryName(path) }, cancellation);
             _ownedProcess = existing is null ? (int?)agent["processId"] : null;
-            package.SetStatus("Groundhog: " + ((string?)agent["url"] ?? name) + " â†’ " + target);
+            package.SetStatus("Groundhog: " + ((string?)agent["url"] ?? name) + " > " + target);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             await package.JoinableTaskFactory.SwitchToMainThreadAsync(cancellation);
-            package.SetStatus("Groundhog: debug tunnel could not start or stop. Open View â†’ Groundhog Tunnels to check sign-in and project settings.");
+            package.SetStatus("Groundhog: debug tunnel could not start or stop. Open View > Groundhog Tunnels to check sign-in and project settings.");
         }
         finally { _changes.Release(); }
     }
