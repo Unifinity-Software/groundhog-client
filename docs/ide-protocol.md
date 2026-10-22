@@ -33,6 +33,10 @@ The backend selects the highest common protocol version. No common version retur
 with `data.supportedVersions`. A breaking shape or semantic change requires another protocol version; additive
 properties and optional methods use capabilities.
 
+`initialize` accepts optional `clientName`; both name and version are plain text up to 128 characters without control characters. The backend
+combines it with `clientVersion` and bounds the device sign-in label to 128 characters. The fallback is
+`Groundhog IDE {clientVersion}`. Extensions identify themselves as `Groundhog for VS Code` or `Groundhog for Visual Studio`.
+
 ```json
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientVersion":"0.1.0","protocolVersions":[1]}}
 {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"cliVersion":"1.0.0","capabilities":["deviceLogin","localAgents","liveRequests"]}}

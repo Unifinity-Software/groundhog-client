@@ -301,12 +301,16 @@ public sealed class IdeBackendTests
         Assert.DoesNotContain("stack", fixture.Output, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public async Task Stdio_login_returns_only_public_challenge_and_logout_clears_shared_keys()
+    [Theory]
+    [InlineData(null, "Groundhog IDE 0.1.0")]
+    [InlineData("Groundhog for Visual Studio", "Groundhog for Visual Studio 0.1.0")]
+    public async Task Stdio_login_returns_only_public_challenge_and_logout_clears_shared_keys(string? clientName, string expectedName)
     {
         await using var fixture = new Fixture(signedIn: false);
-        await fixture.InitializeAsync();
+        await fixture.InitializeAsync(clientName);
         var challenge = await fixture.CallAsync("auth/login", new { });
+        using var request = JsonDocument.Parse(await fixture.Handler.DeviceRequest);
+        Assert.Equal(expectedName, request.RootElement.GetProperty("clientName").GetString());
         Assert.Equal("ABCD-EFGH", challenge.GetProperty("userCode").GetString());
         fixture.Time.Advance(TimeSpan.FromSeconds(1));
         await fixture.Handler.PollReached.Task.WaitAsync(TestContext.Current.CancellationToken);
@@ -444,7 +448,7 @@ public sealed class IdeBackendTests
         }
         private void Register(string method, Action<JsonElement> callback) =>
             _rpc.AddLocalRpcMethod(callback.Method, callback.Target, new JsonRpcMethodAttribute(method) { UseSingleObjectParameterDeserialization = true });
-        internal Task<JsonElement> InitializeAsync() => CallAsync("initialize", new { clientVersion = "0.1.0", protocolVersions = new[] { 1 } });
+        internal Task<JsonElement> InitializeAsync(string? clientName = null) => CallAsync("initialize", new { clientName, clientVersion = "0.1.0", protocolVersions = new[] { 1 } });
         internal Task<JsonElement> CallAsync(string method, object parameters) =>
             _rpc.InvokeWithParameterObjectAsync<JsonElement>(method, parameters, _stop.Token);
         internal Task NextAgentPoll()
@@ -488,11 +492,13 @@ public sealed class IdeBackendTests
         internal bool RefreshTokens { get; set; }
         internal int Refreshes { get; private set; }
         internal bool DetailsTruncated { get; set; }
+        internal Task<string> DeviceRequest { get; private set; } = Task.FromResult("");
         internal TaskCompletionSource PollReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ListReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
+            if (path == "/api/cli/device") { DeviceRequest = request.Content!.ReadAsStringAsync(cancellationToken); }
             if (request.RequestUri.Query.Contains("limit=1000", StringComparison.Ordinal))
             { return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)); }
             if (path.EndsWith("/requests/stream", StringComparison.Ordinal))

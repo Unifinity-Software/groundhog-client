@@ -502,7 +502,8 @@ internal static class RemoteCommands
         Action<SignInChallenge>? challenge = null)
     {
         using var client = new ManagementClient(relay);
-        var authorization = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device", new { }, cancellation);
+        var authorization = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device",
+            new { clientName = "Groundhog CLI " + UpdateCommands.Version }, cancellation);
         var verification = new Uri(authorization.VerificationUri);
         if (verification.GetLeftPart(UriPartial.Authority) != new Uri(relay).GetLeftPart(UriPartial.Authority)
             || verification.AbsolutePath != "/cli-login" || authorization.ExpiresIn is < 1 or > 600 || authorization.Interval is < 1 or > 30)

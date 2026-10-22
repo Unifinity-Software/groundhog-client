@@ -43,6 +43,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private string? _lastAuth;
     private string? _lastTunnels;
     private string? _lastAgents;
+    private string _deviceClientName = "Groundhog IDE";
     private readonly List<string> _capabilities = ["deviceLogin", "localAgents", "liveRequests", "requestDetail", "requestReplay", "requestExportHttp", "captureBodies", "visitorAccess", "rotateWithoutDowntime"];
     internal Func<string, object, Task> Notify { get; set; } = (_, _) => Task.CompletedTask;
 
@@ -105,7 +106,15 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private async Task<object> InitializeAsync(JsonElement p, CancellationToken ct)
     {
         if (_initialized) { throw Fault(-32000, "notInitialized", "The backend is already initialized."); }
-        _ = Required(p, "clientVersion");
+        var clientVersion = Required(p, "clientVersion");
+        var clientName = Optional(p, "clientName") ?? "Groundhog IDE";
+        if (clientVersion.Length > 128 || clientVersion.Any(char.IsControl) || clientName.Length > 128 || clientName.Any(char.IsControl)
+            || (p.TryGetProperty("clientName", out var suppliedName) && suppliedName.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)))
+        { throw Fault(-32602, "invalidParams", "Client name and version must be plain text of at most 128 characters."); }
+        var label = clientName.Trim() + " " + clientVersion.Trim();
+        var length = Math.Min(label.Length, 128);
+        if (char.IsHighSurrogate(label[length - 1])) { length--; }
+        _deviceClientName = label[..length];
         if (!p.TryGetProperty("protocolVersions", out var versions) || versions.ValueKind != JsonValueKind.Array
             || !versions.EnumerateArray().Any(v => v.TryGetInt32(out var version) && version == 1))
         {
@@ -239,7 +248,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
         _login = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
         var relay = GroundhogService.DefaultRelayAddress;
         using var client = _client(relay, null);
-        var auth = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device", new { }, ct);
+        var auth = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device", new { clientName = _deviceClientName }, ct);
         if (!Uri.TryCreate(auth.VerificationUri, UriKind.Absolute, out var verification)
             || verification.GetLeftPart(UriPartial.Authority) != relay.TrimEnd('/') || verification.AbsolutePath != "/cli-login"
             || verification.UserInfo.Length > 0 || auth.ExpiresIn is < 1 or > 600 || auth.Interval is < 1 or > 30

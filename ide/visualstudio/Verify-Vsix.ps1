@@ -54,6 +54,10 @@ public class GroundhogPeer {
             while (count < length) { int read = input.Read(bytes, count, length-count); if (read == 0) return; count += read; }
             var request = json.Deserialize<Dictionary<string, object>>(Encoding.UTF8.GetString(bytes));
             var method = request["method"].ToString();
+            if (method == "initialize") {
+                var parameters = (Dictionary<string,object>)request["params"];
+                if ((string)parameters["clientName"] != "Groundhog for Visual Studio") return;
+            }
             var result = method == "initialize" ? "{\"protocolVersion\":1,\"capabilities\":[\"deviceLogin\"]}" : "{\"state\":\"signedOut\"}";
             if (method == "requests/subscribe") {
                 Send(output, "{\"jsonrpc\":\"2.0\",\"method\":\"requests/event\",\"params\":{\"subscriptionId\":\"early-sub\",\"request\":{\"requestId\":\"early-request\"}}}");

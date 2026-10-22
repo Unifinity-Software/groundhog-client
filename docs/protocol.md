@@ -174,7 +174,9 @@ the relay's own address and never forwarded.
 This additive HTTPS API does not change hosting protocol version 1. Older relays can host tunnels without
 supporting CLI login. Management endpoints exist only on the relay's own host, never on visitor tunnel hosts.
 
-1. `POST /api/cli/device` (anonymous, empty JSON object) returns `deviceCode` (32 random bytes in canonical base64url),
+1. `POST /api/cli/device` (anonymous JSON object) accepts optional `clientName`, plain display text up to 128 characters,
+   for example `Groundhog CLI 1.3.0-preview.1` or `Groundhog for Visual Studio 0.1.0`. Older clients may send `{}`.
+   The relay treats this label as untrusted text and escapes it in browser/device listings. It returns `deviceCode` (32 random bytes in canonical base64url),
    `userCode` (12 uppercase hex characters), `verificationUri`, `expiresIn: 600` and `interval: 5`.
    The CLI opens the same-origin verification URL and displays the code. Neither code grants API access.
 2. `GET /cli-login?code=<userCode>` requires browser sign-in and shows an explicit approval page with the code.

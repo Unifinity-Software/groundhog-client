@@ -30,7 +30,7 @@ internal sealed class BackendClient : IDisposable
             _rpc = new JsonRpc(new HeaderDelimitedMessageHandler(_process.StandardInput.BaseStream, _process.StandardOutput.BaseStream));
             _rpc.AddLocalRpcTarget(new Notifications((name, value) => Notification?.Invoke(name, value)));
             _rpc.StartListening();
-            var initialized = await RequestAsync("initialize", new { clientVersion = "0.1.0", protocolVersions = new[] { 1 } }, cancellation).ConfigureAwait(false);
+            var initialized = await RequestAsync("initialize", new { clientName = "Groundhog for Visual Studio", clientVersion = "0.1.0", protocolVersions = new[] { 1 } }, cancellation).ConfigureAwait(false);
             if ((int?)initialized["protocolVersion"] != 1) { throw new InvalidOperationException("The CLI and extension have no common protocol version."); }
             Capabilities = initialized["capabilities"]?.ToObject<string[]>() ?? [];
         }
