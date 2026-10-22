@@ -8,6 +8,9 @@ namespace Groundhog.Agent;
 /// <summary>Settings for a <see cref="GroundhogAgent"/>.</summary>
 public sealed class GroundhogAgentOptions
 {
+    /// <summary>Registers this running agent for current-user local CLI and IDE discovery. Defaults to true.</summary>
+    public bool RegisterLocalSession { get; set; } = true;
+
     /// <summary>The hosting package and its version. Defaults to the agent library when omitted.</summary>
     public GroundhogClientInfo? Client { get; set; }
     /// <summary>

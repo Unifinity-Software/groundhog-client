@@ -104,31 +104,43 @@ internal static class UtilityCommands
                 cancellation.ThrowIfCancellationRequested();
                 var registrations = LocalSessions.Registrations().Where(r => nameFilter is null || r.Name == nameFilter).ToArray();
                 var sessions = new List<SessionSnapshot>();
+                var responding = new List<SessionRegistration>();
                 foreach (var registration in registrations)
                 {
-                    var snapshot = await LocalSessions.QueryAsync(registration, command == "stop", cancellation);
+                    var snapshot = await LocalSessions.QueryAsync(registration, false, cancellation);
                     if (snapshot is not null)
                     {
                         sessions.Add(snapshot);
+                        responding.Add(registration);
                     }
                 }
                 if (command != "ps" && sessions.Count > 1)
                 { error.WriteLine("groundhog: multiple responsive local agents match; stop the obsolete process first."); return 1; }
                 if (command != "ps" && sessions.Count == 0)
                 { error.WriteLine("groundhog: no responsive local agent. Start it with host; ps lists local sessions."); return 1; }
-                if (command == "stop") { output.WriteLine("Stop requested."); return 0; }
+                if (command == "stop")
+                {
+                    var session = sessions[0];
+                    if (session.Host == "Aspire")
+                    {
+                        error.WriteLine($"groundhog: {LocalSessions.StopRefusal(session.ProcessName, session.ProcessId)}");
+                        return ExitCodes.BadArguments;
+                    }
+                    await LocalSessions.QueryAsync(responding[0], true, cancellation);
+                    output.WriteLine("Stop requested."); return 0;
+                }
                 if (command == "ps")
                 {
                     if (json)
                     {
-                        output.WriteLine(JsonSerializer.Serialize(sessions.Select(s => new { s.Name, s.State, s.Target, s.PublicAddress, s.Started })));
+                        output.WriteLine(JsonSerializer.Serialize(sessions.Select(s => new { s.Name, s.State, s.Target, s.PublicAddress, s.Started, s.Host, s.ProcessName, s.ProcessId })));
                     }
                     else
                     {
-                        var table = new Table().AddColumn("Local agent").AddColumn("State").AddColumn("Target").AddColumn("Public URL");
+                        var table = new Table().AddColumn("Local agent").AddColumn("Host").AddColumn("State").AddColumn("Target").AddColumn("Public URL");
                         foreach (var s in sessions)
                         {
-                            table.AddRow(TerminalViews.Safe(s.Name), TerminalViews.Safe(s.State), TerminalViews.Safe(s.Target), TerminalViews.Safe(s.PublicAddress));
+                            table.AddRow(TerminalViews.Safe(s.Name), TerminalViews.Safe(s.Host), TerminalViews.Safe(s.State), TerminalViews.Safe(s.Target), TerminalViews.Safe(s.PublicAddress));
                         }
 
                         Display(table);

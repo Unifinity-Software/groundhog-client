@@ -1,3 +1,4 @@
+using Groundhog.Agent;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -80,12 +81,19 @@ internal static class AgentLifecycle
         var existing = LocalSessions.Registrations().Where(r => r.Name == name).ToArray();
         foreach (var registration in existing)
         {
-            if (await LocalSessions.QueryAsync(registration, args[0] == "restart", cancellation) is null)
+            var snapshot = await LocalSessions.QueryAsync(registration, false, cancellation);
+            if (snapshot is null)
             {
                 continue;
             }
 
             if (args[0] == "start") { error.WriteLine("groundhog: a local agent is already running."); return 1; }
+            if (snapshot.Host == "Aspire")
+            {
+                error.WriteLine($"groundhog: {LocalSessions.StopRefusal(snapshot.ProcessName, snapshot.ProcessId)}");
+                return ExitCodes.BadArguments;
+            }
+            await LocalSessions.QueryAsync(registration, true, cancellation);
             while (await LocalSessions.QueryAsync(registration, false, deadline.Token) is not null)
             {
                 await Task.Delay(100, deadline.Token);

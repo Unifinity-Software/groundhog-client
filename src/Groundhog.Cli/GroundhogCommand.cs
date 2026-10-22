@@ -244,7 +244,6 @@ internal static class GroundhogCommand
             return ExitCodes.BadArguments;
         }
 
-        var telemetry = new SessionTelemetry(arguments.Name, arguments.LocalTarget);
         var interactive = view is not null || (ReferenceEquals(output, Console.Out) && InteractiveCli.Available);
         var reporter = new StatusReporter(output, error, arguments.LocalTarget, arguments.Verbose, arguments.VisitorAccess is not null);
         GroundhogAgent agent;
@@ -261,7 +260,7 @@ internal static class GroundhogCommand
                 PoolSize = arguments.Pool ?? ConnectionPool.DefaultSize,
                 VisitorAccess = arguments.VisitorAccess,
                 Client = GroundhogClientInfo.FromAssembly("Groundhog.Cli", typeof(GroundhogCommand).Assembly),
-                OnRequestCompleted = request => { telemetry.OnRequest(request); if (!interactive) { reporter.OnRequest(request); } },
+                OnRequestCompleted = request => { if (!interactive) { reporter.OnRequest(request); } },
             });
         }
         catch (ArgumentException ex)
@@ -278,10 +277,10 @@ internal static class GroundhogCommand
         }
 
         using var hostStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        await using var sessions = new LocalSessions(telemetry, hostStop);
+        var telemetry = agent.Telemetry;
 
         // The stream ends after the agent's Stopped status, so awaiting it means every status has been reported.
-        var watching = ReportStatusAsync(agent.WatchStatusAsync(CancellationToken.None), telemetry, interactive ? null : reporter);
+        var watching = ReportStatusAsync(agent.WatchStatusAsync(CancellationToken.None), interactive ? null : reporter);
         GroundhogAgentStopReason reason;
         if (interactive)
         {
@@ -345,11 +344,10 @@ internal static class GroundhogCommand
     }
 
     private static async Task ReportStatusAsync(
-        IAsyncEnumerable<GroundhogAgentStatus> statuses, SessionTelemetry telemetry, StatusReporter? reporter)
+        IAsyncEnumerable<GroundhogAgentStatus> statuses, StatusReporter? reporter)
     {
         await foreach (var status in statuses)
         {
-            telemetry.OnStatus(status);
             reporter?.OnStatus(status);
         }
     }

@@ -1,3 +1,4 @@
+using Groundhog.Agent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
@@ -135,6 +136,33 @@ public sealed class InteractiveFeatureTests
 
 public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<TunnelFixture>
 {
+    [Fact(Timeout = 30000)]
+    public async Task Aspire_agents_are_visible_to_cli_and_cannot_be_stopped_even_with_changed_registration_metadata()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var running = fixture.StartAgent("aspire-local-session", client: new("Groundhog.Aspire.Hosting", "1.2.0"));
+        while ((await running.NextStatusAsync()).State != GroundhogAgentState.Connected) { }
+        var registration = Assert.Single(LocalSessions.Registrations(), r => r.Name == "aspire-local-session");
+        var connection = await fixture.Relay.Tunnel("aspire-local-session").Connections.Reader.ReadAsync(ct);
+        using var response = await connection.Client.GetAsync("http://aspire-local-session.groundhog.unifinity.com/echo?secret=hidden", ct);
+        await running.NextRequestAsync();
+        foreach (var command in new[] { "ps", "status", "requests" })
+        {
+            var output = new StringWriter();
+            string[] args = command == "ps" ? [command, "--output", "json"] : [command, "aspire-local-session", "--output", "json"];
+            Assert.Equal(0, await GroundhogCommand.RunAsync(args, _ => null, output, new StringWriter(), ct));
+            Assert.DoesNotContain("hidden", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains(command == "requests" ? "/echo" : "Aspire", output.ToString(), StringComparison.Ordinal);
+        }
+        var error = new StringWriter();
+        Assert.Equal(2, await GroundhogCommand.RunAsync(["stop", "aspire-local-session"], _ => null, new StringWriter(), error, ct));
+        Assert.Contains(registration.ProcessName!, error.ToString(), StringComparison.Ordinal);
+        // A stale or edited registration must not let a client cancel an AppHost-owned agent.
+        await Assert.ThrowsAsync<ArgumentException>(() => LocalSessions.QueryAsync(registration with { Host = "Cli" }, true, ct));
+        Assert.False(running.Run.IsCompleted);
+        Assert.Equal("Connected", (await LocalSessions.QueryAsync(registration, false, ct))!.State);
+    }
+
     [Fact(Timeout = 30000)]
     public async Task Real_cli_background_start_status_and_stop_use_the_saved_profile()
     {

@@ -560,3 +560,7 @@ terminal. The captures use public sample data, not a production account.
 
 The pixel-art groundhog on the boot and help screens is generated from the brand icon with
 `node tools/groundhog-pixels.cjs`, which rewrites `src/Groundhog.Cli/Views/GroundhogPixels.cs`.
+
+Aspire-hosted tunnels also appear in `groundhog ps`, labelled `Aspire`. Use `status` and `requests` with their tunnel
+name to inspect them. `stop` and `restart` refuse Aspire-owned tunnels and name the AppHost process; manage their
+lifecycle from Aspire.
