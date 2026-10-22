@@ -2,6 +2,8 @@ param([string]$Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $projectRoot = [IO.Path]::GetFullPath($PSScriptRoot)
+$publish = Get-Content -LiteralPath (Join-Path $projectRoot 'publishManifest.json') -Raw | ConvertFrom-Json
+if ($publish.categories.Count -ne 1 -or $publish.categories[0] -cne 'coding') { throw 'Use the verified VsixPublisher coding category.' }
 $output = Join-Path $projectRoot "bin/$Configuration/net472"
 $archive = [IO.Compression.ZipFile]::OpenRead((Join-Path $output 'Groundhog.VisualStudio.vsix'))
 try {
