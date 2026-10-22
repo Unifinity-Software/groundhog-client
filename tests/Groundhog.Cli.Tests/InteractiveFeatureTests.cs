@@ -185,9 +185,11 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
         }
         finally
         {
-            await CliProcess.RunAsync(["stop", "project-background"], home, fixture.Key, ct, nested);
-            if (process is not null) { await process.WaitForExitAsync(ct); process.Dispose(); }
-            Directory.Delete(directory, true);
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            process ??= CliProcess.BackgroundProcess(home, "project-background");
+            await CliProcess.RunAsync(["stop", "project-background"], home, fixture.Key, cleanup.Token, nested);
+            if (process is not null) { await process.WaitForExitAsync(cleanup.Token); process.Dispose(); }
+            await CliProcess.DeleteExitedDirectoryAsync(directory, cleanup.Token);
         }
     }
 
@@ -198,7 +200,7 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
         var directory = Path.Combine(Path.GetTempPath(), "groundhog-background-" + Guid.NewGuid().ToString("N"));
         var store = new ProfileStore(directory);
         store.Save(new("background-smoke", fixture.LocalApp.ToString(), fixture.Relay.Address.ToString()));
-        var stopped = false;
+        Process? process = null;
         try
         {
             var started = await RunProcessAsync(["start", "background-smoke", "--timeout", "5"]);
@@ -206,18 +208,20 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
             await fixture.Relay.Tunnel("background-smoke").Connections.Reader.ReadAsync(cancellation);
             var status = await RunProcessAsync(["status", "background-smoke", "--output", "json"]);
             Assert.Equal(0, status.ExitCode);
-            Assert.Equal("Connected", JsonSerializer.Deserialize<SessionSnapshot>(status.Output)!.State);
+            var snapshot = JsonSerializer.Deserialize<SessionSnapshot>(status.Output)!;
+            process = Process.GetProcessById(snapshot.ProcessId);
+            Assert.Equal("Connected", snapshot.State);
             Assert.DoesNotContain(fixture.Key, status.Output, StringComparison.Ordinal);
             var stop = await RunProcessAsync(["stop", "background-smoke"]);
             Assert.Equal(0, stop.ExitCode);
-            stopped = true;
         }
         finally
         {
-            if (!stopped) { await RunProcessAsync(["stop", "background-smoke"]); }
-            // The agent owns its registration file until it exits; retain this tiny temporary directory on a race.
-            if (!Directory.Exists(Path.Combine(directory, "sessions")) || !Directory.EnumerateFiles(Path.Combine(directory, "sessions")).Any())
-            { Directory.Delete(directory, true); }
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            process ??= CliProcess.BackgroundProcess(directory, "background-smoke");
+            await CliProcess.RunAsync(["stop", "background-smoke"], directory, fixture.Key, cleanup.Token);
+            if (process is not null) { await process.WaitForExitAsync(cleanup.Token); process.Dispose(); }
+            await CliProcess.DeleteExitedDirectoryAsync(directory, cleanup.Token);
         }
 
         Task<(int ExitCode, string Output)> RunProcessAsync(string[] args) =>
@@ -255,6 +259,42 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
 /// <summary>Runs the real CLI in a child process with its own configuration directory.</summary>
 internal static class CliProcess
 {
+    internal static Process? BackgroundProcess(string home, string name)
+    {
+        var directory = Path.Combine(home, "sessions");
+        if (!Directory.Exists(directory)) { return null; }
+        foreach (var file in Directory.EnumerateFiles(directory, "groundhog-*.json"))
+        {
+            SessionRegistration? registration;
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                registration = JsonSerializer.Deserialize<SessionRegistration>(stream);
+            }
+            catch (IOException) { continue; }
+            if (registration is not { Host: "Cli" } || registration.Name != name) { continue; }
+            try { return Process.GetProcessById(registration.ProcessId); }
+            catch (ArgumentException) { /* The owned agent already exited. */ }
+        }
+        return null;
+    }
+
+    // Windows can briefly retain a shell-launched process's working-directory handle after the exact
+    // agent has signaled exit. Retry the actual deletion condition; never skip cleanup or wait unboundedly.
+    internal static async Task DeleteExitedDirectoryAsync(string directory, CancellationToken cancellation)
+    {
+        var full = Path.GetFullPath(directory);
+        if (Path.GetDirectoryName(full) != Path.TrimEndingDirectorySeparator(Path.GetTempPath())
+            || !Path.GetFileName(full).StartsWith("groundhog-", StringComparison.Ordinal))
+        { throw new ArgumentException("Cleanup must stay in the test-owned temporary directory.", nameof(directory)); }
+        while (true)
+        {
+            try { Directory.Delete(full, true); return; }
+            catch (IOException) when (!cancellation.IsCancellationRequested)
+            { await Task.Delay(20, cancellation); }
+        }
+    }
+
     /// <summary>
     /// Runs <c>groundhog</c> (the packed tool when <c>GROUNDHOG_CLI_SMOKE_PATH</c> is set) and returns its exit code
     /// with stdout and stderr combined.
