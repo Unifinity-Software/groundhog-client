@@ -14,13 +14,15 @@ internal sealed class LocalSessions : IAsyncDisposable
     private readonly Task _server;
     private readonly SessionTelemetry _telemetry;
     private readonly CancellationTokenSource _hostStop;
+    private readonly TunnelKeyCredential? _key;
     internal static string DirectoryPath => Path.Combine(Environment.GetEnvironmentVariable("GROUNDHOG_HOME") is { Length: > 0 } configured
         ? Path.GetFullPath(configured) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Groundhog"), "sessions");
 
-    internal LocalSessions(SessionTelemetry telemetry, CancellationTokenSource hostStop)
+    internal LocalSessions(SessionTelemetry telemetry, CancellationTokenSource hostStop, TunnelKeyCredential? key = null)
     {
         _telemetry = telemetry;
         _hostStop = hostStop;
+        _key = key;
         Directory.CreateDirectory(DirectoryPath);
         _file = Path.Combine(DirectoryPath, $"{_pipe}.json");
         File.WriteAllText(_file, JsonSerializer.Serialize(new SessionRegistration(telemetry.Snapshot().Name, _pipe, Environment.ProcessId, telemetry.Host, telemetry.ProcessName)));
@@ -77,6 +79,25 @@ internal sealed class LocalSessions : IAsyncDisposable
     internal static string StopRefusal(string? processName, int processId) =>
         $"The tunnel is hosted by Aspire AppHost {processName ?? "unknown"} (PID {processId}). Stop it from Aspire.";
 
+    // A yes/no proof lets rotation confirm its rollback key without exposing keys or fingerprints in snapshots.
+    internal static async Task<bool> MatchesKeyAsync(SessionRegistration registration, string key, CancellationToken cancellation)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            await using var pipe = new NamedPipeClientStream(".", registration.Pipe, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            await pipe.ConnectAsync(timeout.Token);
+            using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
+            using var reader = new StreamReader(pipe, leaveOpen: true);
+            var fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key)));
+            await writer.WriteLineAsync(("match-key " + fingerprint).AsMemory(), timeout.Token);
+            return await reader.ReadLineAsync(timeout.Token) == "true";
+        }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException)
+        { cancellation.ThrowIfCancellationRequested(); return false; }
+    }
+
     private async Task ServeAsync()
     {
         while (!_shutdown.IsCancellationRequested)
@@ -89,7 +110,7 @@ internal sealed class LocalSessions : IAsyncDisposable
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(2));
                 // Fixed-size request: an idle or malicious local client cannot occupy this pipe indefinitely.
-                var bytes = new byte[16];
+                var bytes = new byte[96];
                 var count = 0;
                 while (count < bytes.Length)
                 {
@@ -102,6 +123,12 @@ internal sealed class LocalSessions : IAsyncDisposable
                     count++;
                 }
                 var command = System.Text.Encoding.UTF8.GetString(bytes, 0, count).TrimEnd('\r');
+                if (command.StartsWith("match-key ", StringComparison.Ordinal))
+                {
+                    using var proof = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
+                    await proof.WriteLineAsync((_key?.MatchesFingerprint(command[10..]) == true ? "true" : "false").AsMemory(), timeout.Token);
+                    continue;
+                }
                 if (command is not ("snapshot" or "stop"))
                 {
                     continue;

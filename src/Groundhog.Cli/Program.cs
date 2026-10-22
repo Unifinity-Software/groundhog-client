@@ -51,6 +51,12 @@ try
             // The explicit update command reports these errors; a startup offer is optional.
         }
     }
+    if (args is ["__host-background-stored", .. var storedArgs])
+    {
+        return await GroundhogCommand.RunAsync(["host", .. storedArgs],
+            variable => variable == HostArguments.KeyVariable ? null : Environment.GetEnvironmentVariable(variable),
+            TextWriter.Null, TextWriter.Null, stop.Token);
+    }
     if (args is ["__host-background", .. var backgroundArgs])
     {
         return await GroundhogCommand.RunAsync(["host", .. backgroundArgs], Environment.GetEnvironmentVariable, TextWriter.Null, TextWriter.Null, stop.Token);

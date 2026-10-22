@@ -41,4 +41,11 @@ public sealed class TunnelKeyCredential : GroundhogCredential
     public override ValueTask<GroundhogAccessToken> GetTokenAsync(
         GroundhogTokenRequestContext context,
         CancellationToken cancellationToken) => ValueTask.FromResult(_token);
+
+    internal bool MatchesFingerprint(string fingerprint)
+    {
+        if (fingerprint.Length != 64 || !fingerprint.All(char.IsAsciiHexDigit)) { return false; }
+        var expected = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(_token.Token));
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expected, Convert.FromHexString(fingerprint));
+    }
 }

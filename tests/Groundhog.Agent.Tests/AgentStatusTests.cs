@@ -177,6 +177,8 @@ public class AgentStatusTests(TunnelFixture fixture) : IClassFixture<TunnelFixtu
             Assert.Equal("Agent", snapshot.Host);
             Assert.Equal(Environment.ProcessId, snapshot.ProcessId);
             Assert.NotEmpty(snapshot.ProcessName!);
+            Assert.True(await LocalSessions.MatchesKeyAsync(registration, fixture.Key, ct));
+            Assert.False(await LocalSessions.MatchesKeyAsync(registration, Groundhog.Protocol.ConnectionKey.Generate(), ct));
         }
         Assert.DoesNotContain(LocalSessions.Registrations(), r => r.Pipe == registration.Pipe);
     }

@@ -167,7 +167,7 @@ public sealed class GroundhogAgent
             }
 
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            await using var session = _options.RegisterLocalSession ? new LocalSessions(Telemetry, stop) : null;
+            await using var session = _options.RegisterLocalSession ? new LocalSessions(Telemetry, stop, _options.Credential as TunnelKeyCredential) : null;
             var run = new AgentRun(_options, PublishStatus, OnRequestCompleted, _metrics, stop.Token);
             return await run.RunAsync().ConfigureAwait(false);
         }

@@ -11,6 +11,7 @@ internal sealed record LoginSession(string Relay, string Token, DateTimeOffset E
 
 internal sealed class CredentialStore(string directory)
 {
+    internal string DirectoryPath => directory;
     private string FilePath => Path.Combine(directory, "credentials.dat");
     internal LoginSession? Read()
     {

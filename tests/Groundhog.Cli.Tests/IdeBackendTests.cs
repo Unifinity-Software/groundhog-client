@@ -19,6 +19,25 @@ namespace Groundhog.Cli.Tests;
 public sealed class IdeBackendTests
 {
     [Fact]
+    public async Task Rotation_advertises_capability_requires_confirmation_and_refuses_remote_hosts_clearly()
+    {
+        await using var fixture = new Fixture();
+        var initialized = await fixture.InitializeAsync();
+        Assert.Contains("rotateWithoutDowntime", initialized.GetProperty("capabilities").EnumerateArray().Select(c => c.GetString()));
+        var unconfirmed = await Assert.ThrowsAsync<RemoteInvocationException>(() => fixture.CallAsync("keys/rotateWithoutDowntime",
+            new { workspace = "example", name = "my-tunnel" }));
+        Assert.Equal(-32013, unconfirmed.ErrorCode);
+        var invalid = await Assert.ThrowsAnyAsync<RemoteRpcException>(() => fixture.CallAsync("keys/rotateWithoutDowntime",
+            new { workspace = "example", name = "my-tunnel", confirm = true, timeoutSeconds = 121 }));
+        Assert.Equal(-32602, (int)invalid.ErrorCode!.Value);
+        var remote = await Assert.ThrowsAsync<RemoteInvocationException>(() => fixture.CallAsync("keys/rotateWithoutDowntime",
+            new { workspace = "example", name = "my-tunnel", confirm = true }));
+        Assert.Equal(-32017, remote.ErrorCode);
+        Assert.Contains("hosted elsewhere", remote.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Fixture.Token, fixture.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Visitor_access_validates_policies_and_returns_API_key_only_once_on_creation()
     {
         await using var fixture = new Fixture(); await fixture.InitializeAsync();

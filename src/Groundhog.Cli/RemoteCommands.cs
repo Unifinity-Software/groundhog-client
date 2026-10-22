@@ -14,7 +14,7 @@ internal static class RemoteCommands
 
     internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, CancellationToken cancellation,
         CredentialStore? credentialStore = null, Func<string, string?, ManagementClient>? createClient = null,
-        Func<string, string>? userSecretsPath = null)
+        Func<string, string>? userSecretsPath = null, IRotationHost? rotationHost = null)
     {
         if (args.Contains("--help", StringComparer.Ordinal)) { output.Write(GroundhogCommand.Usage); return 0; }
         var rest = args[1..];
@@ -35,7 +35,10 @@ internal static class RemoteCommands
         }
         else if (args[0] == "stats") { options.RequireKnown("--remote", "--workspace", "--output"); }
         else if (args[0] == "access") { options.RequireKnown("--relay", "--workspace", "--output", "--agent-managed"); }
-        else { options.RequireKnown("--relay", "--workspace", "--output", "--yes", "--status", "--project", "--name-parameter", "--key-parameter"); }
+        else { options.RequireKnown("--relay", "--workspace", "--output", "--yes", "--status", "--project", "--name-parameter", "--key-parameter", "--no-downtime", "--timeout"); }
+        var noDowntime = options.Has("--no-downtime");
+        if ((noDowntime || options.Has("--timeout")) && !(args[0] == "key" && options.Positional is ["rotate", _] && noDowntime))
+        { throw new UsageException("--no-downtime and --timeout are only supported by key rotate --no-downtime."); }
         if (options.Get("--output") is { } format && format != "json")
         {
             throw new ArgumentException("Unsupported output format.");
@@ -334,6 +337,15 @@ internal static class RemoteCommands
                 await RevokeKeyAsync(client, path, name, revokedId, cancellation);
                 // The saved key stays: its ID can't be worked out from the key, so it may be the key that's still live.
                 output.WriteLine($"Key {revokedId[..8]} revoked. Agents that used it were disconnected.");
+                break;
+            case "key" when positional[0] == "rotate" && noDowntime:
+                var timeout = options.Get("--timeout") is { } seconds && double.TryParse(seconds, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+                    ? value : options.Has("--timeout") ? double.NaN : 30;
+                if (!double.IsFinite(timeout) || timeout is < 1 or > 120) { throw new UsageException("Rotation timeout must be from 1 to 120 seconds."); }
+                await new KeyRotation(store.DirectoryPath, client, rotationHost).RunAsync(session, workspaceSlug, name, TimeSpan.FromSeconds(timeout), cancellation);
+                if (projectSecrets is not null && store.Read()?.TunnelKeys.GetValueOrDefault(KeyId(workspaceSlug, name)) is { } replacementKey)
+                { projectSecrets.Write(name, replacementKey, output); }
+                output.WriteLine("Key rotated. The replacement local agent is connected and the old key was revoked.");
                 break;
             case "key":
                 if (positional[0] == "rotate")

@@ -69,7 +69,7 @@ internal static class GroundhogCommand
           groundhog create <name> [--workspace <slug>] [--project <file> [user secrets options]]
           groundhog rename <old-name> <new-name> [--workspace <slug>] [--yes]
           groundhog delete <name> [--workspace <slug>] [--yes]
-          groundhog key rotate <name> [--workspace <slug>] [--yes] [--project <file> [user secrets options]]
+          groundhog key rotate <name> [--no-downtime [--timeout <seconds>]] [--workspace <slug>] [--yes] [--project <file> [user secrets options]]
           groundhog key add <name> [--workspace <slug>] [--project <file> [user secrets options]]
           groundhog key list <name> [--workspace <slug>] [--output json]
           groundhog key revoke <name> [<key-id>] [--workspace <slug>] [--yes]

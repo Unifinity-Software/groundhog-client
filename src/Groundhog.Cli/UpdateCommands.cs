@@ -158,7 +158,7 @@ internal sealed class UpdateCommands(
     /// <summary>Whether to print the once-a-day notice before running <paramref name="args"/>.</summary>
     internal static bool ShouldCheck(bool interactive, string[] args, Func<string, string?> environment) =>
         Enabled(interactive, args, environment)
-        && !args.Any(arg => arg is "--help" or "-h" or "help" or "--version" or "update" or "__host-background")
+        && !args.Any(arg => arg is "--help" or "-h" or "help" or "--version" or "update" or "__host-background" or "__host-background-stored")
         // The dashboard checks in the background and shows the result on its launch screen.
         && args.Where(arg => arg is not "--no-color").ToArray() is not ([] or ["dashboard"])
         && !args.Contains("json", StringComparer.Ordinal) && !args.Contains("--output=json", StringComparer.Ordinal);

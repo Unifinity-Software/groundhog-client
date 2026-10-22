@@ -43,7 +43,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private string? _lastAuth;
     private string? _lastTunnels;
     private string? _lastAgents;
-    private readonly List<string> _capabilities = ["deviceLogin", "localAgents", "liveRequests", "requestDetail", "requestReplay", "requestExportHttp", "captureBodies", "visitorAccess"];
+    private readonly List<string> _capabilities = ["deviceLogin", "localAgents", "liveRequests", "requestDetail", "requestReplay", "requestExportHttp", "captureBodies", "visitorAccess", "rotateWithoutDowntime"];
     internal Func<string, object, Task> Notify { get; set; } = (_, _) => Task.CompletedTask;
 
     internal IdeServices(string? directory = null, Func<string, string?, ManagementClient>? client = null,
@@ -77,8 +77,6 @@ internal sealed partial class IdeServices : IAsyncDisposable
             if (method == "auth/login") { return await LoginAsync(ct); }
             if (method is "requests/detail" or "requests/replay" or "requests/exportHttp" or "captureBodies/set")
             { return await RequestMethodAsync(method, p, ct); }
-            if (method is "keys/rotateWithoutDowntime")
-            { throw Fault(-32014, "featureNotEnabled", "This backend does not support this feature."); }
             if (method == "doctor/run") { return await DoctorAsync(p, ct); }
             if (method == "requests/subscribe") { return await SubscribeAsync(p, ct); }
             // Serialize account/key mutations so two overlapping UI operations cannot overwrite saved keys.
@@ -178,6 +176,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
         var slug = Workspace(p, session);
         var name = method == "tunnels/list" ? null : Name(p);
         var path = name is null ? $"/api/w/{Uri.EscapeDataString(slug)}/tunnels" : ManagementClient.TunnelPath(slug, name);
+        if (method == "keys/rotateWithoutDowntime") { return await RotateKeyAsync(p, session, client, slug, name!, ct); }
         if (method.StartsWith("visitorAccess/", StringComparison.Ordinal)) { return await VisitorAccessMethodAsync(method, p, client, slug, name!, ct); }
         if (method == "tunnels/list")
         {

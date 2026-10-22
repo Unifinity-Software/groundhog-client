@@ -334,3 +334,18 @@ safe projections, device-login orchestration, subscription IDs and structured di
 | visitor access, diagnostics and bundled backend | #51 |
 
 The separate newline-delimited MCP adapter and its read-only/action policy are described in [Groundhog MCP server](mcp.md).
+## Connected local key rotation
+
+`keys/rotateWithoutDowntime` is enabled by `rotateWithoutDowntime`. It accepts a workspace/tunnel, `confirm: true` and
+optional integer `timeoutSeconds` from 1 to 120 (default 30), and returns `{}` after a verified handover and revocation.
+It uses the same transaction and safe refusal/rollback behavior as `groundhog key rotate --no-downtime`. The old key ID
+is the sole existing live service key; the new ID is the added ID in the post-add set. The backend verifies that the
+saved rollback key matches the current connected CLI agent, and verifies the replacement process and newly connected
+key before revoking the old ID. A fixed-size current-user pipe proof returns only a boolean; no key or fingerprint is
+projected into IDE messages. Aspire, library, remote or ambiguous hosts and occupied key slots require manual handling.
+The backend emits `tunnels/changed` and `agents/changed` after success.
+
+```json
+{"jsonrpc":"2.0","id":40,"method":"keys/rotateWithoutDowntime","params":{"workspace":"example","name":"my-tunnel","confirm":true,"timeoutSeconds":30}}
+{"jsonrpc":"2.0","id":40,"result":{}}
+```

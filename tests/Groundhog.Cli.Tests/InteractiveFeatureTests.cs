@@ -278,6 +278,6 @@ internal static class CliProcess
             await process.WaitForExitAsync(cancellation);
             return (process.ExitCode, await stdout + await stderr);
         }
-        finally { if (!process.HasExited) { process.Kill(entireProcessTree: true); } }
+        finally { if (!process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(CancellationToken.None); } }
     }
 }

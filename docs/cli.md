@@ -440,61 +440,39 @@ Rename, deletion, rotation and revocation can disconnect agents; the CLI asks fo
 
 ### Rotate a connection key without downtime
 
-A tunnel can have two live connection keys at once. `key rotate` replaces every key and disconnects agents immediately,
-so the public address stops answering until hosting restarts. To replace a key while the app stays reachable, add a
-second key, move hosting to it, and then revoke the old key. Run these steps on the computer that hosts the tunnel:
-the new key is saved there and never printed.
-
-First, add a key. Agents already connected keep using the old key, which keeps working until you revoke it:
+Run the following on the computer hosting the tunnel with the current CLI. The command adds a second key, saves it,
+starts a replacement local agent and confirms both its connection and the new key's connected state before revoking
+the exact old key ID. The old agent keeps running until the service accepts its replacement; the new key is never
+printed or passed on a command line.
 
 ```sh
-groundhog key add my-tunnel
+groundhog key rotate my-tunnel --no-downtime
 ```
 
-The new key is saved on this computer for `groundhog host my-tunnel`, replacing the key saved there before. If
-`my-tunnel` already has two live keys, the command stops with
-`A tunnel has at most 2 connection keys. Revoke one first` and changes nothing. If the AppHost reads the tunnel from
-[user secrets](#put-a-tunnel-in-an-aspire-apphosts-user-secrets), add `--project` so the new key is written there too:
+The replacement agent is connected when the command prints `Key rotated. The replacement local agent is connected
+and the old key was revoked.` Scripts also pass `--yes`. `--timeout 60` allows up to 60 seconds for handover; the default
+is 30 seconds and the supported range is 1 to 120 seconds. Request/WebSocket connections already in flight may still
+end during the agent handover; this mode keeps a live hosting key available rather than promising uninterrupted streams.
 
-```sh
-groundhog key add my-tunnel --project AppHost/AppHost.csproj
-```
+The command requires exactly one connected local CLI agent, a saved connection key matching that agent, one live key
+reported by the service, and one free key slot. It verifies the saved key through a current-user local pipe that returns
+only a yes/no answer. Key IDs come from the service's before/after key sets, never from list order or from hashing a key.
+For a loopback HTTPS target, save a profile with its local certificate settings first. Existing visitor access rules are
+retained, and a saved profile's visitor and TLS options are reused.
 
-`Parameters:groundhog-tunnel-name` is `my-tunnel` and `Parameters:groundhog-tunnel-key` is the new key.
+A timeout or cancellation before old-key revocation restores the previous saved key and hosting, then revokes the added
+key using an independent bounded cleanup operation. If the service's response to revocation is lost, the command reads
+its key IDs again before deciding whether to roll back; it never blindly revokes both keys. A failure to verify the final
+state or finish rollback reports that you must inspect `groundhog key list my-tunnel`, local status and the saved key
+before changing either key.
 
-Next, restart hosting so the agent connects with the new key: stop `groundhog host my-tunnel` and run it again, run
-`groundhog restart <saved-profile>` for a background agent, or restart the AppHost. Hosting that passes the old key
-through `GROUNDHOG_KEY` or `--key` keeps using it, because those take precedence over the saved key.
+Remote hosts, Aspire AppHosts, library hosts, ambiguous local sessions, older agents without key verification and tunnels
+with two occupied key slots are refused before a key is created. For an Aspire AppHost, use `groundhog key add my-tunnel
+--project AppHost/AppHost.csproj`, restart the AppHost to load its new user secret, inspect `key list`, and revoke the
+specific old ID only after confirming it is no longer connected. A key ID cannot be derived from a saved key value.
 
-Then check which key each agent uses. Revoking a key disconnects every agent that still uses it, so make sure none do:
-
-```sh
-groundhog key list my-tunnel
-```
-
-```text
-ID                                Created (UTC)     Last used (UTC)   Connected
-0123456789abcdef0123456789abcdef  2026-10-01 09:00  2026-10-14 08:55  No
-fedcba9876543210fedcba9876543210  2026-10-14 09:00  2026-10-14 09:02  Yes
-```
-
-Keys are listed oldest first, so the first row is the old key. Its `Connected` column is `No`: no agent uses it any
-more. The new key, `fedcba9876543210fedcba9876543210`, is `Yes`. A key no agent has used shows `Never` under
-`Last used (UTC)`. `--output json` prints the same keys as JSON.
-
-Finally, revoke the old key by its ID. The CLI asks for confirmation; scripts pass `--yes`:
-
-```sh
-groundhog key revoke my-tunnel 0123456789abcdef0123456789abcdef
-```
-
-The CLI prints `Key 01234567 revoked. Agents that used it were disconnected.` The new key keeps working and stays
-saved on this computer. A key's ID can't be worked out from the key itself, so revoking one key never removes the key
-saved here.
-
-If a key may be compromised, use `groundhog key rotate my-tunnel` instead: it revokes every key and disconnects all
-agents at once, so nobody can keep using the old key while you switch. A relay that doesn't support two keys yet
-answers `key add` with `This relay doesn't support adding keys yet`; use `key rotate` there.
+If a key may be compromised, `groundhog key rotate my-tunnel` without `--no-downtime` still revokes every key and
+immediately disconnects existing agents. Use that mode when keeping the old key valid during handover is inappropriate.
 
 ### Put a tunnel in an Aspire AppHost's user secrets
 

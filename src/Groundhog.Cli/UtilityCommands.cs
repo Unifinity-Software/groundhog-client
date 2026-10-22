@@ -360,7 +360,7 @@ internal sealed class Options
             var split = args[i].Split('=', 2);
             var key = split[0];
             string? value = null;
-            if (key is "--watch" or "--follow" or "--yes" or "--remote" or "--agent-managed" or "--insecure-local")
+            if (key is "--watch" or "--follow" or "--yes" or "--remote" or "--agent-managed" or "--insecure-local" or "--no-downtime")
             {
                 if (split.Length != 1)
                 {
