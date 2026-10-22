@@ -185,8 +185,9 @@ groundhog logout
 
 Logout revokes the saved remote credential and removes local credentials and saved connection keys. It also succeeds
 when that remote session has already expired or been revoked; other relay failures remain errors.
-If the relay cannot be reached, the local copy is still removed, but remote revocation cannot be confirmed;
-the credential expires at its original eight-hour deadline.
+If the relay cannot be reached, local credentials are still removed; this does not confirm remote revocation.
+An access token expires at its issued deadline. A refresh-capable sign-in may remain valid until its idle or absolute
+limit, or until you revoke it from Account.
 
 ## Run a tunnel
 
