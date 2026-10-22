@@ -56,7 +56,7 @@ internal sealed class DebugHosting(GroundhogPackage package, DTE dte)
             if ((string?)existing?["source"] == "aspire")
             { package.SetStatus("Groundhog: this tunnel belongs to the Aspire AppHost. Manage it from Aspire."); return; }
             var agent = await package.Backend.RequestAsync("agents/start", new { workspace = _workspace, name, target, projectDirectory = Path.GetDirectoryName(path) }, cancellation);
-            _ownedProcess = existing is null ? (int?)agent["processId"] : null;
+            _ownedProcess = CreatedProcess(agent);
             package.SetStatus("Groundhog: " + ((string?)agent["url"] ?? name) + " > " + target);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -66,6 +66,9 @@ internal sealed class DebugHosting(GroundhogPackage package, DTE dte)
         }
         finally { _changes.Release(); }
     }
+
+    internal static int? CreatedProcess(JObject agent) => (bool?)agent["created"] == true && (string?)agent["source"] == "cli"
+        ? (int?)agent["processId"] : null;
 
     private Project? StartupProject()
     {

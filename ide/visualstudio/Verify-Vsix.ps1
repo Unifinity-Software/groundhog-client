@@ -140,6 +140,13 @@ public static class SubscriptionSmoke {
         [SubscriptionSmoke]::Verify($assembly, $client)
     } finally { $client.Dispose() }
     $targetType = $assembly.GetType('Groundhog.VisualStudio.DebugHosting', $true)
+    $ownedMethod = $targetType.GetMethod('CreatedProcess', [Reflection.BindingFlags]'Static,NonPublic')
+    foreach ($case in @(@('{"processId":1234,"source":"cli","state":"Reconnecting","created":false}', $null), @('{"processId":1234,"source":"cli","state":"Connected","created":false}', $null), @('{"processId":1234,"source":"cli","created":true}', 1234))) {
+        $agent = [Newtonsoft.Json.Linq.JObject]::Parse($case[0])
+        $arguments = New-Object object[] 1
+        $arguments[0] = $agent
+        if ($ownedMethod.Invoke($null, $arguments) -ne $case[1]) { throw 'Debug hosting claimed an agent it did not create.' }
+    }
     $targetMethod = $targetType.GetMethod('ValidTarget', [Reflection.BindingFlags]'Static,NonPublic')
     foreach ($case in @(@('http://localhost:5173', $true), @('https://localhost:7132', $true), @('javascript:alert(1)', $false), @('https://user:secret@localhost', $false), @('http://localhost/path', $false), @('http://localhost/?key=value', $false))) {
         if ($targetMethod.Invoke($null, @($case[0].ToString())) -ne $case[1]) { throw 'Target validation smoke failed.' }

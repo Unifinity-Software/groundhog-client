@@ -143,11 +143,14 @@ emit `tunnels/changed` after success; clients refetch state rather than treating
 
 `agents/start` validates the target, saves a hosting profile and starts a background CLI agent using the securely saved
 key for the requested workspace/tunnel. It succeeds when connected; already-running agents return their current
-agent object when the target agrees, and fail with `conflict` otherwise. Closing the backend does not stop the agent.
+agent object when the target agrees, and fail with `conflict` otherwise. Start/restart results additionally include
+`created`: true only when that invocation launched the returned process, false when start reused a responsive session,
+including one still connecting or reconnecting. Debug adapters take ownership only when `created` is true, never from
+an earlier list snapshot. A replacement observed after startup is not claimed. Closing the backend does not stop the agent.
 
 ```json
 {"jsonrpc":"2.0","id":11,"method":"agents/start","params":{"workspace":"example","name":"my-tunnel","target":"http://localhost:5173"}}
-{"jsonrpc":"2.0","id":11,"result":{"name":"my-tunnel","target":"http://localhost:5173","url":"https://my-tunnel.groundhog.unifinity.com","state":"Connected","source":"cli","processId":1234}}
+{"jsonrpc":"2.0","id":11,"result":{"name":"my-tunnel","target":"http://localhost:5173","url":"https://my-tunnel.groundhog.unifinity.com","state":"Connected","source":"cli","processId":1234,"created":true}}
 {"jsonrpc":"2.0","id":12,"method":"agents/stop","params":{"workspace":"example","name":"my-tunnel"}}
 {"jsonrpc":"2.0","id":12,"result":{}}
 {"jsonrpc":"2.0","id":13,"method":"agents/restart","params":{"workspace":"example","name":"my-tunnel","target":"http://localhost:5173"}}

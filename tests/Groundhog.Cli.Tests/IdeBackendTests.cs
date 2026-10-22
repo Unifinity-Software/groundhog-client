@@ -18,6 +18,29 @@ namespace Groundhog.Cli.Tests;
 
 public sealed class IdeBackendTests
 {
+    [Theory]
+    [InlineData(GroundhogAgentState.Reconnecting)]
+    [InlineData(GroundhogAgentState.Connecting)]
+    public async Task Debug_start_does_not_claim_existing_unconnected_agent_or_agent_started_after_list(GroundhogAgentState state)
+    {
+        await using var fixture = new Fixture();
+        await fixture.InitializeAsync();
+        var before = await fixture.CallAsync("tunnels/list", new { workspace = "example" });
+        Assert.Empty(before.GetProperty("agents").EnumerateArray());
+        using var hostStop = new CancellationTokenSource();
+        var name = "ide-reuse-" + Guid.NewGuid().ToString("N")[..8];
+        var telemetry = new SessionTelemetry(name, new Uri("http://localhost:5173"), fixture.Time);
+        telemetry.OnStatus(new(state));
+        await using var session = new LocalSessions(telemetry, hostStop);
+        fixture.Registrations = [Assert.Single(LocalSessions.Registrations(), r => r.Name == name)];
+        fixture.Store.Update(saved => saved! with { TunnelKeys = new() { ["example/" + name] = fixture.Handler.Key } });
+        var reused = await fixture.CallAsync("agents/start", new { workspace = "example", name, target = "http://localhost:5173" });
+        Assert.False(reused.GetProperty("created").GetBoolean());
+        Assert.Equal(Environment.ProcessId, reused.GetProperty("processId").GetInt32());
+        Assert.Equal(state.ToString(), reused.GetProperty("state").GetString());
+        Assert.False(hostStop.IsCancellationRequested);
+    }
+
     [Fact]
     public async Task Rotation_advertises_capability_requires_confirmation_and_refuses_remote_hosts_clearly()
     {

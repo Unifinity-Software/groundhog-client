@@ -331,18 +331,25 @@ internal sealed partial class IdeServices : IAsyncDisposable
         {
             var existing = Agent(responsive[0].Registration, responsive[0].Snapshot);
             if (new Uri(existing.Target) != target) { throw Fault(-32017, "conflict", "The local agent has a different target."); }
-            return existing;
+            return StartedAgent(existing, created: false);
         }
         if (!session.TunnelKeys.ContainsKey(RemoteCommands.KeyId(workspace, name)))
         { throw Fault(-32012, "noConnectionKey", "No connection key is saved for this tunnel."); }
         profileStore.Save(new(name, target.ToString(), session.Relay, parsed.Arguments.AccessFlags,
             parsed.Arguments.LocalCaFile, parsed.Arguments.InsecureLocal));
-        var code = await AgentLifecycle.RunAsync([method == "agents/start" ? "start" : "restart", name], TextWriter.Null, TextWriter.Null, ct);
+        int? startedProcess = null;
+        var code = await AgentLifecycle.RunAsync([method == "agents/start" ? "start" : "restart", name], TextWriter.Null, TextWriter.Null, ct,
+            started: processId => startedProcess = processId);
         if (code != 0) { throw Fault(-32017, "conflict", "The local agent could not start. Run groundhog doctor."); }
         var agents = await AgentsAsync(ct);
         await Notify("agents/changed", new { agents });
-        return agents.SingleOrDefault(a => a.Name == name) ?? throw Fault(-32018, "notFound", "The local agent stopped before it could be observed.");
+        var started = agents.SingleOrDefault(a => a.Name == name && a.ProcessId == startedProcess)
+            ?? throw Fault(-32018, "notFound", "The local agent stopped before it could be observed.");
+        return StartedAgent(started, created: true);
     }
+
+    private static object StartedAgent(IdeAgent agent, bool created) => new
+    { agent.Name, agent.Target, agent.Url, agent.State, agent.Source, agent.ProcessId, created };
 
     private async Task<IdeAgent[]> AgentsAsync(CancellationToken ct)
     {

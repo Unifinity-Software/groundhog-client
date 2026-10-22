@@ -6,7 +6,8 @@ namespace Groundhog.Cli;
 
 internal static class AgentLifecycle
 {
-    internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, CancellationToken cancellation)
+    internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, CancellationToken cancellation,
+        Action<int>? started = null)
     {
         if (args.Contains("--help", StringComparer.Ordinal)) { output.Write(GroundhogCommand.Usage); return 0; }
         var hostArgs = new List<string>();
@@ -149,7 +150,7 @@ internal static class AgentLifecycle
             {
                 var registration = LocalSessions.Registrations().FirstOrDefault(r => r.ProcessId == process.Id);
                 if (registration is not null && await LocalSessions.QueryAsync(registration, false, deadline.Token) is { State: "Connected" })
-                { output.WriteLine($"Started local agent (PID {process.Id}). Use status, logs, or stop {name}."); return 0; }
+                { started?.Invoke(process.Id); output.WriteLine($"Started local agent (PID {process.Id}). Use status, logs, or stop {name}."); return 0; }
                 await Task.Delay(200, deadline.Token);
             }
             error.WriteLine("groundhog: background host exited. Run host in the foreground to see the failure."); return 1;
