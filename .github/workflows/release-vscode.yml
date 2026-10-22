@@ -153,14 +153,26 @@ jobs:
           pattern: groundhog-*
           merge-multiple: true
           path: ide/vscode/release-packages
-      - name: Publish the verified packages through trusted identities
+      - name: Publish the verified packages
         working-directory: ide/vscode
         shell: bash
+        env:
+          MARKETPLACE_AUTH: ${{ vars.MARKETPLACE_AUTH || 'pat' }}
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
+          marketplace=()
+          case "$MARKETPLACE_AUTH" in
+            pat) test -n "$VSCE_PAT" || { echo 'Configure VSCE_PAT in the vscode environment before publishing to Marketplace.' >&2; exit 1; } ;;
+            oidc) marketplace+=(--oidc) ;;
+            *) echo 'MARKETPLACE_AUTH must be pat or oidc.' >&2; exit 1 ;;
+          esac
+          openvsx=()
+          if test -z "$OVSX_PAT"; then openvsx+=(--trusted-publishing); fi
           npm ci --no-audit --no-fund
           node scripts/check-release.mjs
           node -e 'const fs=require("fs"); for(const target of ["win32-x64","win32-arm64","linux-x64","linux-arm64","darwin-x64","darwin-arm64"]) if(!fs.existsSync("release-packages/groundhog-"+target+".vsix")) throw new Error("Missing verified target: "+target)'
           extra=()
           if node -e 'process.exit(require("./package.json").groundhog.preRelease === false ? 1 : 0)'; then extra+=(--pre-release); fi
-          npx vsce publish --packagePath release-packages/*.vsix --oidc --skip-duplicate "${extra[@]}"
-          npx ovsx publish --packagePath release-packages/*.vsix --trusted-publishing --skip-duplicate "${extra[@]}"
+          npx vsce publish --packagePath release-packages/*.vsix "${marketplace[@]}" --skip-duplicate "${extra[@]}"
+          npx ovsx publish --packagePath release-packages/*.vsix "${openvsx[@]}" --skip-duplicate "${extra[@]}"

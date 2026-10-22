@@ -102,12 +102,21 @@ versions listed as `minimumCliVersion` and `bundledCliVersion` in `ide/vscode/pa
 extension version, and requires a merged master PR whose latest Build run passed. A generic development
 VSIX still requires the global CLI; platform release VSIX files include their backend.
 
-Owner setup: create the `unifinity` Marketplace publisher and Open VSX namespace, accept Open VSX's publisher
-agreement, then register this repository's `.github/workflows/release-vscode.yml` as a trusted publisher in
-both registries. The publishing job uses GitHub environment `vscode` and `id-token: write`. Marketplace uses
-VSCE 4's `--oidc`; Open VSX uses `--trusted-publishing`. No long-lived publishing tokens are required. Keep
-any environment protections in place. See the official [Marketplace CLI](https://github.com/microsoft/vscode-vsce)
-and [Open VSX CLI](https://github.com/eclipse/openvsx/tree/master/cli) for trusted publisher configuration.
+Owner setup: create the `unifinity` Marketplace publisher and Open VSX namespace and accept Open VSX's publisher
+agreement. Add a Marketplace publishing token as the `VSCE_PAT` secret in GitHub environment `vscode`;
+the workflow defaults to this mode and fails before publication if the token is missing. Scope the token to the
+publisher and extension publishing. Keep environment protections in place and never print or commit tokens.
+
+VSCE 4 includes `--oidc`, but Marketplace's trusted-publishing backend is not available as of October 22, 2026.
+The [maintainer's rollout update](https://github.com/microsoft/vscode-vsce/issues/1275#issuecomment-5990771209)
+tracks availability. Once the publisher's trusted policy can be configured for this repository and
+`.github/workflows/release-vscode.yml`, set environment variable `MARKETPLACE_AUTH=oidc` to opt in.
+The job has `id-token: write`; an OIDC failure stops publishing without falling back to a token.
+
+Open VSX uses `--trusted-publishing` by default: register this repository and workflow as a trusted publisher
+for the namespace. An optional `OVSX_PAT` environment secret selects token authentication instead.
+See the official [Marketplace CLI](https://github.com/microsoft/vscode-vsce) and
+[Open VSX CLI](https://github.com/eclipse/openvsx/tree/master/cli) for publisher configuration.
 
 Before tagging, run the full client checks and extension lint, type checking, unit tests, production build,
 VSIX packaging and Electron smoke locally. Update the extension version and `groundhog.preRelease` marker,
