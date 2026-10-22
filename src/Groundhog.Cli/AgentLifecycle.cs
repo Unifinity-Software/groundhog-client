@@ -137,7 +137,7 @@ internal static class AgentLifecycle
         };
         if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
         {
-            start.ArgumentList.Add(typeof(GroundhogCommand).Assembly.Location);
+            start.ArgumentList.Add(CliPaths.AssemblyFile);
         }
 
         start.ArgumentList.Add("__host-background");

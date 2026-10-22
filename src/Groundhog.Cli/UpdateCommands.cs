@@ -41,7 +41,8 @@ internal sealed class UpdateCommands(
         var http = new HttpClient(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All }) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.UserAgent.ParseAdd($"Groundhog.Cli/{Version}");
         return new(new(http, TimeProvider.System, ProfileStore.DefaultDirectory, Version),
-            ToolInstallation.Find(typeof(GroundhogCommand).Assembly.Location, Environment.CurrentDirectory, Version),
+            File.Exists(CliPaths.AssemblyFile)
+                ? ToolInstallation.Find(CliPaths.AssemblyFile, Environment.CurrentDirectory, Version) : null,
             InteractiveCli.Available,
             (message, cancellation) => AnsiConsole.PromptAsync(new ConfirmationPrompt(message) { DefaultValue = false }, cancellation),
             (scope, version, cancellation) => FinishesAfterExit(scope)
@@ -81,7 +82,7 @@ internal sealed class UpdateCommands(
 
             if (installation is null)
             {
-                error.WriteLine("groundhog: this executable's .NET tool installation could not be identified. Update using its original installer.");
+                error.WriteLine("groundhog: this executable's .NET tool installation could not be identified. Update a bundled IDE backend by upgrading the Groundhog extension; otherwise use its original installer.");
                 return ExitCodes.Failed;
             }
             if (!yes && !await confirm($"Update Groundhog CLI to {status.Available}?", cancellation))
