@@ -150,7 +150,9 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
         {
             var output = new StringWriter();
             string[] args = command == "ps" ? [command, "--output", "json"] : [command, "aspire-local-session", "--output", "json"];
-            Assert.Equal(0, await GroundhogCommand.RunAsync(args, _ => null, output, new StringWriter(), ct));
+            var commandError = new StringWriter();
+            var exit = await GroundhogCommand.RunAsync(args, _ => null, output, commandError, ct);
+            Assert.True(exit == 0, $"Local {command} exited {exit}: {commandError.ToString().Replace(fixture.Key, "[redacted]", StringComparison.Ordinal)}");
             Assert.DoesNotContain("hidden", output.ToString(), StringComparison.Ordinal);
             Assert.Contains(command == "requests" ? "/echo" : "Aspire", output.ToString(), StringComparison.Ordinal);
         }
