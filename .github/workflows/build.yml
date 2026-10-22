@@ -29,6 +29,31 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ide/vscode/package-lock.json
+      - name: Extension checks and package
+        working-directory: ide/vscode
+        run: |
+          npm ci --no-audit --no-fund
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run package
+      - uses: actions/upload-artifact@v6
+        with:
+          name: groundhog-vscode
+          path: ide/vscode/groundhog.vsix
+      - name: Extension host smoke
+        working-directory: ide/vscode
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a npm run test:smoke
+          else
+            npm run test:smoke
+          fi
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json

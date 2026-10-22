@@ -1,0 +1,101 @@
+{
+  "name": "groundhog",
+  "displayName": "Groundhog",
+  "description": "Hosted HTTPS tunnels and request inspection beside your app.",
+  "version": "0.1.0",
+  "publisher": "unifinity",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Unifinity-Software/groundhog-client"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.cjs",
+  "groundhog": {
+    "minimumCliVersion": "1.2.0"
+  },
+  "activationEvents": [
+    "onView:groundhog.tunnels"
+  ],
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "eslint src test",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:smoke": "node test/smoke/run.cjs",
+    "package": "vsce package --no-dependencies --out groundhog.vsix",
+    "vscode:prepublish": "npm run build"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "groundhog.signIn",
+        "title": "Groundhog: Sign in"
+      },
+      {
+        "command": "groundhog.installCli",
+        "title": "Groundhog: Install Groundhog CLI"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "groundhog",
+          "title": "Groundhog",
+          "icon": "media/groundhog.svg"
+        }
+      ]
+    },
+    "views": {
+      "groundhog": [
+        {
+          "id": "groundhog.tunnels",
+          "name": "Tunnels"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "groundhog.tunnels",
+        "contents": "Expose your local app with a stable HTTPS URL.\n[Sign in](command:groundhog.signIn)\n[Install Groundhog CLI](command:groundhog.installCli)"
+      }
+    ],
+    "configuration": {
+      "title": "Groundhog",
+      "properties": {
+        "groundhog.cliPath": {
+          "type": "string",
+          "default": "groundhog",
+          "scope": "machine-overridable",
+          "description": "Path to the Groundhog CLI on the machine running this workspace."
+        },
+        "groundhog.useMockBackend": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use scripted demo data. Available only in extension development mode."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.95.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.13.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^5.0.5"
+  }
+}
