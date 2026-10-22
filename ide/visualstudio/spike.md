@@ -18,16 +18,29 @@ is still needed on both VS generations; the declared range is not a claim that t
 The layout is one `ide/visualstudio` SDK project containing the native package, tool window, debugger adapter and stdio
 adapter. `ide/webview` owns the browser code. Its built bundle is included as VSIX content, keeping Node outside the
 normal client solution. All native/SDK analyzers remain enabled with warnings treated as errors.
+The `VisualStudio.Extensibility` contribution provides the in-process hosting configuration and generated extension
+metadata. User-facing commands, options and tool windows use the native VSSDK package; there is no Remote UI tree in
+this implementation. This follows the supported hybrid recipe and permits the native WebView2 control and debugger
+services in one installation.
+
+`IVsDebuggerEvents.OnModeChange` observes Run mode after the debuggee starts; it is not a before-launch barrier.
+`IVsDebuggableProjectCfg2.OnBeforeDebugLaunch` belongs to a project configuration, rather than a global package event.
+Microsoft explicitly says not to implement or consume `IVsDebugLaunchHook`. This preview therefore uses the supported
+Run-mode notification without intercepting Visual Studio commands. Manual hosting before F5 is required when initial
+requests depend on the tunnel; automatic pre-launch parity remains an owner scope decision.
 
 The spike built an actual VSIX locally using `dotnet build`, including generated package/tool-window registrations and
 compiled View-menu commands. This succeeded without installing Visual Studio. The final standalone verification also
 asserts that the package, native tool-window registration, new SDK metadata, license and shared inspector files are in
-the VSIX. These checks cannot prove Visual Studio host loading or rendering; `devenv.exe` is absent here.
+the VSIX. Visual Studio Community 2026 has since been installed, but actual host qualification is pending while desktop
+testing is on hold. These checks cannot prove Visual Studio host loading or rendering.
 
 Public sources:
 
 - [Using VisualStudio.Extensibility and VSSDK together](https://learn.microsoft.com/en-us/visualstudio/extensibility/visualstudio.extensibility/get-started/in-proc-extensions)
 - [Remote UI limits](https://learn.microsoft.com/en-us/visualstudio/extensibility/visualstudio.extensibility/inside-the-sdk/remote-ui)
 - [IVsDebuggerEvents](https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualstudio.shell.interop.ivsdebuggerevents)
+- [Project configuration before-launch callback](https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualstudio.shell.interop.ivsdebuggableprojectcfg2)
+- [Debug launch hook restriction](https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualstudio.shell.interop.ivsdebuglaunchhook)
 - [WebView2 WPF support](https://learn.microsoft.com/en-us/microsoft-edge/webview2/get-started/wpf)
 - [Microsoft's SDK project metadata](https://github.com/microsoft/VSExtensibility/blob/main/New_Extensibility_Model/Samples/InProcFeatureGallery/InProcFeatureGallery.csproj)

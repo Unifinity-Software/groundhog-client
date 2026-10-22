@@ -40,7 +40,9 @@ public class GroundhogPeer {
         output.Flush();
     }
     public static void Main(string[] args) {
-        if (args.Length == 1 && args[0] == "--version") { Console.WriteLine("1.3.0-preview.1"); return; }
+        if (args.Length == 1 && args[0] == "--version") {
+            Console.WriteLine(Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).EndsWith("-old") ? "1.2.0" : "1.3.0-preview.1"); return;
+        }
         var input = Console.OpenStandardInput(); var output = Console.OpenStandardOutput();
         var json = new JavaScriptSerializer();
         while (true) {
@@ -90,6 +92,7 @@ public static class SmokeResolution {
     } finally { $resources.Dispose() }
     Add-Type -ReferencedAssemblies (Join-Path $output 'Newtonsoft.Json.dll') -TypeDefinition @'
 using System;
+using System.IO;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -131,7 +134,56 @@ public static class SubscriptionSmoke {
         }
     }
 }
+public static class NativeBehaviorSmoke {
+    private static readonly BindingFlags Instance = BindingFlags.Instance | BindingFlags.NonPublic;
+    private static readonly BindingFlags Static = BindingFlags.Static | BindingFlags.NonPublic;
+    private static object Read(object value, string name) { return value.GetType().GetProperty(name, Instance).GetValue(value); }
+    public static void Verify(Assembly assembly, string temporary) {
+        var now = DateTimeOffset.Parse("2026-10-22T12:00:00Z");
+        var signInType = assembly.GetType("Groundhog.VisualStudio.SignInState", true);
+        var signIn = Activator.CreateInstance(signInType, true);
+        var notice = signInType.GetMethod("Notice", Instance);
+        var verification = signInType.GetMethod("Verification", Instance);
+        signInType.GetMethod("Begin", Instance).Invoke(signIn, new object[] {"ABCD-EFGH","https://groundhog.unifinity.com/cli-login",now.AddMinutes(10)});
+        if (!((string)notice.Invoke(signIn, new object[] {"signedOut",now.AddSeconds(31)})).Contains("ABCD-EFGH")) throw new Exception("Periodic refresh lost the pending code.");
+        notice.Invoke(signIn, new object[] {"signedIn",now.AddSeconds(32)});
+        if (verification.Invoke(signIn, new object[] {now.AddSeconds(33)}) != null) throw new Exception("Completed login retained the approval action.");
+        signInType.GetMethod("Begin", Instance).Invoke(signIn, new object[] {"EXPIRED","https://groundhog.unifinity.com/cli-login",now});
+        if (((string)notice.Invoke(signIn, new object[] {"signedOut",now})).Contains("EXPIRED")) throw new Exception("Expired user code remained active.");
+
+        var settings = assembly.GetType("Groundhog.VisualStudio.ProjectSettings", true);
+        var project = Path.Combine(temporary,"project"); var nested = Path.Combine(project,"src"); Directory.CreateDirectory(nested);
+        var file = Path.Combine(project,"groundhog.json");
+        File.WriteAllText(file,"{\"tunnel\":\"configured\",\"target\":\"https://localhost:7132\"}");
+        var prefill = settings.GetMethod("Prefill", Static); var debug = settings.GetMethod("ForDebug", Static);
+        if ((string)prefill.Invoke(null,new object[] {nested,"configured"}) != "https://localhost:7132") throw new Exception("Start did not discover parent project settings.");
+        var configured = debug.Invoke(null,new object[] {nested,"selected","another-workspace"});
+        if ((string)Read(configured,"Name") != "configured" || (string)Read(configured,"ProjectDirectory") != nested) throw new Exception("Project debug configuration or directory was lost.");
+        File.Delete(file); Directory.CreateDirectory(Path.Combine(project,"Properties"));
+        var launch = Path.Combine(project,"Properties","launchSettings.json");
+        File.WriteAllText(launch,"{\"profiles\":{\"App\":{\"commandName\":\"Project\",\"applicationUrl\":\"http://localhost:5178\"},\"Other\":{\"commandName\":\"IISExpress\",\"applicationUrl\":\"http://localhost:9999\"}}}");
+        if ((string)prefill.Invoke(null,new object[] {project,"selected"}) != "http://localhost:5178") throw new Exception("Start did not prefill the unambiguous application target.");
+        var selected = debug.Invoke(null,new object[] {project,"selected","another-workspace"});
+        if ((string)Read(selected,"Workspace") != "another-workspace") throw new Exception("Debugger targeted the default workspace instead of the selected tunnel's workspace.");
+        File.WriteAllText(launch,"{\"profiles\":{\"App\":{\"commandName\":\"Project\",\"applicationUrl\":\"http://localhost:5178;https://localhost:7132\"}}}");
+        if (debug.Invoke(null,new object[] {project,"selected","another-workspace"}) != null) throw new Exception("An ambiguous launch target was guessed.");
+
+        var label = assembly.GetType("Groundhog.VisualStudio.TunnelsControl",true).GetMethod("StateLabel",Static);
+        var disconnected = (string)label.Invoke(null,new object[] {JObject.Parse("{\"state\":\"connected\"}"),JObject.Parse("{\"source\":\"cli\",\"state\":\"Reconnecting\"}")});
+        if (!disconnected.Contains("Reconnecting") || !disconnected.Contains("on this computer")) throw new Exception("Local tree state was hidden by its location label.");
+
+        var selectionType = assembly.GetType("Groundhog.VisualStudio.DetailSelection", true);
+        var selection = Activator.CreateInstance(selectionType,true); var begin = selectionType.GetMethod("Begin",Instance);
+        var complete = selectionType.GetMethod("Complete",Instance); var action = selectionType.GetMethod("ActionId",Instance);
+        var a = begin.Invoke(selection,null); var b = begin.Invoke(selection,null);
+        if (!(bool)complete.Invoke(selection,new object[] {b,JObject.Parse("{\"requestId\":\"b\"}")}) || (bool)complete.Invoke(selection,new object[] {a,JObject.Parse("{\"requestId\":\"a\"}")})) throw new Exception("A late detail response replaced the selected request.");
+        if ((string)action.Invoke(selection,new object[] {"b"}) != "b") throw new Exception("Selected request action lost its identity.");
+        try { action.Invoke(selection,new object[] {"a"}); throw new Exception("A stale inspector action targeted another request."); }
+        catch (TargetInvocationException error) { if (!(error.InnerException is InvalidOperationException)) throw; }
+    }
+}
 '@
+    [NativeBehaviorSmoke]::Verify($assembly, $temporary)
     $type = $assembly.GetType('Groundhog.VisualStudio.BackendClient', $true)
     $client = [Activator]::CreateInstance($type, $true)
     $flags = [Reflection.BindingFlags]'Instance,NonPublic'
@@ -143,6 +195,18 @@ public static class SubscriptionSmoke {
         if ($result['state'].ToString() -ne 'signedOut') { throw 'Stdio client did not receive the expected response.' }
         [SubscriptionSmoke]::Verify($assembly, $client)
     } finally { $client.Dispose() }
+    $oldPeer = Join-Path $temporary 'groundhog-peer-old.exe'
+    Copy-Item -LiteralPath $peer -Destination $oldPeer
+    foreach ($invalidCli in @((Join-Path $temporary 'missing-groundhog.exe'), $oldPeer)) {
+        $invalidClient = [Activator]::CreateInstance($type, $true)
+        try {
+            $task = $type.GetMethod('StartAsync', $flags).Invoke($invalidClient, @($invalidCli.ToString(), [Threading.CancellationToken]::None))
+            $null = $task.GetAwaiter().GetResult()
+            throw 'An absent or outdated CLI was accepted.'
+        } catch {
+            if ($_.Exception.ToString() -notmatch 'Choose Install / update CLI') { throw }
+        } finally { $invalidClient.Dispose() }
+    }
     $targetType = $assembly.GetType('Groundhog.VisualStudio.DebugHosting', $true)
     $ownedMethod = $targetType.GetMethod('CreatedProcess', [Reflection.BindingFlags]'Static,NonPublic')
     foreach ($case in @(@('{"processId":1234,"source":"cli","state":"Reconnecting","created":false}', $null), @('{"processId":1234,"source":"cli","state":"Connected","created":false}', $null), @('{"processId":1234,"source":"cli","created":true}', 1234))) {

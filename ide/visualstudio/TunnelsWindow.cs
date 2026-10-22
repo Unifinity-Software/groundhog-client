@@ -21,7 +21,8 @@ public sealed class TunnelsWindow : ToolWindowPane
     }
 }
 
-internal sealed class TunnelNode(string workspace, string name, string url, bool hasKey, string? target, string? source)
+internal sealed class TunnelNode(string workspace, string name, string url, bool hasKey, string? target, string? source,
+    bool captureBodies = false, bool canCaptureBodies = false)
 {
     internal string Workspace { get; } = workspace;
     internal string Name { get; } = name;
@@ -29,6 +30,8 @@ internal sealed class TunnelNode(string workspace, string name, string url, bool
     internal bool HasKey { get; set; } = hasKey;
     internal string? Target { get; } = target;
     internal string? Source { get; } = source;
+    internal bool CaptureBodies { get; set; } = captureBodies;
+    internal bool CanCaptureBodies { get; } = canCaptureBodies;
 }
 
 internal sealed class TunnelsControl : UserControl
@@ -41,7 +44,7 @@ internal sealed class TunnelsControl : UserControl
     private InspectorControl? _inspector;
     private bool _busy;
     private bool _subscribed;
-    private string? _verification;
+    private readonly SignInState _signIn = new();
     internal static TunnelNode? SelectedTunnel { get; private set; }
     private GroundhogPackage Package => GroundhogPackage.Current ?? throw new InvalidOperationException("Groundhog package is not available.");
 
@@ -53,8 +56,8 @@ internal sealed class TunnelsControl : UserControl
         var tools = new WrapPanel { Margin = new Thickness(4) };
         AddButton(tools, "Refresh", RefreshAsync);
         AddButton(tools, "Sign in", LoginAsync);
-        AddButton(tools, "Open browser", () => { if (_verification is not null) { OpenHosted(_verification); } return Task.CompletedTask; });
-        AddButton(tools, "Sign out", async () => { await Package.Backend.RequestAsync("auth/logout", new { }, _stop.Token); await RefreshAsync(); });
+        AddButton(tools, "Open browser", () => { if (_signIn.Verification(DateTimeOffset.UtcNow) is { } url) { OpenHosted(url); } return Task.CompletedTask; });
+        AddButton(tools, "Sign out", async () => { await Package.Backend.RequestAsync("auth/logout", new { }, _stop.Token); _signIn.Clear(); await RefreshAsync(); });
         AddButton(tools, "Create tunnel", CreateAsync);
         AddButton(tools, "Install / update CLI", InstallAsync);
         DockPanel.SetDock(tools, Dock.Top); panel.Children.Add(tools);
@@ -93,6 +96,11 @@ internal sealed class TunnelsControl : UserControl
     private void Run(Func<Task> action) => _ = Package.JoinableTaskFactory.RunAsync(async () =>
     {
         try { await Package.JoinableTaskFactory.SwitchToMainThreadAsync(_stop.Token); await action(); }
+        catch (CliUnavailableException ex)
+        {
+            await Package.JoinableTaskFactory.SwitchToMainThreadAsync(_stop.Token);
+            _notice.Text = ex.Message;
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             await Package.JoinableTaskFactory.SwitchToMainThreadAsync(_stop.Token);
@@ -108,6 +116,7 @@ internal sealed class TunnelsControl : UserControl
 
     private async Task RefreshAsync()
     {
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(_stop.Token);
         if (_busy) { return; }
         _busy = true;
         try
@@ -115,9 +124,12 @@ internal sealed class TunnelsControl : UserControl
             await Package.EnsureBackendAsync(_stop.Token);
             var auth = await Package.Backend.RequestAsync("auth/status", new { }, _stop.Token);
             _tree.Items.Clear();
-            if ((string?)auth["state"] != "signedIn")
-            { _notice.Text = "Sign in to see your Groundhog workspaces. Connection keys stay in the CLI's protected store."; return; }
-            _notice.Text = "Double-click a tunnel to inspect requests. Right-click for hosting and tunnel actions.";
+            var state = (string?)auth["state"];
+            _notice.Text = _signIn.Notice(state, DateTimeOffset.UtcNow);
+            if (state != "signedIn") { return; }
+            if (Package.ActiveName is null && await Package.StartupDirectoryAsync(_stop.Token) is { } directory
+                && ProjectSettings.ForDebug(directory, null, null) is { } configured && (string?)auth["workspace"] is { } defaultWorkspace)
+            { Package.TrackActive(defaultWorkspace, configured.Name); }
             var workspaces = await Package.Backend.RequestAsync("workspaces/list", new { }, _stop.Token);
             foreach (var workspace in workspaces["workspaces"] ?? new JArray())
             {
@@ -127,14 +139,15 @@ internal sealed class TunnelsControl : UserControl
                 AddAction(select, "Use this workspace", async () => { await Package.Backend.RequestAsync("workspaces/use", new { workspace = slug }, _stop.Token); await RefreshAsync(); });
                 group.ContextMenu = select;
                 var tunnels = await Package.Backend.RequestAsync("tunnels/list", new { workspace = slug }, _stop.Token);
+                Package.UpdateActiveStatus(slug, tunnels);
                 foreach (var tunnel in tunnels["tunnels"] ?? new JArray())
                 {
                     var name = (string?)tunnel["name"] ?? "";
                     var agent = tunnels["agents"]?.FirstOrDefault(a => (string?)a["name"] == name);
                     var source = (string?)agent?["source"];
-                    var node = new TunnelNode(slug, name, (string?)tunnel["url"] ?? "", (bool?)tunnel["hasKey"] == true, (string?)agent?["target"], source);
-                    var state = source == "aspire" ? "Aspire" : agent is not null ? "on this computer" : (string?)tunnel["location"] == "remote" ? "hosted elsewhere" : (string?)tunnel["state"] ?? "offline";
-                    var item = new TreeViewItem { Header = name + "  -  " + state, Tag = node, ToolTip = node.Url };
+                    var node = new TunnelNode(slug, name, (string?)tunnel["url"] ?? "", (bool?)tunnel["hasKey"] == true, (string?)tunnel["target"] ?? (string?)agent?["target"], source,
+                        (bool?)tunnel["captureBodies"] == true, (bool?)tunnel["canCaptureBodies"] == true);
+                    var item = new TreeViewItem { Header = name + "  -  " + StateLabel(tunnel, agent), Tag = node, ToolTip = node.Url };
                     item.ContextMenu = Menu(node, tunnel["actions"]?.Values<string>().OfType<string>().ToArray() ?? []);
                     group.Items.Add(item);
                 }
@@ -186,8 +199,8 @@ internal sealed class TunnelsControl : UserControl
     {
         await Package.EnsureBackendAsync(_stop.Token);
         var challenge = await Package.Backend.RequestAsync("auth/login", new { }, _stop.Token);
-        _verification = (string?)challenge["verificationUri"];
-        _notice.Text = "Approve sign-in in your browser. Confirm code: " + (string?)challenge["userCode"] + ". Choose Open browser.";
+        _signIn.Begin((string)challenge["userCode"]!, (string)challenge["verificationUri"]!, (DateTimeOffset)challenge["expiresAt"]!);
+        _notice.Text = _signIn.Notice("pending", DateTimeOffset.UtcNow);
     }
 
     private async Task CreateAsync()
@@ -204,12 +217,15 @@ internal sealed class TunnelsControl : UserControl
     {
         if (tunnel.Source == "aspire") { _notice.Text = "Manage this tunnel from its Aspire AppHost."; return; }
         if (!tunnel.HasKey) { await EnterKeyAsync(tunnel); if (!tunnel.HasKey) { return; } }
-        var target = Prompt("Local app URL", tunnel.Target ?? "http://localhost:5173");
+        var directory = await Package.StartupDirectoryAsync(_stop.Token);
+        var initial = tunnel.Target ?? (directory is null ? null : ProjectSettings.Prefill(directory, tunnel.Name));
+        var target = Prompt("Local app URL", initial ?? "http://localhost:5173");
         if (target is null || !DebugHosting.ValidTarget(target)) { return; }
         if (!Confirm($"Forward public requests for {tunnel.Name} to {target}?")) { return; }
-        var agent = await Package.Backend.RequestAsync(restart ? "agents/restart" : "agents/start", new { workspace = tunnel.Workspace, name = tunnel.Name, target }, _stop.Token);
+        await Package.Backend.RequestAsync(restart ? "agents/restart" : "agents/start", new { workspace = tunnel.Workspace, name = tunnel.Name, target, projectDirectory = directory }, _stop.Token);
         await Package.JoinableTaskFactory.SwitchToMainThreadAsync(_stop.Token);
-        Package.SetStatus("Groundhog: " + (string?)agent["url"] + " > " + target);
+        Package.TrackActive(tunnel.Workspace, tunnel.Name);
+        await Package.RefreshActiveStatusAsync(_stop.Token);
         await RefreshAsync();
     }
 
@@ -239,6 +255,14 @@ internal sealed class TunnelsControl : UserControl
     }
 
     internal static bool Confirm(string message) => MessageBox.Show(message, "Groundhog", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+
+    internal static string StateLabel(JToken tunnel, JToken? agent)
+    {
+        var state = (string?)agent?["state"] ?? (string?)tunnel["state"] ?? "offline";
+        var location = (string?)agent?["source"] == "aspire" ? "Aspire"
+            : agent is not null ? "on this computer" : (string?)tunnel["location"] == "remote" ? "hosted elsewhere" : null;
+        return location is null ? state : state + " - " + location;
+    }
 
     internal static bool IsHosted(string value) => Uri.TryCreate(value, UriKind.Absolute, out var url) && url.Scheme == "https" && url.IsDefaultPort && url.UserInfo.Length == 0
         && (url.Host == "groundhog.unifinity.com" || System.Text.RegularExpressions.Regex.IsMatch(url.Host, @"^[a-z][a-z0-9-]*[a-z0-9]\.groundhog\.unifinity\.com$"));

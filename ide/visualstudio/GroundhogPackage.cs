@@ -5,6 +5,7 @@ using EnvDTE;
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
+using Newtonsoft.Json.Linq;
 
 namespace Groundhog.VisualStudio;
 
@@ -22,6 +23,8 @@ public sealed class GroundhogPackage : AsyncPackage, IVsDebuggerEvents
     private IVsDebugger? _debugger;
     private uint _debugCookie;
     private DebugHosting? _debugHosting;
+    internal string? ActiveName { get; private set; }
+    private string? _activeWorkspace;
     internal GroundhogOptions Options => (GroundhogOptions)GetDialogPage(typeof(GroundhogOptions));
 
     protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
@@ -40,6 +43,7 @@ public sealed class GroundhogPackage : AsyncPackage, IVsDebuggerEvents
         var dte = await GetServiceAsync(typeof(DTE)) as DTE
             ?? throw new InvalidOperationException("The Visual Studio automation service is unavailable.");
         _debugHosting = new DebugHosting(this, dte);
+        Backend.Notification += BackendChanged;
     }
 
     public int OnModeChange(DBGMODE dbgmodeNew)
@@ -58,6 +62,51 @@ public sealed class GroundhogPackage : AsyncPackage, IVsDebuggerEvents
         await Backend.StartAsync(Options.CliPath, cancellation);
     }
 
+    internal async Task<string?> StartupDirectoryAsync(CancellationToken cancellation)
+    {
+        await JoinableTaskFactory.SwitchToMainThreadAsync(cancellation);
+        var dte = await GetServiceAsync(typeof(DTE)) as DTE;
+        return dte is null ? null : DebugHosting.StartupDirectory(dte);
+    }
+
+    internal void TrackActive(string workspace, string name)
+    { _activeWorkspace = workspace; ActiveName = name; }
+
+    internal void UpdateActiveStatus(string workspace, JObject listing)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        if (workspace != _activeWorkspace || ActiveName is null) { return; }
+        var tunnel = listing["tunnels"]?.FirstOrDefault(t => (string?)t["name"] == ActiveName) ?? new JObject { ["state"] = "offline" };
+        var agent = listing["agents"]?.FirstOrDefault(a => (string?)a["name"] == ActiveName);
+        SetStatus("Groundhog: " + ActiveName + " - " + TunnelsControl.StateLabel(tunnel, agent)
+            + " - " + ((long?)tunnel["requestsLastMinute"] ?? 0) + " req/min");
+    }
+
+    internal async Task RefreshActiveStatusAsync(CancellationToken cancellation)
+    {
+        await JoinableTaskFactory.SwitchToMainThreadAsync(cancellation);
+        if (ActiveName is null || _activeWorkspace is null) { return; }
+        var auth = await Backend.RequestAsync("auth/status", new { }, cancellation);
+        if ((string?)auth["state"] != "signedIn") { SetStatus("Groundhog: sign in to view tunnel status."); return; }
+        var workspace = _activeWorkspace;
+        var listing = await Backend.RequestAsync("tunnels/list", new { workspace }, cancellation);
+        UpdateActiveStatus(workspace, listing);
+    }
+
+    private void BackendChanged(string method, JObject value)
+    {
+        if (method is not ("auth/changed" or "agents/changed" or "tunnels/changed")) { return; }
+        _ = JoinableTaskFactory.RunAsync(async () =>
+        {
+            try { await RefreshActiveStatusAsync(DisposalToken); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
+                SetStatus("Groundhog: tunnel status unavailable. Open Groundhog Tunnels and Refresh.");
+            }
+        });
+    }
+
     internal void SetStatus(string text)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
@@ -70,6 +119,7 @@ public sealed class GroundhogPackage : AsyncPackage, IVsDebuggerEvents
         if (disposing)
         {
             if (_debugger is not null && _debugCookie != 0) { _debugger.UnadviseDebuggerEvents(_debugCookie); }
+            Backend.Notification -= BackendChanged;
             Backend.Dispose();
             Current = null;
         }

@@ -1,9 +1,12 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.IO;
 using Newtonsoft.Json.Linq;
 using StreamJsonRpc;
 
 namespace Groundhog.VisualStudio;
+
+internal sealed class CliUnavailableException(string message) : InvalidOperationException(message);
 
 internal sealed class BackendClient : IDisposable
 {
@@ -21,9 +24,14 @@ internal sealed class BackendClient : IDisposable
         {
             if (_rpc is not null && !_rpc.Completion.IsCompleted) { return; }
             Reset();
-            var version = await RunAsync(executable, "--version", cancellation).ConfigureAwait(false);
+            string version;
+            try { version = await RunAsync(executable, "--version", cancellation, TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
+            catch (Win32Exception)
+            { throw new CliUnavailableException("Groundhog CLI was not found. Choose Install / update CLI, or set Tools > Options > Groundhog > CLI executable."); }
+            catch (Exception ex) when (ex is InvalidOperationException || ex is OperationCanceledException && !cancellation.IsCancellationRequested)
+            { throw new CliUnavailableException("Groundhog CLI could not run. Choose Install / update CLI, or check the configured executable and .NET SDK."); }
             if (!Version.TryParse(version.Trim().Split('-')[0], out var parsed) || parsed < new Version(1, 3, 0))
-            { throw new InvalidOperationException("Groundhog CLI 1.3.0-preview.1 or newer is required. Install or update the CLI."); }
+            { throw new CliUnavailableException("Groundhog CLI 1.3.0-preview.1 or newer is required. Choose Install / update CLI."); }
             var start = StartInfo(executable, "ide --stdio");
             _process = Process.Start(start) ?? throw new IOException("Groundhog CLI could not start.");
             _ = DrainAsync(_process.StandardError);
@@ -31,7 +39,7 @@ internal sealed class BackendClient : IDisposable
             _rpc.AddLocalRpcTarget(new Notifications((name, value) => Notification?.Invoke(name, value)));
             _rpc.StartListening();
             var initialized = await RequestAsync("initialize", new { clientName = "Groundhog for Visual Studio", clientVersion = "0.1.0", protocolVersions = new[] { 1 } }, cancellation).ConfigureAwait(false);
-            if ((int?)initialized["protocolVersion"] != 1) { throw new InvalidOperationException("The CLI and extension have no common protocol version."); }
+            if ((int?)initialized["protocolVersion"] != 1) { throw new CliUnavailableException("The CLI and extension have no common protocol version. Choose Install / update CLI."); }
             Capabilities = initialized["capabilities"]?.ToObject<string[]>() ?? [];
         }
         catch { Reset(); throw; }
@@ -46,11 +54,11 @@ internal sealed class BackendClient : IDisposable
             .InvokeWithParameterObjectAsync<JObject>(method, parameters, deadline.Token).ConfigureAwait(false);
     }
 
-    internal static async Task<string> RunAsync(string executable, string arguments, CancellationToken cancellation)
+    internal static async Task<string> RunAsync(string executable, string arguments, CancellationToken cancellation, TimeSpan? timeout = null)
     {
         using var process = Process.Start(StartInfo(executable, arguments)) ?? throw new IOException("The command could not start.");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        deadline.CancelAfter(TimeSpan.FromMinutes(2));
+        deadline.CancelAfter(timeout ?? TimeSpan.FromMinutes(2));
         var output = process.StandardOutput.ReadToEndAsync();
         var error = DrainAsync(process.StandardError);
         using (deadline.Token.Register(() => { try { if (!process.HasExited) { process.Kill(); } } catch (InvalidOperationException) { } }))

@@ -20,8 +20,7 @@ internal sealed class InspectorControl : UserControl, IDisposable
     private readonly TunnelNode _tunnel;
     private readonly CancellationTokenSource _stop = new();
     private string? _subscription;
-    private string? _requestId;
-    private JObject? _detail;
+    private readonly DetailSelection _selection = new();
     private readonly SubscriptionEvents _events = new();
     private bool _disposed;
 
@@ -74,6 +73,7 @@ internal sealed class InspectorControl : UserControl, IDisposable
         switch ((string?)message["type"])
         {
             case "ready":
+                Post(new { type = "captureState", enabled = _tunnel.CaptureBodies, canChange = _tunnel.CanCaptureBodies });
                 var generation = _events.Begin();
                 if (_subscription is { } previous) { await UnsubscribeAsync(previous); _subscription = null; }
                 if (TunnelsControl.IsHosted(_tunnel.Url))
@@ -92,9 +92,10 @@ internal sealed class InspectorControl : UserControl, IDisposable
                 foreach (var buffered in _events.Complete(generation, id)) { PostNotification(buffered.Method, buffered.Value); }
                 break;
             case "detail" when _backend.Capabilities.Contains("requestDetail"):
-                _requestId = (string?)message["requestId"];
-                var detail = await _backend.RequestAsync("requests/detail", new { workspace = _tunnel.Workspace, name = _tunnel.Name, requestId = _requestId }, _stop.Token);
-                _detail = detail;
+                var selection = _selection.Begin();
+                var requestId = (string?)message["requestId"];
+                var detail = await _backend.RequestAsync("requests/detail", new { workspace = _tunnel.Workspace, name = _tunnel.Name, requestId }, _stop.Token);
+                if (_disposed || !_selection.Complete(selection, detail)) { return; }
                 Post(new { type = "detail", detail, target = _tunnel.Target ?? "http://localhost:5173" });
                 break;
             case "detail":
@@ -102,19 +103,21 @@ internal sealed class InspectorControl : UserControl, IDisposable
                 break;
             case "capture" when _backend.Capabilities.Contains("captureBodies"):
                 await _backend.RequestAsync("captureBodies/set", new { workspace = _tunnel.Workspace, name = _tunnel.Name, enabled = (bool?)message["enabled"] == true }, _stop.Token);
+                _tunnel.CaptureBodies = (bool?)message["enabled"] == true;
+                Post(new { type = "captureState", enabled = _tunnel.CaptureBodies, canChange = _tunnel.CanCaptureBodies });
                 Post(new { type = "operation", message = "Body capture setting saved for future requests." });
                 break;
-            case "replay" when _backend.Capabilities.Contains("requestReplay") && _requestId is not null:
+            case "replay" when _backend.Capabilities.Contains("requestReplay") && _selection.Detail is not null:
                 if (!TunnelsControl.Confirm("Send this request again to the local app? Signed webhooks may reject old timestamps.")) { return; }
                 var arguments = EditedRequest(message);
                 arguments["confirm"] = true;
                 var replay = await _backend.RequestAsync("requests/replay", arguments, _stop.Token);
                 Post(new { type = "operation", message = "Local app returned " + (string?)replay["statusCode"] + "." });
                 break;
-            case "curl" when _detail is not null:
+            case "curl" when _selection.Detail is not null:
                 var edited = EditedRequest(message);
-                var method = (string?)_detail["method"] ?? "GET";
-                var path = (string?)_detail["path"] ?? "/";
+                var method = (string?)_selection.Detail!["method"] ?? "GET";
+                var path = (string?)_selection.Detail!["path"] ?? "/";
                 if (!path.StartsWith("/", StringComparison.Ordinal) || path.Any(char.IsControl) || !method.All(c => c is >= 'A' and <= 'Z' or >= 'a' and <= 'z'))
                 { throw new InvalidOperationException("Invalid captured request."); }
                 var url = new Uri((string)edited["target"]!).GetLeftPart(UriPartial.Authority) + path;
@@ -128,7 +131,7 @@ internal sealed class InspectorControl : UserControl, IDisposable
                 Clipboard.SetText(command);
                 Post(new { type = "operation", message = "Copied as curl.exe for Windows PowerShell." });
                 break;
-            case "export" when _backend.Capabilities.Contains("requestExportHttp") && _requestId is not null:
+            case "export" when _backend.Capabilities.Contains("requestExportHttp") && _selection.Detail is not null:
                 var exported = await _backend.RequestAsync("requests/exportHttp", EditedRequest(message), _stop.Token);
                 var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "HTTP request (*.http)|*.http", FileName = "groundhog-request.http" };
                 if (dialog.ShowDialog() == true) { File.WriteAllText(dialog.FileName, (string?)exported["text"] ?? ""); }
@@ -146,10 +149,11 @@ internal sealed class InspectorControl : UserControl, IDisposable
         var target = (string?)message["target"];
         var body = (string?)message["body"] ?? "";
         var headers = (string?)message["headers"] ?? "{}";
+        var requestId = _selection.ActionId((string?)message["requestId"]);
         if (!DebugHosting.ValidTarget(target) || headers.Length > 65536 || body.Length > 262144)
         { throw new InvalidOperationException("Invalid edited request."); }
         return new JObject { ["workspace"] = _tunnel.Workspace, ["name"] = _tunnel.Name,
-            ["requestId"] = _requestId, ["target"] = target, ["headers"] = JObject.Parse(headers), ["body"] = body };
+            ["requestId"] = requestId, ["target"] = target, ["headers"] = JObject.Parse(headers), ["body"] = body };
     }
 
     private void Notification(string name, JObject value)
@@ -211,6 +215,7 @@ internal sealed class InspectorControl : UserControl, IDisposable
     {
         if (_disposed) { return; }
         _disposed = true;
+        _selection.Begin();
         _events.Cancel();
         _backend.Notification -= Notification;
         VSColorTheme.ThemeChanged -= ThemeChanged;

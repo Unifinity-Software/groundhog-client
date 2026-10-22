@@ -31,33 +31,35 @@ internal sealed class DebugHosting(GroundhogPackage package, DTE dte)
                     { await package.Backend.RequestAsync("agents/stop", new { workspace = _workspace, name = _name, expectedProcessId = _ownedProcess }, cancellation); }
                 }
                 _ownedProcess = null;
-                package.SetStatus("Groundhog: debug session ended.");
+                await package.RefreshActiveStatusAsync(cancellation);
                 return;
             }
             if (_active || !package.Options.HostOnDebug) { return; }
             _active = true;
-            var project = StartupProject();
-            if (project is null) { return; }
-            var settings = FindSettings(project);
+            var directory = StartupDirectory(dte);
+            if (directory is null) { return; }
+            var selected = TunnelsControl.SelectedTunnel;
+            var settings = ProjectSettings.ForDebug(directory, selected?.Name, selected?.Workspace);
             if (settings is null)
             {
                 package.SetStatus("Groundhog: add groundhog.json, or select a tunnel and a single applicationUrl launch profile.");
                 return;
             }
-            var (name, target, path) = settings.Value;
+            var name = settings.Name; var target = settings.Target; var path = settings.SourcePath;
             if (MessageBox.Show($"Host {name} and forward public requests to {target}?\n\nProject settings: {path}", "Groundhog debug tunnel",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) { return; }
             await package.EnsureBackendAsync(cancellation);
             var auth = await package.Backend.RequestAsync("auth/status", new { }, cancellation);
-            _workspace = (string?)auth["workspace"] ?? throw new InvalidOperationException("Select a Groundhog workspace before debugging.");
+            _workspace = settings.Workspace ?? (string?)auth["workspace"] ?? throw new InvalidOperationException("Select a Groundhog workspace before debugging.");
             _name = name;
             var previous = await package.Backend.RequestAsync("tunnels/list", new { workspace = _workspace }, cancellation);
             var existing = previous["agents"]?.FirstOrDefault(a => (string?)a["name"] == name);
             if ((string?)existing?["source"] == "aspire")
             { package.SetStatus("Groundhog: this tunnel belongs to the Aspire AppHost. Manage it from Aspire."); return; }
-            var agent = await package.Backend.RequestAsync("agents/start", new { workspace = _workspace, name, target, projectDirectory = Path.GetDirectoryName(path) }, cancellation);
+            var agent = await package.Backend.RequestAsync("agents/start", new { workspace = _workspace, name, target, projectDirectory = settings.ProjectDirectory }, cancellation);
             _ownedProcess = CreatedProcess(agent);
-            package.SetStatus("Groundhog: " + ((string?)agent["url"] ?? name) + " > " + target);
+            package.TrackActive(_workspace, name);
+            await package.RefreshActiveStatusAsync(cancellation);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -70,12 +72,13 @@ internal sealed class DebugHosting(GroundhogPackage package, DTE dte)
     internal static int? CreatedProcess(JObject agent) => (bool?)agent["created"] == true && (string?)agent["source"] == "cli"
         ? (int?)agent["processId"] : null;
 
-    private Project? StartupProject()
+    internal static string? StartupDirectory(DTE dte)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
         if (dte.Solution.SolutionBuild.StartupProjects is not Array startup || startup.Length != 1) { return null; }
         var uniqueName = startup.GetValue(0)?.ToString();
-        return FindProject(dte.Solution.Projects.Cast<Project>(), uniqueName);
+        var project = FindProject(dte.Solution.Projects.Cast<Project>(), uniqueName);
+        return project is null || string.IsNullOrEmpty(project.FullName) ? null : Path.GetDirectoryName(project.FullName);
     }
 
     private static Project? FindProject(IEnumerable<Project> projects, string? uniqueName)
@@ -91,34 +94,6 @@ internal sealed class DebugHosting(GroundhogPackage package, DTE dte)
             }
         }
         return null;
-    }
-
-    private static (string Name, string Target, string Path)? FindSettings(Project project)
-    {
-        ThreadHelper.ThrowIfNotOnUIThread();
-        var directory = Path.GetDirectoryName(project.FullName);
-        if (string.IsNullOrEmpty(directory)) { return null; }
-        for (var current = new DirectoryInfo(directory); current is not null; current = current.Parent)
-        {
-            var file = Path.Combine(current.FullName, "groundhog.json");
-            if (!File.Exists(file)) { continue; }
-            var json = JObject.Parse(File.ReadAllText(file));
-            string[] allowed = ["$schema", "tunnel", "target", "allow", "rules", "ipRanges", "apiKeyEnv"];
-            if (json.Properties().Any(p => !allowed.Contains(p.Name))) { throw new InvalidOperationException("Unsupported project configuration field."); }
-            var name = (string?)json["tunnel"];
-            var target = (string?)json["target"];
-            if (name is null || !ValidTarget(target)) { throw new InvalidOperationException("Invalid Groundhog project configuration."); }
-            return (name, target!, file);
-        }
-        var selected = TunnelsControl.SelectedTunnel;
-        if (selected is null) { return null; }
-        var launchFile = Path.Combine(directory, "Properties", "launchSettings.json");
-        if (!File.Exists(launchFile)) { return null; }
-        var launch = JObject.Parse(File.ReadAllText(launchFile));
-        var urls = launch["profiles"]?.Children<JProperty>().Where(p => (string?)p.Value["commandName"] == "Project")
-            .SelectMany(p => ((string?)p.Value["applicationUrl"] ?? "").Split(';')).Where(ValidTarget).Distinct().ToArray() ?? [];
-        // Multiple profiles/origins need an explicit choice in groundhog.json; do not guess which app is being debugged.
-        return urls.Length == 1 ? (selected.Name, urls[0], launchFile) : null;
     }
 
     internal static bool ValidTarget(string? target) => Uri.TryCreate(target, UriKind.Absolute, out var uri)
