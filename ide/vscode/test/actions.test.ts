@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ActionUI, hostedUrl, TunnelActions, tunnelLocation } from '../src/actions';
+import { ActionUI, hostedUrl, TunnelActions, tunnelConnected, tunnelLocation } from '../src/actions';
 import { MockBackend } from '../src/mockBackend';
 import { Tunnel } from '../src/protocol';
 
@@ -20,6 +20,21 @@ describe('tunnel actions', () => {
     await actions.start(tunnel); expect(request).toHaveBeenLastCalledWith('agents/start', { workspace: 'example', name: 'my-tunnel', target: 'http://localhost:5173' });
     await actions.start(tunnel, true); expect(request).toHaveBeenLastCalledWith('agents/restart', { workspace: 'example', name: 'my-tunnel', target: 'http://localhost:5173' });
     await actions.stop(tunnel); expect(request).toHaveBeenLastCalledWith('agents/stop', { workspace: 'example', name: 'my-tunnel' });
+  });
+  it('asks for an unknown target once, then preserves the saved custom target after stopping and refreshing', async () => {
+    const unknown = (await backend.request('tunnels/list', { workspace: 'example' })).tunnels[2];
+    vi.mocked(ui.target).mockResolvedValue('http://localhost:6000'); vi.mocked(ui.input).mockResolvedValue('http://localhost:7000');
+    await actions.start(unknown); expect(ui.input).toHaveBeenCalledExactlyOnceWith('Local app URL', 'http://localhost:6000');
+    await actions.stop(unknown);
+    const refreshed = (await backend.request('tunnels/list', { workspace: 'example' })).tunnels[2];
+    const request = vi.spyOn(backend, 'request'); await actions.start(refreshed, true);
+    expect(ui.input).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenLastCalledWith('agents/restart', { workspace: 'example', name: 'service-b', target: 'http://localhost:7000' });
+  });
+  it('does not treat a reconnecting local agent as connected even while relay state is stale', async () => {
+    const agents = (await backend.request('tunnels/list', { workspace: 'example' })).agents;
+    expect(tunnelConnected(tunnel, agents)).toBe(true);
+    expect(tunnelConnected(tunnel, [{ ...agents[0], state: 'Reconnecting' }])).toBe(false);
   });
   it('masks and saves a missing key once before hosting, and honors trust', async () => {
     tunnel.hasKey = false;

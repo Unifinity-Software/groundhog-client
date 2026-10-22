@@ -29,7 +29,7 @@ describe('debug hosting', () => {
   });
   it('continues without a missing key, and honors trust/configuration filters', async () => {
     const backend = new MockBackend(); const debug = new DebugHosting(backend); const list = await backend.request('tunnels/list', { workspace: 'example' }); const request = vi.spyOn(backend, 'request');
-    expect(await debug.beforeLaunch({ name: 'App' }, { tunnel: 'service-a' }, 'example', [], list.tunnels, settings, true)).toEqual({ missingKey: true });
+    expect(await debug.beforeLaunch({ name: 'App' }, { tunnel: 'service-a' }, 'example', [], list.tunnels, settings, true)).toEqual({ missingKey: list.tunnels[1] });
     await debug.beforeLaunch({ name: 'App' }, { tunnel: 'my-tunnel' }, 'example', [], list.tunnels, settings, false);
     await debug.beforeLaunch({ name: 'Other' }, { tunnel: 'my-tunnel' }, 'example', [], list.tunnels, { ...settings, configurations: ['App'] }, true);
     expect(request).not.toHaveBeenCalled();

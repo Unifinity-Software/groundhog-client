@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Agent, AuthStatus, Backend, Tunnel, Workspace } from './protocol';
 import { tunnelLocation } from './actions';
 
-export type ExplorerNode = { kind: 'workspace'; workspace: Workspace } | { kind: 'tunnel'; tunnel: Tunnel };
+export type ExplorerNode = { kind: 'workspace'; workspace: Workspace } | { kind: 'tunnel'; tunnel: Tunnel; folder?: vscode.WorkspaceFolder };
 export class TunnelExplorer implements vscode.TreeDataProvider<ExplorerNode>, vscode.Disposable {
   private readonly changes = new vscode.EventEmitter<ExplorerNode | undefined>();
   readonly onDidChangeTreeData = this.changes.event;
@@ -14,8 +14,8 @@ export class TunnelExplorer implements vscode.TreeDataProvider<ExplorerNode>, vs
   auth: AuthStatus = { state: 'signedOut' };
   private readonly subscriptions;
   private refreshing?: Promise<void>;
-  private readonly rates = new Map<string, number>();
-  setRequestRate(name: string, count: number): void { this.rates.set(name, count); this.changes.fire(undefined); }
+  private readonly rates = new Map<string, { count: number; updated: number }>();
+  setRequestRate(name: string, count: number): void { this.rates.set(name, { count, updated: Date.now() }); this.changes.fire(undefined); }
   constructor(private readonly backend: Backend) {
     this.subscriptions = [backend.on('auth/changed', () => { void this.refresh().catch(() => {}); }), backend.on('tunnels/changed', () => { void this.refresh().catch(() => {}); }), backend.on('agents/changed', event => { this.agents = event.agents; this.changes.fire(undefined); this.updated.fire(); }), backend.on('backend/state', event => { if (event.state === 'ready') void this.refresh().catch(() => {}); })];
   }
@@ -45,7 +45,9 @@ export class TunnelExplorer implements vscode.TreeDataProvider<ExplorerNode>, vs
     const tunnel = node.tunnel; const location = tunnelLocation(tunnel, this.agents);
     const symbol = { local: '●', remote: '◐', offline: '○' }[location];
     const item = new vscode.TreeItem(`${symbol} ${tunnel.name}`, vscode.TreeItemCollapsibleState.None);
-    item.description = tunnel.url; item.tooltip = `${tunnel.name} · ${location} · ${this.rates.get(tunnel.name) ?? 0} req/min\n${tunnel.url}`;
+    const recent = this.rates.get(tunnel.name);
+    const rate = recent && Date.now() - recent.updated < 60000 ? recent.count : tunnel.requestsLastMinute ?? 0;
+    item.description = tunnel.url; item.tooltip = `${tunnel.name} · ${location} · ${rate} req/min\n${tunnel.url}`;
     item.contextValue = `tunnel.${location}${this.agents.some(a => a.name === tunnel.name && a.source === 'aspire') ? '.aspire' : ''}${tunnel.actions.includes('rename') ? '.rename' : ''}${tunnel.actions.includes('delete') ? '.delete' : ''}`;
     item.command = { command: 'groundhog.requests', title: 'Inspect requests', arguments: [node] };
     return item;

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { Backend, RequestDetail, RequestSummary, Tunnel } from './protocol';
+import { Backend, RequestSummary, Tunnel } from './protocol';
+import { DetailSelection } from './detailSelection';
 import { StreamEvent, SubscriptionBuffer } from './subscription';
 import { asCurl, parseHeaders, RequestActions, signatureWarning } from './requestActions';
 import { toDataURL } from 'qrcode';
@@ -19,7 +20,7 @@ export class InspectorPanels implements vscode.Disposable {
     let source: 'local' | 'remote' | undefined;
     let disposed = false;
     const rows: RequestSummary[] = [];
-    let detail: RequestDetail | undefined;
+    const selection = new DetailSelection(requestId => this.backend.request('requests/detail', { workspace: tunnel.workspace, name: tunnel.name, requestId }), () => this.target(tunnel.name));
     const buffer = new SubscriptionBuffer();
     const post = (message: unknown) => { if (!disposed) void panel.webview.postMessage(message); };
     const deliver = (event: StreamEvent) => {
@@ -56,8 +57,8 @@ export class InspectorPanels implements vscode.Disposable {
     };
     const showDetail = async (requestId: string) => {
       if (!this.backend.capabilities.includes('requestDetail')) throw new Error('Request detail requires a newer Groundhog CLI or relay.');
-      detail = await this.backend.request('requests/detail', { workspace: tunnel.workspace, name: tunnel.name, requestId });
-      post({ type: 'detail', detail, target: await this.target(tunnel.name) ?? 'http://localhost:5173' });
+      const selected = await selection.select(requestId);
+      if (selected) post({ type: 'detail', ...selected });
     };
     panel.webview.onDidReceiveMessage(async (message: { type?: string; requestId?: unknown; target?: unknown; headers?: unknown; body?: unknown; enabled?: unknown }) => {
       try {
@@ -72,8 +73,9 @@ export class InspectorPanels implements vscode.Disposable {
       } else if (message?.type === 'capture' && typeof message.enabled === 'boolean') {
         const result = await this.backend.request('captureBodies/set', { workspace: tunnel.workspace, name: tunnel.name, enabled: message.enabled });
         post({ type: 'captureState', enabled: result.enabled, canChange: true });
-        if (detail) await showDetail(detail.requestId);
-      } else if (['replay', 'curl', 'export'].includes(message?.type ?? '') && detail) {
+        if (selection.value) await showDetail(selection.value.detail.requestId);
+      } else if (['replay', 'curl', 'export'].includes(message?.type ?? '')) {
+        const detail = selection.displayed(message.requestId);
         if (typeof message.target !== 'string' || typeof message.headers !== 'string' || typeof message.body !== 'string' || message.headers.length > 65536 || message.body.length > 262144) throw new Error('The edited request is too large or invalid.');
         const headers = parseHeaders(message.headers); const body = message.body;
         if (message.type === 'curl') { await vscode.env.clipboard.writeText(asCurl(detail, message.target, headers, body)); post({ type: 'operation', message: 'Copied as curl.' }); }
@@ -92,7 +94,7 @@ export class InspectorPanels implements vscode.Disposable {
       } catch (error) { post({ type: 'operation', message: (error as Error).message }); }
     });
     panel.onDidDispose(() => {
-      disposed = true; generation++; this.panels.delete(key); subscriptions.forEach(s => s.dispose());
+      disposed = true; generation++; selection.dispose(); this.panels.delete(key); subscriptions.forEach(s => s.dispose());
       if (subscriptionId) void this.backend.request('requests/unsubscribe', { subscriptionId }).catch(() => {});
     });
     panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'inspector.js');

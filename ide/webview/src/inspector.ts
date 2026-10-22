@@ -33,7 +33,7 @@ function renderDetail(detail: Detail, target: string): void {
   const body = section.querySelector('#body') as HTMLTextAreaElement; body.value = detail.body;
   section.querySelector('#warning')!.textContent = detail.truncated ? 'This capture was truncated. Send again is unavailable.' : Object.keys(detail.headers).some(name => name.toLowerCase().endsWith('-signature')) ? 'Signed webhooks may reject old timestamps when sent again.' : '';
   (section.querySelector('#replay') as HTMLButtonElement).disabled = detail.truncated;
-  for (const type of ['replay', 'curl', 'export']) section.querySelector('#' + type)!.addEventListener('click', () => host.postMessage({ type, target: targetInput.value, headers: headers.value, body: body.value }));
+  for (const type of ['replay', 'curl', 'export']) section.querySelector('#' + type)!.addEventListener('click', () => host.postMessage({ type, requestId: detail.requestId, target: targetInput.value, headers: headers.value, body: body.value }));
   if (detail.statusCode !== undefined || detail.responseHeaders || detail.responseBody) {
     const heading = document.createElement('h3'); heading.textContent = `Response · ${detail.statusCode ?? ''}${detail.responseTruncated ? ' · truncated' : ''}`;
     const response = document.createElement('pre'); response.textContent = JSON.stringify(detail.responseHeaders ?? {}, null, 2) + '\n\n' + (detail.responseBody ?? '');

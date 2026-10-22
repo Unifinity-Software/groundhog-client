@@ -4,6 +4,8 @@ Run hosted HTTPS tunnels beside your app. The extension runs in the workspace, i
 
 Use VS Code 1.101 or later. Open **Groundhog** in the activity bar, sign in through the Accounts menu, and choose your workspace. Right-click a tunnel to start hosting, copy its URL, inspect traffic or edit visitor access. CLI credentials stay in the shared CLI store.
 
+When no local target is saved, **Start hosting** asks for your app's URL, prefilled from `groundhog.json` or `launchSettings.json`. Later starts and restarts reuse the saved local target.
+
 Install the [.NET 10 SDK](https://dotnet.microsoft.com/download) and run `dotnet tool update --global Groundhog.Cli --prerelease`. This preview requires CLI 1.3.0-preview.1 or later; install it only after the matching CLI package is published. Open **Groundhog** in the activity bar to sign in. A custom executable path can be set with `groundhog.cliPath`.
 
 Platform-specific release packages include a self-contained CLI and work without a .NET SDK. A compatible global CLI is used when it is newer; an explicit `groundhog.cliPath` always takes precedence. Bundled backends use compressed single-file publishing. Trimming is currently unsupported because the CLI and RPC dependencies use reflection; no trim warnings are suppressed.

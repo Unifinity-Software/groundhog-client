@@ -10,7 +10,7 @@ import { DebugHosting, ProjectConfig } from './debug';
 import { InspectorPanels } from './inspector';
 import { ActiveRequestStats } from './stats';
 import { NotificationPolicy, tunnelLiterals } from './notifications';
-import { tunnelLocation } from './actions';
+import { tunnelConnected, tunnelLocation } from './actions';
 import { VisitorAccessPanels } from './visitorAccess';
 import { GroundhogDiagnostics } from './diagnostics';
 
@@ -21,8 +21,7 @@ async function projectConfig(folder?: vscode.WorkspaceFolder): Promise<ProjectCo
     return typeof value.tunnel === 'string' ? { ...value, projectDirectory: folder.uri.fsPath } : undefined;
   } catch { return; }
 }
-async function targetFor(tunnel: string): Promise<string | undefined> {
-  const folder = vscode.workspace.workspaceFolders?.[0];
+async function targetFor(tunnel: string, folder = vscode.workspace.workspaceFolders?.[0]): Promise<string | undefined> {
   const project = await projectConfig(folder);
   if (project?.tunnel === tunnel && project.target) return project.target;
   if (!folder) return;
@@ -75,14 +74,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const updateStatus = () => {
     if (!activeTunnel || explorer.auth.state !== 'signedIn') { status.hide(); return; }
     const current = explorer.tunnels.find(t => t.name === activeTunnel!.name) ?? activeTunnel;
-    const local = explorer.agents.find(a => a.name === current.name);
-    const connected = !requestStats.disconnected && (local?.state === 'Connected' || current.state.toLowerCase() === 'connected');
+    const connected = !requestStats.disconnected && tunnelConnected(current, explorer.agents);
     status.text = (connected ? '● ' : '○ ') + current.name + ' · ' + requestStats.requests + ' req/min · ' + requestStats.failures + ' 5xx';
     status.tooltip = current.url + '\nOpen Groundhog requests';
     status.backgroundColor = connected ? undefined : new vscode.ThemeColor('statusBarItem.errorBackground'); status.show();
   };
   const stats = new ActiveRequestStats(backend, value => { requestStats = value; if (activeTunnel) explorer.setRequestRate(activeTunnel.name, value.requests); updateStatus(); });
-  const panels = new InspectorPanels(backend, context.extensionUri, (tunnel, rows) => { explorer.setRequestRate(tunnel.name, rows.filter(row => Date.parse(row.completed) >= Date.now() - 60000).length); }, targetFor);
+  const panels = new InspectorPanels(backend, context.extensionUri, (tunnel, rows) => { explorer.setRequestRate(tunnel.name, rows.filter(row => Date.parse(row.completed) >= Date.now() - 60000).length); }, async name => explorer.tunnels.find(tunnel => tunnel.name === name)?.target ?? await targetFor(name));
   const access = new VisitorAccessPanels(backend, context.extensionUri);
   const diagnostics = new GroundhogDiagnostics(backend);
   context.subscriptions.push(access, diagnostics);
@@ -113,15 +111,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
   command('create', async () => { if (explorer.workspace) { await actions.create(explorer.workspace); await explorer.refresh(); } });
   command('visitorAccess', async node => { const tunnel = await selectTunnel(node); if (tunnel) await access.open(tunnel); });
-  command('runDiagnostics', async node => { const tunnel = await selectTunnel(node); if (tunnel) await diagnostics.run(vscode.workspace.workspaceFolders?.[0], tunnel, await targetFor(tunnel.name) ?? 'http://localhost:5173'); });
-  command('startApp', async () => { if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before starting your app.'); await vscode.commands.executeCommand('workbench.action.debug.start'); });
+  command('runDiagnostics', async node => {
+    const tunnel = await selectTunnel(node); const folder = node?.kind === 'tunnel' ? node.folder ?? vscode.workspace.workspaceFolders?.[0] : vscode.workspace.workspaceFolders?.[0];
+    if (tunnel) await diagnostics.run(folder, tunnel, tunnel.target ?? await targetFor(tunnel.name, folder) ?? 'http://localhost:5173');
+  });
+  command('startApp', async node => {
+    if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before starting your app.');
+    const folder = node?.kind === 'tunnel' ? node.folder : undefined;
+    const configurations = folder ? vscode.workspace.getConfiguration('launch', folder.uri).get<vscode.DebugConfiguration[]>('configurations', []) : [];
+    if (folder && configurations.length) {
+      const choice = configurations.length === 1 ? configurations[0].name : await vscode.window.showQuickPick(configurations.map(configuration => configuration.name), { placeHolder: 'Choose the app to start' });
+      if (choice) await vscode.debug.startDebugging(folder, choice);
+    } else await vscode.commands.executeCommand('workbench.action.debug.start');
+  });
   command('configureLocalCa', async node => {
     const tunnel = await selectTunnel(node); if (!tunnel) return;
+    const folder = node?.kind === 'tunnel' ? node.folder ?? vscode.workspace.workspaceFolders?.[0] : vscode.workspace.workspaceFolders?.[0];
     if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before changing local certificate settings.');
     const files = await vscode.window.showOpenDialog({ title: 'Choose a trusted local CA certificate', canSelectMany: false, filters: { Certificates: ['pem', 'crt', 'cer'] } }); if (!files?.[0]) return;
     if (explorer.agents.some(agent => agent.name === tunnel.name && agent.source === 'aspire')) throw new Error('Configure the local CA through the Aspire AppHost for this tunnel.');
-    await backend.request('agents/restart', { workspace: tunnel.workspace, name: tunnel.name, localCa: files[0].fsPath, projectDirectory: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath });
-    await explorer.refresh(); await diagnostics.run(vscode.workspace.workspaceFolders?.[0], tunnel, await targetFor(tunnel.name) ?? 'http://localhost:5173');
+    await backend.request('agents/restart', { workspace: tunnel.workspace, name: tunnel.name, localCa: files[0].fsPath, projectDirectory: folder?.uri.fsPath });
+    await explorer.refresh(); await diagnostics.run(folder, tunnel, tunnel.target ?? await targetFor(tunnel.name, folder) ?? 'http://localhost:5173');
   });
   command('rotateKey', async node => {
     const tunnel = await selectTunnel(node); if (!tunnel) return;
@@ -144,16 +154,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(debug);
   const notices = new NotificationPolicy();
   const lenses = new vscode.EventEmitter<void>();
+  const notifyKey = (tunnel: Tunnel) => {
+    if (notices.keyChanged(tunnel.name)) void vscode.window.showWarningMessage(`The connection key for ${tunnel.name} changed or was rejected. Enter its current key to reconnect.`);
+  };
   const updateNotices = () => {
     for (const tunnel of explorer.tunnels) {
-      const location = tunnelLocation(tunnel, explorer.agents);
-      if (notices.connection(tunnel.name, location === 'offline' ? 'offline' : 'connected', config.get<boolean>('notifyOnDisconnect', true))) void vscode.window.showWarningMessage(`Groundhog tunnel ${tunnel.name} disconnected.`, 'Inspect requests').then(action => { if (action) void panels.open(tunnel); });
+      const agent = explorer.agents.find(agent => agent.name === tunnel.name);
+      if (agent?.reasonCode === 'credentialRejected') notifyKey(tunnel);
+      if (notices.connection(tunnel.name, tunnelConnected(tunnel, explorer.agents) ? 'connected' : 'offline', config.get<boolean>('notifyOnDisconnect', true))) void vscode.window.showWarningMessage(`Groundhog tunnel ${tunnel.name} disconnected.`, 'Inspect requests').then(action => { if (action) void panels.open(tunnel); });
     }
     lenses.fire();
   };
   context.subscriptions.push(lenses, explorer.updated.event(updateNotices),
     backend.on('requests/event', event => { if (stats.matches(event.subscriptionId) && activeTunnel && notices.request(activeTunnel.name, event.request.statusCode, config.get<boolean>('notifyOn5xx', false))) void vscode.window.showWarningMessage(`Groundhog received a ${event.request.statusCode} response for ${activeTunnel.name}.`); }),
-    backend.on('connection/event', event => { if (stats.matches(event.subscriptionId) && activeTunnel && event.reason && /key.*(revok|rotat|reject)/i.test(event.reason) && notices.keyChanged(activeTunnel.name)) void vscode.window.showWarningMessage(`The connection key for ${activeTunnel.name} changed or was rejected. Enter its current key to reconnect.`); }),
+    backend.on('connection/event', event => { if (stats.matches(event.subscriptionId) && activeTunnel && event.reasonCode === 'credentialRejected') notifyKey(activeTunnel); }),
     vscode.languages.registerCodeLensProvider({ language: 'csharp', scheme: 'file' }, {
       onDidChangeCodeLenses: lenses.event,
       provideCodeLenses: document => tunnelLiterals(document.getText()).flatMap(({ name, offset }) => {
@@ -172,9 +186,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const settings = vscode.workspace.getConfiguration('groundhog', folder?.uri);
         try {
           await explorer.refresh();
-          const result = await debug.beforeLaunch(configuration, await projectConfig(folder), explorer.workspace, explorer.agents, explorer.tunnels,
+          const project = await projectConfig(folder);
+          if (project && !project.target) project.target = await targetFor(project.tunnel, folder);
+          const result = await debug.beforeLaunch(configuration, project, explorer.workspace, explorer.agents, explorer.tunnels,
             { configurations: settings.get<string[]>('debugConfigurations', []), stopAfterDebugging: settings.get<boolean>('stopHostingAfterDebugging', false) }, vscode.workspace.isTrusted);
-          if (result.missingKey) void vscode.window.showWarningMessage('Enter a Groundhog connection key to host this tunnel. Debugging will continue without the tunnel.', 'Enter connection key').then(action => { if (action) void vscode.commands.executeCommand('groundhog.enterKey'); });
+          if (result.missingKey) {
+            const node: ExplorerNode = { kind: 'tunnel', tunnel: result.missingKey, folder };
+            void vscode.window.showWarningMessage('Enter a Groundhog connection key to host this tunnel. Debugging will continue without the tunnel.', 'Enter connection key').then(action => { if (action) void vscode.commands.executeCommand('groundhog.enterKey', node); });
+          }
         } catch (error) { void vscode.window.showWarningMessage('Groundhog could not start hosting. Debugging will continue. ' + (error as Error).message); }
         return configuration;
       }

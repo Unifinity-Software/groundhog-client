@@ -38,7 +38,7 @@ export class MockBackend implements Backend {
         break;
       case 'workspaces/list': result = { workspaces: [{ slug: 'example', name: 'Example', role: 'owner' }], selected: this.auth.workspace ?? null }; break;
       case 'workspaces/use': this.auth.workspace = (params as { workspace: string }).workspace; result = { workspace: this.auth.workspace }; this.events.emit('auth/changed', this.auth); break;
-      case 'tunnels/list': result = { tunnels: this.tunnels.map(t => ({ ...t, captureBodies: this.captureBodies, canCaptureBodies: true })), agents: this.agents }; break;
+      case 'tunnels/list': result = { tunnels: this.tunnels.map(t => ({ ...t, target: this.agents.find(agent => agent.name === t.name)?.target ?? t.target, captureBodies: this.captureBodies, canCaptureBodies: true })), agents: this.agents }; break;
       case 'tunnels/create':
         if (this.tunnels.some(t => t.name === ref.name)) throw new Error('A tunnel with this name already exists.');
         result = { ...ref, url: `https://${ref.name}.groundhog.unifinity.com`, state: 'disconnected', location: 'offline', hasKey: true, actions: ['rename', 'delete'] };
@@ -61,6 +61,7 @@ export class MockBackend implements Backend {
         }
         const tunnel = this.findTunnel(ref); tunnel.state = 'connected'; tunnel.location = 'local';
         const agent: Agent = { name: ref.name, target: (params as Methods['agents/start'][0]).target ?? 'http://localhost:5173', url: tunnel.url, state: 'Connected', source: 'cli', processId: 1234 };
+        tunnel.target = agent.target;
         this.agents = this.agents.filter(a => a.name !== ref.name).concat(agent); result = { ...agent, created: true };
         this.events.emit('agents/changed', { agents: this.agents }); break;
       }

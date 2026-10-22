@@ -21,10 +21,12 @@ export class TunnelActions {
   async start(tunnel: Tunnel, restart = false): Promise<Agent | undefined> {
     if (!await this.ui.trust()) return;
     if (!tunnel.hasKey && !await this.enterKey(tunnel)) return;
-    const target = await this.ui.input('Local app URL', await this.ui.target(tunnel.name) ?? 'http://localhost:5173');
+    const target = tunnel.target ?? await this.ui.input('Local app URL', await this.ui.target(tunnel.name) ?? 'http://localhost:5173');
     if (!target) return;
     const projectDirectory = this.ui.projectDirectory?.();
-    return this.backend.request(restart ? 'agents/restart' : 'agents/start', { workspace: tunnel.workspace, name: tunnel.name, target, ...(projectDirectory ? { projectDirectory } : {}) });
+    const agent = await this.backend.request(restart ? 'agents/restart' : 'agents/start', { workspace: tunnel.workspace, name: tunnel.name, target, ...(projectDirectory ? { projectDirectory } : {}) });
+    tunnel.target = agent.target;
+    return agent;
   }
   async stop(tunnel: Tunnel): Promise<void> { await this.backend.request('agents/stop', this.ref(tunnel)); }
   async open(tunnel: Tunnel): Promise<void> { if (!hostedUrl(tunnel.url)) throw new Error('Groundhog returned an invalid public URL.'); await this.ui.open(tunnel.url); }
@@ -50,4 +52,8 @@ export class TunnelActions {
 export function tunnelLocation(tunnel: Tunnel, agents: Agent[]): 'local' | 'remote' | 'offline' {
   if (agents.some(a => a.name === tunnel.name && ['Connected', 'Reconnecting', 'Connecting'].includes(a.state))) return 'local';
   return tunnel.location ?? (tunnel.state.toLowerCase() === 'connected' ? 'remote' : 'offline');
+}
+export function tunnelConnected(tunnel: Tunnel, agents: Agent[]): boolean {
+  const local = agents.find(agent => agent.name === tunnel.name);
+  return local ? local.state === 'Connected' : tunnel.state.toLowerCase() === 'connected';
 }

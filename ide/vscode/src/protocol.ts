@@ -1,7 +1,8 @@
 /** Public, credential-free shapes from docs/ide-protocol.md. */
 export interface Workspace { slug: string; name: string; role: string }
-export interface Tunnel { workspace: string; name: string; url: string; state: string; location?: 'local' | 'remote' | 'offline'; actions: string[]; hasKey: boolean; captureBodies?: boolean; canCaptureBodies?: boolean }
-export interface Agent { name: string; target: string; url?: string; state: string; source: 'cli' | 'aspire'; processId: number; created?: boolean }
+export interface Tunnel { workspace: string; name: string; url: string; state: string; location?: 'local' | 'remote' | 'offline'; actions: string[]; hasKey: boolean; target?: string; requestsLastMinute?: number; captureBodies?: boolean; canCaptureBodies?: boolean }
+export type ConnectionReasonCode = 'credentialRejected' | 'replaced' | 'tunnelNotFound' | 'notAllowed' | 'unsupportedProtocol' | 'visitorAccessUnsupported' | 'cancelled';
+export interface Agent { name: string; target: string; url?: string; state: string; source: 'cli' | 'aspire' | 'agent'; processId: number; created?: boolean; reasonCode?: ConnectionReasonCode; reason?: string }
 export interface AuthStatus { state: 'signedIn' | 'signedOut' | 'expired'; workspace?: string | null; expiresAt?: string | null }
 export interface RequestSummary { requestId: string; completed: string; method: string; path: string; statusCode: number; durationMs: number; source: 'local' | 'remote' }
 export interface TunnelRef { workspace: string; name: string }
@@ -45,7 +46,7 @@ export interface Notifications {
   'tunnels/changed': { workspace: string };
   'agents/changed': { agents: Agent[] };
   'requests/event': { subscriptionId: string; request: RequestSummary };
-  'connection/event': { subscriptionId: string; state: 'live' | 'reconnecting' | 'stopped'; reason?: string; source?: 'local' | 'remote' };
+  'connection/event': { subscriptionId: string; state: 'live' | 'reconnecting' | 'stopped'; reason?: string; reasonCode?: ConnectionReasonCode; source?: 'local' | 'remote' };
   /** Client lifecycle event; never sent over the protocol. */
   'backend/state': { state: 'ready' | 'reconnecting' | 'stopped'; message?: string };
 }
