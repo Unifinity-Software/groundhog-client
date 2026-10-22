@@ -60,6 +60,7 @@ internal static class GroundhogCommand
           groundhog logs <name> [--follow] [--output json]
           groundhog wait <name> [--condition connected|ready] [--timeout <seconds>]
           groundhog doctor [--target <url>]
+          groundhog mcp [--allow-actions]
           groundhog login
           groundhog logout|whoami
           groundhog workspace list|use <slug>

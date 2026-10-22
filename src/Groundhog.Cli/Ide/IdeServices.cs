@@ -65,7 +65,12 @@ internal sealed partial class IdeServices : IAsyncDisposable
         {
             if (p.ValueKind is not (JsonValueKind.Object or JsonValueKind.Undefined or JsonValueKind.Null))
             { throw Fault(-32602, "invalidParams", "Parameters must be an object."); }
-            if (method == "initialize") { return await InitializeAsync(p, ct); }
+            if (method == "initialize")
+            {
+                await _mutations.WaitAsync(ct);
+                try { return await InitializeAsync(p, ct); }
+                finally { _mutations.Release(); }
+            }
             if (!_initialized) { throw Fault(-32000, "notInitialized", "Initialize the backend first."); }
             if (method is "auth/status") { return Auth(); }
             if (method == "requests/unsubscribe") { return await UnsubscribeAsync(Required(p, "subscriptionId")); }

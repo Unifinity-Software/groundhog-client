@@ -33,6 +33,11 @@ try
     {
         return await Groundhog.Cli.Ide.IdeServer.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(), stop.Token);
     }
+    if (args is ["mcp"] or ["mcp", "--allow-actions"])
+    {
+        return await Groundhog.Cli.Ide.McpServer.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(),
+            args.Length == 2, stop.Token);
+    }
     if (checkForUpdates)
     {
         // A broken cache or unavailable NuGet feed must never prevent the requested command from running.

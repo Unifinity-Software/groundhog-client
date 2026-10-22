@@ -414,7 +414,7 @@ public sealed class IdeBackendTests
         public override void SetLength(long value) => throw new NotSupportedException();
     }
 
-    private sealed class RelayHandler : HttpMessageHandler
+    internal sealed class RelayHandler : HttpMessageHandler
     {
         internal string Key { get; } = ConnectionKey.Generate();
         internal HttpStatusCode? Status { get; set; }

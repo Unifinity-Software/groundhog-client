@@ -332,3 +332,5 @@ safe projections, device-login orchestration, subscription IDs and structured di
 | Visual Studio debugger/WebView2 integration | spike #38, extension #49 |
 | MCP adapter and explicit action policy | #50 |
 | visitor access, diagnostics and bundled backend | #51 |
+
+The separate newline-delimited MCP adapter and its read-only/action policy are described in [Groundhog MCP server](mcp.md).

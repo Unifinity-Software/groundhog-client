@@ -7,6 +7,48 @@ namespace Groundhog.Cli.Ide;
 
 internal sealed partial class IdeServices
 {
+    internal async Task<IdeRequest[]> RecentRequestsAsync(JsonElement p, CancellationToken ct)
+    {
+        var session = await SessionAsync(ct);
+        var workspace = Workspace(p, session);
+        var name = Optional(p, "tunnel") ?? Optional(p, "name");
+        if (name is not null && !Groundhog.Protocol.TunnelName.IsValid(name))
+        { throw Fault(-32602, "invalidParams", "Invalid tunnel name."); }
+        var requests = new List<IdeRequest>();
+        if (name is not null)
+        {
+            foreach (var registration in _registrations().Where(r => r.Name == name))
+            {
+                if (await LocalSessions.QueryAsync(registration, false, ct) is { } snapshot)
+                { requests.AddRange(snapshot.Recent.Select(LocalRequest)); }
+            }
+        }
+        if (requests.Count == 0)
+        {
+            using var client = _authentication.CreateClient(session);
+            var path = $"/api/w/{Uri.EscapeDataString(workspace)}/requests?limit=200"
+                + (name is null ? "" : "&tunnel=" + Uri.EscapeDataString(name));
+            var records = await client.SendAsync<RemoteSearchResult>(HttpMethod.Get, path, null, ct);
+            requests.AddRange(records.Entries.Select(RemoteRequest));
+        }
+        var statusClass = Optional(p, "statusClass");
+        if (statusClass is not null && statusClass is not ("1xx" or "2xx" or "3xx" or "4xx" or "5xx"))
+        { throw Fault(-32602, "invalidParams", "Status class must be 1xx through 5xx."); }
+        DateTimeOffset? since = null;
+        if (Optional(p, "since") is { } sinceText)
+        {
+            if (!DateTimeOffset.TryParse(sinceText, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed))
+            { throw Fault(-32602, "invalidParams", "Since must be an ISO 8601 timestamp."); }
+            since = parsed;
+        }
+        return requests.DistinctBy(r => r.RequestId).Where(r => (statusClass is null || r.StatusCode / 100 == statusClass[0] - '0')
+                && (Optional(p, "method") is not { } method || r.Method.Equals(method, StringComparison.OrdinalIgnoreCase))
+                && (Optional(p, "path") is not { } path || r.Path.Contains(path, StringComparison.Ordinal))
+                && (since is null || r.Completed >= since))
+            .OrderByDescending(r => r.Completed).Take(200).Select(r => r with { Path = Redact(r.Path, session) }).ToArray();
+    }
+
     private sealed class Subscription(CancellationTokenSource stop)
     {
         internal CancellationTokenSource Stop { get; } = stop;
