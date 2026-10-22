@@ -312,9 +312,17 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
                 return false;
             }
 
-            session.TunnelKeys[RemoteCommands.KeyId(workspace, name)] = key;
-            store.Save(session);
-            return true;
+            var saved = false;
+            store.Update(fresh =>
+            {
+                if (fresh is not null && fresh.SessionId == session.SessionId && fresh.Relay == session.Relay)
+                {
+                    fresh.TunnelKeys[RemoteCommands.KeyId(workspace, name)] = key;
+                    saved = true;
+                }
+                return fresh;
+            });
+            return saved;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or CryptographicException)
         {

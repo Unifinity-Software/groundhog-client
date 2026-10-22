@@ -164,7 +164,12 @@ the code in large type with the address and waits for approval; Esc cancels.
 
 ![Signing in from the app](images/cli-sign-in.png) Sign in through the browser,
 check that its code matches your terminal, and approve CLI access. In a headless shell, open the printed URL on
-another device. The code expires after ten minutes; the resulting CLI session expires after eight hours.
+another device. The code expires after ten minutes. Older relays issue a CLI session that expires after eight hours.
+A relay advertising refresh tokens can renew that access automatically while your refresh session remains valid.
+The CLI stores the rotating refresh token beside the access token in its protected local credential store; it refreshes
+before management calls when fewer than five minutes remain and retries a 401 once after refresh. Simultaneous CLI
+and IDE processes coordinate through a local file lock. `groundhog logout` revokes the session's refresh chain and
+removes saved credentials and tunnel keys. Refresh support depends on the relay's advertised capability.
 Signing in replaces the saved session.
 
 `list` includes connected and disconnected remote tunnels in the selected workspace. `ls` is an alias.

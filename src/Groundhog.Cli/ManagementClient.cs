@@ -34,9 +34,9 @@ internal sealed record DeviceAuthorization(string DeviceCode, string UserCode, s
 {
     public override string ToString() => "CLI authorization request";
 }
-internal sealed record DeviceToken(string State, string? AccessToken, int ExpiresIn)
+internal sealed record DeviceToken(string? State, string? AccessToken, int ExpiresIn, string? RefreshToken = null)
 {
-    public override string ToString() => State;
+    public override string ToString() => State ?? "CLI token response";
 }
 
 internal sealed class ManagementException(string message, HttpStatusCode? status = null, TimeSpan? retryAfter = null) : Exception(message)
@@ -51,6 +51,30 @@ internal sealed class ManagementException(string message, HttpStatusCode? status
 internal sealed class ManagementClient : IDisposable
 {
     private readonly HttpClient _http;
+    private Func<bool, string?, CancellationToken, Task<string>>? _authenticate;
+
+    internal void Authenticate(Func<bool, string?, CancellationToken, Task<string>> authenticate) => _authenticate = authenticate;
+
+    private async Task<HttpResponseMessage> SendAuthenticatedAsync(HttpMethod method, string path, object? body,
+        HttpCompletionOption completion, CancellationToken cancellation, bool eventStream = false)
+    {
+        var token = _authenticate is null ? null : await _authenticate(false, null, cancellation).ConfigureAwait(false);
+        for (var attempt = 0; ; attempt++)
+        {
+            using var request = new HttpRequestMessage(method, path);
+            if (body is not null) { request.Content = JsonContent.Create(body); }
+            if (token is not null) { request.Headers.Authorization = new AuthenticationHeaderValue("GroundhogCli", token); }
+            if (eventStream) { request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream")); }
+            var response = await _http.SendAsync(request, completion, cancellation).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.Unauthorized || attempt != 0 || _authenticate is null) { return response; }
+            string next;
+            try { next = await _authenticate(true, token, cancellation).ConfigureAwait(false); }
+            catch { response.Dispose(); throw; }
+            if (next == token) { return response; }
+            response.Dispose();
+            token = next;
+        }
+    }
     internal ManagementClient(string relay, string? token = null, HttpMessageHandler? handler = null)
     {
         var address = new Uri(relay);
@@ -70,13 +94,7 @@ internal sealed class ManagementClient : IDisposable
 
     internal async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellation)
     {
-        using var request = new HttpRequestMessage(method, path);
-        if (body is not null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
-
-        using var response = await _http.SendAsync(request, cancellation);
+        using var response = await SendAuthenticatedAsync(method, path, body, HttpCompletionOption.ResponseContentRead, cancellation);
         ThrowIfFailed(response);
         if (response.StatusCode == HttpStatusCode.NoContent)
         {
@@ -92,10 +110,9 @@ internal sealed class ManagementClient : IDisposable
     /// </summary>
     internal async Task<RequestStream> OpenRequestStreamAsync(string workspace, string name, CancellationToken cancellation)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, TunnelPath(workspace, name) + "/requests/stream");
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        // Only the headers are bounded by the client's timeout; the body stays open for as long as the relay sends it.
-        var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+        // Only headers have the client's timeout; the streaming body remains open until cancellation.
+        var response = await SendAuthenticatedAsync(HttpMethod.Get, TunnelPath(workspace, name) + "/requests/stream", null,
+            HttpCompletionOption.ResponseHeadersRead, cancellation, eventStream: true);
         try
         {
             ThrowIfFailed(response);

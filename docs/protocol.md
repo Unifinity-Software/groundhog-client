@@ -188,8 +188,23 @@ supporting CLI login. Management endpoints exist only on the relay's own host, n
    and action permissions are checked on every request. CLI credentials cannot authorize `/api/platform`.
    A valid explicit CLI credential uses no browser cookies and does not require browser antiforgery tokens.
    Invalid or expired credentials return 401; inaccessible workspaces return 404 without exposing their existence.
-5. `POST /api/cli/logout` with that credential revokes it and returns 204. Expiry is absolute at eight hours;
-   no refresh token is issued. Login replaces the CLI's saved local session.
+5. Older relays issue an eight-hour access token without renewal. An additive refresh-capable relay advertises
+   `"refreshToken"` in the `capabilities` string array returned by `GET /api/service-info`. Its approved device grant
+   also includes `refreshToken`. Clients require both signals before enabling refresh.
+6. `POST /api/cli/refresh` with `{"refreshToken":"<secret>"}` returns `accessToken`, `refreshToken` and
+   `expiresIn: 28800`. Each refresh rotates the refresh token and invalidates its predecessor; reusing a predecessor
+   revokes the chain. The relay applies sliding and absolute refresh expiry and account eligibility checks. The
+   expected defaults are 30 days since last use and 90 days since sign-in; relay settings may shorten them.
+7. `POST /api/cli/logout` with the access credential revokes the session and returns 204. Refresh-capable clients
+   also include `{"refreshToken":"<secret>"}` so the whole refresh chain can be revoked. Login replaces the CLI's
+   saved local session.
+
+Refresh is an optional additive contract; a relay that omits its capability retains the fixed eight-hour session.
+The client refreshes before a management call when fewer than five minutes remain, and on a 401 it refreshes and
+retries at most once. A current-user credential-file lock serializes refresh and credential updates across CLI,
+IDE and background processes. Each waiter reads the credential again after acquiring the lock, so it uses another
+process's rotated successor rather than replaying an old refresh token. Access and refresh tokens share the existing
+protected credential store and never enter project files, session discovery, IDE messages or logs.
 
 Credentials and polling secrets are never placed in URLs. Storage holds only their SHA-256 hashes, expiry,
 and the approved identity claims. Authorization records are global authentication infrastructure; all tunnel,
