@@ -1,0 +1,64 @@
+# Groundhog for Visual Studio
+
+This preview targets Visual Studio 2022 17.14 or newer on Windows x64. The VSIX also declares the Visual Studio 2026
+installation range; that host has not been exercised in this development environment. Use **View â†’ Groundhog Tunnels**.
+The tool window groups tunnels by workspace and labels local CLI, Aspire and remote hosting. Its context menu offers
+hosting, stopping, restarting, opening/copying URLs, key entry and authorized rename/delete actions.
+
+Choose **Sign in**, compare the displayed user code, then **Open browser**. Connection keys and login tokens remain in
+the CLI credential store. If the CLI is missing or older than 1.3.0-preview.1, choose **Install / update CLI**; installation
+requires your confirmation and a .NET SDK. A custom executable path is under **Tools â†’ Options â†’ Groundhog**.
+
+Double-click a tunnel to inspect requests. The WebView2 control hosts the same `ide/webview` bundle as VS Code and maps
+Visual Studio theme colors to its existing CSS variables. Request detail, body capture, replay and HTTP export require
+the corresponding backend/relay capability; unavailable actions report that requirement. The public tunnel QR code stays local. Web navigation,
+downloads, permissions and new windows from the inspector are blocked.
+
+## Debugging
+
+A single startup project can host its tunnel when debugging starts. The extension searches the project directory and
+parents for `groundhog.json`; the backend merges project visitor rules with local profiles. Without that file, select a
+tunnel in the tool window and use a launchSettings.json with exactly one Project applicationUrl origin. Multiple startup
+projects or ambiguous launch profiles need explicit project configuration. The extension shows the tunnel, local target
+and source settings path for approval before it starts forwarding public requests.
+
+**Host when debugging** and **Stop after debugging** are configurable under **Tools â†’ Options â†’ Groundhog**. Only a CLI
+agent started by that debug session, still at the same process ID, is stopped automatically. Existing CLI agents and
+Aspire AppHosts stay under their owner's lifecycle. Aspire tunnels direct you back to their AppHost.
+
+## Build and bounded checks
+
+Build the shared browser assets once, then build the separate Windows project:
+
+```powershell
+cd ide/vscode
+npm ci
+npm run build
+cd ../..
+dotnet build ide/visualstudio/Groundhog.VisualStudio.csproj -c Release
+powershell.exe -NoProfile -File ide/visualstudio/Verify-Vsix.ps1
+```
+
+The standalone verification inspects real VSIX registrations/assets, runs the shipping StreamJsonRpc client against a
+fragmented stdio peer, verifies target/host URL boundaries, and removes its temporary peer. It needs no relay or Visual
+Studio installation. The normal Groundhog .NET solution does not require Node or the Visual Studio SDK.
+
+## Host smoke checklist
+
+Before publishing, install the built VSIX in an experimental Visual Studio 2022 17.14+ instance and repeat on Visual
+Studio 2026. Limit the smoke to one small project and one tunnel; no load or sleep-based test loops are required.
+
+1. Open **View â†’ Groundhog Tunnels**, sign in, compare the user code and select a workspace.
+2. Create/rename/delete a disposable tunnel, verify the confirmation dialogs, and enter a connection key with the masked
+   field. Confirm that no token, connection key or device secret appears in IDE output or saved project files.
+3. Host a loopback app, inspect one HTTP request and one WebSocket completion, and change the IDE theme/high contrast.
+   Check keyboard navigation, body-capture permission, replay confirmation and the request detail/export controls when
+   their capabilities are available.
+4. Start/stop debugging once with groundhog.json, once with a single launchSettings applicationUrl, and once with an
+   existing CLI agent. Verify that only the agent created by the current debug session stops automatically.
+5. Start an Aspire AppHost and verify its tunnel is visible, labels Aspire, and cannot be stopped through this extension.
+6. Close the tool window and Visual Studio; verify the stdio child exits while independent hosting agents remain running.
+
+No Visual Studio host is installed in the development machine used for this change. Compilation, VSIX packaging and the
+standalone transport checks passed; debugger callbacks, actual IDE rendering, install/uninstall and version-specific host
+loading remain a release validation gap until the checklist runs on those hosts. See [the spike](spike.md).

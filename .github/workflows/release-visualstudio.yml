@@ -1,0 +1,69 @@
+name: Visual Studio extension
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified VSIX to Visual Studio Marketplace
+        type: boolean
+        default: false
+      host_validated:
+        description: The experimental-host checklist passed on supported Visual Studio versions
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visualstudio-release
+  cancel-in-progress: false
+
+jobs:
+  visualstudio:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ide/vscode/package-lock.json
+      - name: Build shared request inspector
+        working-directory: ide/vscode
+        run: |
+          npm ci
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build native extension and VSIX
+        run: dotnet build ide/visualstudio/Groundhog.VisualStudio.csproj -c Release
+      - name: Verify VSIX and isolated stdio transport
+        shell: powershell
+        run: ./ide/visualstudio/Verify-Vsix.ps1
+      - uses: actions/upload-artifact@v6
+        with:
+          name: groundhog-visualstudio
+          path: ide/visualstudio/bin/Release/net472/Groundhog.VisualStudio.vsix
+          if-no-files-found: error
+      - name: Publish to Visual Studio Marketplace
+        if: inputs.publish
+        env:
+          VS_MARKETPLACE_TOKEN: ${{ secrets.VS_MARKETPLACE_TOKEN }}
+          HOST_VALIDATED: ${{ inputs.host_validated }}
+        run: |
+          if ($env:HOST_VALIDATED -ne 'true') { throw 'Run the experimental-host checklist before publishing.' }
+          if (-not $env:VS_MARKETPLACE_TOKEN) { throw 'VS_MARKETPLACE_TOKEN must be configured for the unifinity publisher.' }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installation = & $vswhere -latest -products '*' -property installationPath
+          $publisher = Join-Path $installation 'VSSDK/VisualStudioIntegration/Tools/Bin/VsixPublisher.exe'
+          if (-not (Test-Path -LiteralPath $publisher)) { throw 'The runner needs Visual Studio extension-development publishing tools.' }
+          & $publisher publish -payload ide/visualstudio/bin/Release/net472/Groundhog.VisualStudio.vsix -publishManifest ide/visualstudio/publishManifest.json -personalAccessToken $env:VS_MARKETPLACE_TOKEN
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

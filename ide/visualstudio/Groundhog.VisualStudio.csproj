@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Reference Include="System.Design" />
+    <PackageReference Include="Microsoft.VisualStudio.SDK" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Sdk" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Build" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Web.WebView2" />
+    <PackageReference Include="StreamJsonRpc" />
+    <PackageReference Include="QRCoder" />
+    <PackageReference Include="Newtonsoft.Json" />
+  </ItemGroup>
+  <ItemGroup>
+    <VSCTCompile Include="Commands.vsct" ResourceName="Menus.ctmenu" />
+    <EmbeddedResource Update="VSPackage.resx" MergeWithCTO="true" ManifestResourceName="VSPackage" LogicalName="VSPackage.resources" />
+    <Content Include="Webview/index.html" CopyToOutputDirectory="PreserveNewest" IncludeInVSIX="true" />
+    <Content Include="LICENSE" CopyToOutputDirectory="PreserveNewest" IncludeInVSIX="true" />
+    <Content Include="..\webview\dist\inspector.*" Link="Webview\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" IncludeInVSIX="true" />
+  </ItemGroup>
+</Project>

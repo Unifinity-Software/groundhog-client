@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json.schemastore.org/vsix-publish",
+  "categories": ["Tools"],
+  "identity": { "internalName": "groundhog-visualstudio" },
+  "overview": "README.md",
+  "publisher": "unifinity",
+  "qna": true,
+  "repo": "https://github.com/Unifinity-Software/groundhog-client"
+}
