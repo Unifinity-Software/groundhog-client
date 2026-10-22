@@ -2,7 +2,7 @@ import { Agent, AuthStatus, Backend, BackendEvents, Disposable, Methods, Notific
 
 /** Scripted demo backend; never reads credentials or contacts the hosted service. */
 export class MockBackend implements Backend {
-  readonly capabilities = ['deviceLogin', 'localAgents', 'liveRequests'];
+  readonly capabilities = ['deviceLogin', 'localAgents', 'liveRequests', 'demo'];
   private readonly events = new BackendEvents();
   private auth: AuthStatus = { state: 'signedIn', workspace: 'example' };
   private tunnels: Tunnel[] = ['my-tunnel', 'service-a', 'service-b'].map((name, i) => ({

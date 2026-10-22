@@ -90,7 +90,7 @@ export class RpcBackend implements Backend {
     try {
       return await Promise.race([
         connection.sendRequest<Methods[M][1]>(method, params, cancellation.token),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => { cancellation.cancel(); reject(new Error('Groundhog request timed out. Try again.')); }, this.timeoutMs); })
+        new Promise<never>((_, reject) => { timer = setTimeout(() => { cancellation.cancel(); reject(new Error('Groundhog request timed out. Try again.')); }, method === 'agents/start' || method === 'agents/restart' ? Math.max(this.timeoutMs, 45000) : this.timeoutMs); })
       ]);
     } finally { clearTimeout(timer); cancellation.dispose(); }
   }

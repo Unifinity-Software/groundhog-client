@@ -54,6 +54,15 @@ jobs:
           else
             npm run test:smoke
           fi
+      - name: Extension failure logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: groundhog-extension-failure-logs
+          path: |
+            ide/vscode/.vscode-test/user-data/logs
+            ide/vscode/test-results
+          if-no-files-found: ignore
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json

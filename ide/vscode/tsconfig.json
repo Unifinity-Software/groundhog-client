@@ -4,5 +4,5 @@
     "strict": true, "noEmit": true, "esModuleInterop": true,
     "skipLibCheck": true, "types": ["node", "vscode"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "../webview/src/**/*.ts"]
 }

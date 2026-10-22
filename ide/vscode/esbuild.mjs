@@ -1,4 +1,10 @@
 import { build, context } from 'esbuild';
+import { copyFile, mkdir } from 'node:fs/promises';
 const options = { entryPoints: ['src/extension.ts'], bundle: true, platform: 'node', format: 'cjs', target: 'node20', external: ['vscode'], outfile: 'dist/extension.cjs', sourcemap: false, minify: true };
 if (process.argv.includes('--watch')) await (await context(options)).watch();
 else await build(options);
+await mkdir('../webview/dist', { recursive: true });
+await build({ entryPoints: ['../webview/src/inspector.ts'], bundle: true, platform: 'browser', format: 'iife', target: 'es2022', outfile: '../webview/dist/inspector.js', minify: true });
+await copyFile('../webview/src/inspector.css', '../webview/dist/inspector.css');
+await mkdir('dist', { recursive: true });
+for (const file of ['inspector.js', 'inspector.css']) await copyFile(`../webview/dist/${file}`, `dist/${file}`);

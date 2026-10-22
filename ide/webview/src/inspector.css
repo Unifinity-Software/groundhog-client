@@ -1,0 +1,28 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 20px; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); }
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 6px; }
+#source, #count { color: var(--vscode-descriptionForeground); }
+button { border: 1px solid var(--vscode-button-border, transparent); padding: 6px 12px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
+button:hover { background: var(--vscode-button-hoverBackground); }
+button:focus-visible, input:focus-visible, select:focus-visible, tr:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+form { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+label { display: flex; flex-direction: column; gap: 5px; }
+.search { flex: 1; min-width: 140px; }
+input, select, textarea { font: inherit; border: 1px solid var(--vscode-input-border, transparent); color: var(--vscode-input-foreground); background: var(--vscode-input-background); padding: 6px 8px; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; text-align: left; }
+th { font-weight: 600; padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); }
+td { padding: 8px; border-bottom: 1px solid var(--vscode-panel-border); white-space: nowrap; }
+td:nth-child(3) { white-space: normal; overflow-wrap: anywhere; min-width: 120px; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--vscode-list-hoverBackground); }
+tbody tr:focus { background: var(--vscode-list-focusBackground); }
+#empty { color: var(--vscode-descriptionForeground); margin-top: 32px; max-width: 65ch; }
+#detail { margin-top: 28px; border-top: 1px solid var(--vscode-panel-border); padding-top: 20px; }
+pre { overflow: auto; background: var(--vscode-textCodeBlock-background); padding: 12px; }
+textarea { width: 100%; min-height: 120px; font-family: var(--vscode-editor-font-family); }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+button:disabled { opacity: .6; cursor: default; }
+@media (max-width: 420px) { body { padding: 12px; } form { align-items: stretch; } label { flex: 1; } }

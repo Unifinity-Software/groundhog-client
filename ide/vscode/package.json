@@ -42,8 +42,63 @@
         "title": "Groundhog: Sign in"
       },
       {
+        "command": "groundhog.signOut",
+        "title": "Groundhog: Sign out"
+      },
+      {
         "command": "groundhog.installCli",
         "title": "Groundhog: Install Groundhog CLI"
+      },
+      {
+        "command": "groundhog.refresh",
+        "title": "Groundhog: Refresh tunnels",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "groundhog.switchWorkspace",
+        "title": "Groundhog: Switch workspace",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "groundhog.create",
+        "title": "Groundhog: Create tunnel",
+        "icon": "$(add)"
+      },
+      {
+        "command": "groundhog.start",
+        "title": "Groundhog: Start hosting"
+      },
+      {
+        "command": "groundhog.stop",
+        "title": "Groundhog: Stop hosting"
+      },
+      {
+        "command": "groundhog.restart",
+        "title": "Groundhog: Restart hosting"
+      },
+      {
+        "command": "groundhog.open",
+        "title": "Groundhog: Open in browser"
+      },
+      {
+        "command": "groundhog.copy",
+        "title": "Groundhog: Copy URL"
+      },
+      {
+        "command": "groundhog.rename",
+        "title": "Groundhog: Rename tunnel"
+      },
+      {
+        "command": "groundhog.delete",
+        "title": "Groundhog: Delete tunnel"
+      },
+      {
+        "command": "groundhog.enterKey",
+        "title": "Groundhog: Enter connection key"
+      },
+      {
+        "command": "groundhog.requests",
+        "title": "Groundhog: Inspect requests"
       }
     ],
     "viewsContainers": {
@@ -66,7 +121,8 @@
     "viewsWelcome": [
       {
         "view": "groundhog.tunnels",
-        "contents": "Expose your local app with a stable HTTPS URL.\n[Sign in](command:groundhog.signIn)\n[Install Groundhog CLI](command:groundhog.installCli)"
+        "contents": "Expose your local app with a stable HTTPS URL.\n[Sign in](command:groundhog.signIn)\n[Install Groundhog CLI](command:groundhog.installCli)",
+        "when": "!groundhog.signedIn"
       }
     ],
     "configuration": {
@@ -82,12 +138,89 @@
           "type": "boolean",
           "default": false,
           "description": "Use scripted demo data. Available only in extension development mode."
+        },
+        "groundhog.debugConfigurations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Debug configuration names that start hosting. Empty means all configurations."
+        },
+        "groundhog.stopHostingAfterDebugging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Stop agents started by debugging after the last related session ends. Existing agents are preserved."
         }
       }
-    }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "groundhog.switchWorkspace",
+          "when": "view == groundhog.tunnels && groundhog.signedIn",
+          "group": "navigation"
+        },
+        {
+          "command": "groundhog.create",
+          "when": "view == groundhog.tunnels && groundhog.signedIn",
+          "group": "navigation"
+        },
+        {
+          "command": "groundhog.refresh",
+          "when": "view == groundhog.tunnels",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "groundhog.start",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.stop",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/ && viewItem =~ /local/ && !(viewItem =~ /aspire/)"
+        },
+        {
+          "command": "groundhog.restart",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/ && viewItem =~ /local/ && !(viewItem =~ /aspire/)"
+        },
+        {
+          "command": "groundhog.open",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.copy",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.rename",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/ && viewItem =~ /rename/"
+        },
+        {
+          "command": "groundhog.delete",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/ && viewItem =~ /delete/"
+        },
+        {
+          "command": "groundhog.enterKey",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.requests",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        }
+      ]
+    },
+    "authentication": [
+      {
+        "id": "groundhog",
+        "label": "Groundhog"
+      }
+    ]
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.5",
     "@types/semver": "^7.8.0",
     "@types/vscode": "^1.95.0",
@@ -95,6 +228,8 @@
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.13.0",
+    "jsdom": "^30.1.3",
+    "playwright-core": "^1.64.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.0",
     "vitest": "^5.0.5"
