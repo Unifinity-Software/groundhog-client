@@ -15,14 +15,26 @@ const { runTests } = require('@vscode/test-electron');
   const token = randomBytes(16).toString('hex');
   let browser;
   const server = http.createServer(async (request, response) => {
-    if (request.url !== '/' + token || request.method !== 'POST') { response.writeHead(404).end(); return; }
+    if (!['/' + token, '/' + token + '/access'].includes(request.url) || request.method !== 'POST') { response.writeHead(404).end(); return; }
     try {
       browser = await chromium.connectOverCDP('http://127.0.0.1:' + debugPort);
       const page = browser.contexts()[0].pages().find(page => page.url().includes('workbench')) ?? browser.contexts()[0].pages()[0];
       const frame = page.frameLocator('iframe.webview').frameLocator('iframe#active-frame');
+      await fs.mkdir('test-results', { recursive: true });
+      if (request.url.endsWith('/access')) {
+        await frame.getByRole('heading', { name: 'Visitor access', exact: true }).waitFor();
+        await frame.getByText('Managed by agents', { exact: true }).waitFor();
+        assert.equal(await frame.locator('#default').inputValue(), 'members');
+        assert.equal(await frame.locator('[data-field="path"]').inputValue(), '/webhooks');
+        await page.locator('iframe.webview').screenshot({ path: 'test-results/groundhog-access-demo.png' });
+        response.writeHead(200).end('ok'); return;
+      }
       await frame.locator('#rows tr').first().waitFor({ timeout: 15000 });
       await frame.locator('#method').selectOption('POST');
       await frame.locator('#method').selectOption('');
+      assert.equal(await frame.locator('#capture').isDisabled(), false, 'Header capture is available before selecting a request');
+      await page.screenshot({ path: 'test-results/groundhog-demo.png' });
+      await page.locator('iframe.webview').screenshot({ path: 'test-results/groundhog-inspector-demo.png' });
       await frame.locator('#rows tr').last().click();
       await frame.locator('#detail').waitFor({ state: 'visible' });
       assert.ok(await frame.locator('#replay').isDisabled(), 'Truncated requests cannot be replayed');
@@ -33,9 +45,9 @@ const { runTests } = require('@vscode/test-electron');
       await frame.getByText('Signed webhooks may reject old timestamps when sent again.').waitFor();
       await frame.getByRole('button', { name: 'Show QR code' }).click();
       assert.ok(await frame.getByAltText('QR code of the public tunnel URL').isVisible());
-      await fs.mkdir('test-results', { recursive: true });
-      await page.screenshot({ path: 'test-results/groundhog-demo.png' });
-      await frame.locator('body').screenshot({ path: 'test-results/groundhog-inspector-demo.png' });
+      await frame.getByRole('button', { name: 'Hide QR code' }).click();
+      await frame.locator('#detail').scrollIntoViewIfNeeded();
+      await page.locator('iframe.webview').screenshot({ path: 'test-results/groundhog-request-detail-demo.png' });
       response.writeHead(200).end('ok');
     } catch (error) { console.error(error); response.writeHead(500).end(String(error)); }
   });

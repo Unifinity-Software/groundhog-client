@@ -10,8 +10,14 @@ exports.run = async () => {
   const commands = await vscode.commands.getCommands(true);
   assert.ok(commands.includes('groundhog.installCli'));
   assert.ok(commands.includes('groundhog.signIn'));
-  await vscode.commands.executeCommand('groundhog.requests', { kind: 'tunnel', tunnel: { workspace: 'example', name: 'my-tunnel', url: 'https://my-tunnel.groundhog.unifinity.com', state: 'connected', actions: ['rename', 'delete'], hasKey: true } });
+  const node = { kind: 'tunnel', tunnel: { workspace: 'example', name: 'my-tunnel', url: 'https://my-tunnel.groundhog.unifinity.com', state: 'connected', actions: ['rename', 'delete'], hasKey: true, captureBodies: false, canCaptureBodies: true } };
+  await vscode.commands.executeCommand('groundhog.requests', node);
   assert.ok(vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.label === 'Groundhog requests: my-tunnel')), 'Inspector webview opened');
+  if (commands.includes('notifications.clearAll')) await vscode.commands.executeCommand('notifications.clearAll');
   const capture = await fetch(process.env.GROUNDHOG_SMOKE_CAPTURE_URL, { method: 'POST' });
   assert.equal(capture.status, 200, await capture.text());
+  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+  await vscode.commands.executeCommand('groundhog.visitorAccess', node);
+  const access = await fetch(process.env.GROUNDHOG_SMOKE_CAPTURE_URL + '/access', { method: 'POST' });
+  assert.equal(access.status, 200, await access.text());
 };
