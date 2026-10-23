@@ -3,16 +3,25 @@ name: Release VS Code
 on:
   push:
     tags: ['vscode-v*']
+  workflow_dispatch:
+    inputs:
+      recovery_run_id:
+        description: Successful original Release VS Code run ID (Marketplace recovery only)
+        required: true
+      recovery_tag:
+        description: Exact already-approved tag from that run (for example vscode-v0.1.0)
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-vscode-${{ github.ref }}
+  group: release-vscode-${{ inputs.recovery_tag && format('refs/tags/{0}', inputs.recovery_tag) || github.ref }}
   cancel-in-progress: false
 
 jobs:
   verify:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -174,5 +183,52 @@ jobs:
           node -e 'const fs=require("fs"); for(const target of ["win32-x64","win32-arm64","linux-x64","linux-arm64","darwin-x64","darwin-arm64"]) if(!fs.existsSync("release-packages/groundhog-"+target+".vsix")) throw new Error("Missing verified target: "+target)'
           extra=()
           if node -e 'process.exit(require("./package.json").groundhog.preRelease === false ? 1 : 0)'; then extra+=(--pre-release); fi
-          npx vsce publish --packagePath release-packages/*.vsix "${marketplace[@]}" --skip-duplicate "${extra[@]}"
+          node --require ./scripts/strict-marketplace.cjs node_modules/@vscode/vsce/vsce publish --packagePath release-packages/*.vsix "${marketplace[@]}" --skip-duplicate "${extra[@]}"
           npx ovsx publish --packagePath release-packages/*.vsix "${openvsx[@]}" --skip-duplicate "${extra[@]}"
+
+  recover-marketplace:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: vscode
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ide/vscode
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ide/vscode/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Verify and retrieve the original approved artifacts
+        id: original
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            process.chdir('ide/vscode');
+            await require(process.cwd() + '/scripts/recover-marketplace.cjs')({github, context, core, exec});
+      - name: Publish original packages to Marketplace only
+        shell: bash
+        env:
+          MARKETPLACE_AUTH: ${{ vars.MARKETPLACE_AUTH || 'pat' }}
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          PRE_RELEASE: ${{ steps.original.outputs.pre_release }}
+        run: |
+          auth=()
+          case "$MARKETPLACE_AUTH" in
+            pat) test -n "$VSCE_PAT" || { echo 'Configure VSCE_PAT in the vscode environment.' >&2; exit 1; } ;;
+            oidc) auth+=(--oidc) ;;
+            *) echo 'MARKETPLACE_AUTH must be pat or oidc.' >&2; exit 1 ;;
+          esac
+          extra=()
+          if test "$PRE_RELEASE" = true; then extra+=(--pre-release); fi
+          node --require ./scripts/strict-marketplace.cjs node_modules/@vscode/vsce/vsce publish --packagePath release-packages/*.vsix "${auth[@]}" --skip-duplicate "${extra[@]}"
