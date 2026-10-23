@@ -33,6 +33,14 @@ using System.Text;
 using System.Web.Script.Serialization;
 using System.Collections.Generic;
 public class GroundhogPeer {
+    private static void Phase(string phase) {
+        // This peer handles synthetic smoke traffic only. Record fixed phases and exception types, never payloads.
+        try {
+            var path = Path.ChangeExtension(Environment.GetCommandLineArgs()[0], ".phases");
+            if (!File.Exists(path) || new FileInfo(path).Length + Encoding.UTF8.GetByteCount(phase) + 1 <= 4096)
+                File.AppendAllText(path, phase + "\n", new UTF8Encoding(false));
+        } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
     private static void Send(Stream output, string message) {
         var payload = Encoding.UTF8.GetBytes(message);
         var prefix = Encoding.ASCII.GetBytes("Content-Length: " + payload.Length + "\r\n\r\n");
@@ -40,32 +48,45 @@ public class GroundhogPeer {
         output.Flush();
     }
     public static void Main(string[] args) {
+        try { Run(args); }
+        catch (Exception error) { Phase("exception:" + error.GetType().FullName); Environment.ExitCode = 1; }
+    }
+    private static void Run(string[] args) {
         if (args.Length == 1 && args[0] == "--version") {
+            Phase("version");
             Console.WriteLine(Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).EndsWith("-old") ? "1.2.0" : "1.3.0-preview.1"); return;
         }
+        Phase("stdio-start");
         var input = Console.OpenStandardInput(); var output = Console.OpenStandardOutput();
         var json = new JavaScriptSerializer();
         while (true) {
             var header = new StringBuilder(); int value;
             while ((value = input.ReadByte()) >= 0) { header.Append((char)value); if (header.ToString().EndsWith("\r\n\r\n")) break; }
-            if (value < 0) return;
+            if (value < 0) { Phase("input-ended"); return; }
+            Phase("header-read");
             int length = 0;
             foreach (var line in header.ToString().Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries))
                 if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) length = int.Parse(line.Substring(15));
             var bytes = new byte[length]; int count = 0;
-            while (count < length) { int read = input.Read(bytes, count, length-count); if (read == 0) return; count += read; }
+            while (count < length) { int read = input.Read(bytes, count, length-count); if (read == 0) { Phase("body-ended"); return; } count += read; }
             var request = json.Deserialize<Dictionary<string, object>>(Encoding.UTF8.GetString(bytes));
+            var id = request["id"];
+            Phase(id is string ? "id-string" : id is int || id is long || id is decimal || id is double ? "id-number" : "id-other");
+            var responseId = json.Serialize(id);
             var method = request["method"].ToString();
+            Phase(method == "initialize" ? "initialize" : method == "auth/status" ? "auth-status" : method == "requests/subscribe" ? "subscribe" : "other-request");
             if (method == "initialize") {
                 var parameters = (Dictionary<string,object>)request["params"];
-                if ((string)parameters["clientName"] != "Groundhog for Visual Studio") return;
+                if ((string)parameters["clientName"] != "Groundhog for Visual Studio") { Phase("client-name-mismatch"); return; }
             }
             var result = method == "initialize" ? "{\"protocolVersion\":1,\"capabilities\":[\"deviceLogin\"]}" : "{\"state\":\"signedOut\"}";
             if (method == "requests/subscribe") {
                 Send(output, "{\"jsonrpc\":\"2.0\",\"method\":\"requests/event\",\"params\":{\"subscriptionId\":\"early-sub\",\"request\":{\"requestId\":\"early-request\"}}}");
                 result = "{\"subscriptionId\":\"early-sub\",\"requests\":[],\"source\":\"remote\"}";
             }
-            Send(output, "{\"jsonrpc\":\"2.0\",\"id\":"+request["id"]+",\"result\":"+result+"}");
+            Phase("response-start");
+            Send(output, "{\"jsonrpc\":\"2.0\",\"id\":"+responseId+",\"result\":"+result+"}");
+            Phase("response-sent");
         }
     }
 }
@@ -235,6 +256,16 @@ public static class NativeBehaviorSmoke {
         }
     }
     Write-Output 'VSIX registration, shared inspector, framed-stdio early events and PowerShell quoting smoke passed.'
+} catch {
+    # Surface only bounded fixed phases from our synthetic peer. The shipping client still discards stderr.
+    foreach ($name in @('groundhog-peer.phases', 'groundhog-peer-old.phases')) {
+        $trace = Join-Path $temporary $name
+        if ((Test-Path -LiteralPath $trace) -and (Get-Item -LiteralPath $trace).Length -le 4096) {
+            $phases = @(Get-Content -LiteralPath $trace | Where-Object { $_ -match '^[a-z-]+$|^exception:[A-Za-z0-9_.+]+$' } | Select-Object -Last 16)
+            Write-Output ("Native smoke peer phases [$name]: " + ($phases -join ', '))
+        }
+    }
+    throw
 } finally {
     if ($temporary.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $temporary -Recurse -Force }
     if (Test-Path -LiteralPath $temporary) { throw "Smoke cleanup failed: $temporary" }
