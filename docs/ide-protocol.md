@@ -59,6 +59,8 @@ must not infer support from CLI version.
 Transient management or refresh failures, including client timeouts, do not terminate background auth polling or
 remote tunnel updates. Rejected refresh reports expired authentication; a later successful sign-in resumes updates
 in the same backend process. Retry intervals remain unchanged, and stdin EOF still cancels the background work.
+EOF cancels an already-open workspace event stream and prevents another connection attempt, including when no
+further relay event arrives. The caller can keep reading stdout until the backend exits.
 
 ## Shared objects and security
 

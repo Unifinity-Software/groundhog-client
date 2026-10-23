@@ -212,6 +212,8 @@ protected credential store and never enter project files, session discovery, IDE
 The IDE backend retains its authentication and remote-update loops after a management/refresh failure or client
 timeout. A rejected refresh reports expired authentication; signing in again restores updates in the existing backend
 process. Transient failures retain the normal polling/reconnect intervals, and EOF cancels the loops cleanly.
+Cancelling an open workspace event stream prevents another connection attempt; shutdown does not wait for another
+server event or for the caller to close its stdout reader.
 
 Credentials and polling secrets are never placed in URLs. Storage holds only their SHA-256 hashes, expiry,
 and the approved identity claims. Authorization records are global authentication infrastructure; all tunnel,

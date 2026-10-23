@@ -503,7 +503,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
     {
         try
         {
-            while (true)
+            while (!_stop.IsCancellationRequested)
             {
                 if (_workspaceEventsSupported && Auth() is { State: "signedIn", Workspace: not null })
                 {

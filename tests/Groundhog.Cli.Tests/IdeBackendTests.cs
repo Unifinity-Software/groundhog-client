@@ -442,6 +442,34 @@ public sealed class IdeBackendTests
         Assert.Equal(1, fixture.Handler.EventStreams);
     }
 
+    [Fact(Timeout = 10_000)]
+    public async Task Stdin_EOF_cancels_an_open_workspace_event_stream_while_the_RPC_reader_remains_active()
+    {
+        var events = new Pipe();
+        await using var body = new PendingReadStream(events.Reader.AsStream(leaveOpen: true));
+        await using var fixture = new Fixture();
+        fixture.Handler.WorkspaceEvents = true;
+        fixture.Handler.WorkspaceBody = body;
+        fixture.Handler.RequireUncancelledWorkspaceRequests = true;
+        await events.Writer.WriteAsync(Encoding.UTF8.GetBytes("event: tunnel.connected\ndata: {\"name\":\"my-tunnel\"}\n\n"),
+            TestContext.Current.CancellationToken);
+        try
+        {
+            await fixture.InitializeAsync();
+            await fixture.WorkspaceEventReceived.Task.WaitAsync(TestContext.Current.CancellationToken);
+            await body.Pending.Task.WaitAsync(TestContext.Current.CancellationToken);
+            await fixture.ToServer.Writer.CompleteAsync();
+            await fixture.Server.WaitAsync(TestContext.Current.CancellationToken);
+            Assert.True(fixture.Server.IsCompletedSuccessfully);
+            Assert.True(body.Cancelled);
+        }
+        finally
+        {
+            await events.Writer.CompleteAsync();
+            await events.Reader.CompleteAsync();
+        }
+    }
+
     [Fact]
     public async Task Stdio_handshake_CRUD_and_error_payloads_never_serialize_credentials()
     {
@@ -676,6 +704,27 @@ public sealed class IdeBackendTests
         }
     }
 
+    private sealed class PendingReadStream(Stream body) : Stream
+    {
+        internal TaskCompletionSource Pending { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal bool Cancelled { get; private set; }
+        public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var reading = body.ReadAsync(buffer, cancellationToken);
+            if (!reading.IsCompleted) { Pending.TrySetResult(); }
+            try { return await reading; }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { Cancelled = true; throw; }
+        }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private sealed class RecordingStream(Stream destination) : Stream
     {
         private readonly MemoryStream _capture = new();
@@ -701,6 +750,8 @@ public sealed class IdeBackendTests
         internal int Lists { get; private set; }
         internal int EventStreams { get; private set; }
         internal bool WorkspaceEvents { get; set; }
+        internal Stream? WorkspaceBody { get; set; }
+        internal bool RequireUncancelledWorkspaceRequests { get; set; }
         internal bool RefreshTokens { get; set; }
         internal int Refreshes { get; private set; }
         internal Exception? RefreshError { get; set; }
@@ -736,7 +787,15 @@ public sealed class IdeBackendTests
             }
             if (path.EndsWith("/events", StringComparison.Ordinal))
             {
+                if (RequireUncancelledWorkspaceRequests)
+                { Assert.False(cancellationToken.IsCancellationRequested, "The backend must not reconnect workspace SSE after cancellation."); }
                 EventStreams++;
+                if (WorkspaceBody is { } body)
+                {
+                    var content = new StreamContent(body);
+                    content.Headers.ContentType = new("text/event-stream");
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+                }
                 return Task.FromResult(Stream("event: tunnel.connected\ndata: {\"name\":\"my-tunnel\",\"timestamp\":\"2026-10-22T12:00:00Z\"}\n\n"));
             }
             if (Status is { } status)
