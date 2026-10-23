@@ -101,8 +101,14 @@ describe('IDE feature behavior', () => {
     const backend = new MockBackend(); const detail = await backend.request('requests/detail', { workspace: 'example', name: 'my-tunnel', requestId: 'demo' });
     const payload = "'; Write-Output PWN; #";
     const commands = [asCurl(detail, 'http://localhost:5173', {}, payload, 'win32'), asCurl(detail, 'http://localhost:5173', { Test: payload }, '', 'win32'), asCurl({ ...detail, path: '/' + payload }, 'http://localhost:5173', {}, '', 'win32')];
-    const script = '$commands = $env:GROUNDHOG_CURL_TEST | ConvertFrom-Json; $results = foreach ($command in $commands) { $tokens=$null; $errors=$null; $ast=[System.Management.Automation.Language.Parser]::ParseInput($command,[ref]$tokens,[ref]$errors); $names=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.CommandAst]},$true) | ForEach-Object { $_.GetCommandName() }); @{names=$names;errors=@($errors).Count} }; ConvertTo-Json -InputObject @($results) -Compress';
-    const parsed = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', windowsHide: true, env: { ...process.env, GROUNDHOG_CURL_TEST: JSON.stringify(commands) } }));
+    // Base64 transport and built-in iteration keep this parser check independent of utility-module autoload.
+    const script = '$PSModuleAutoLoadingPreference="None"; foreach ($encoded in $env:GROUNDHOG_CURL_TEST.Split(";")) { $command=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded)); $tokens=$null; $errors=$null; $ast=[Management.Automation.Language.Parser]::ParseInput($command,[ref]$tokens,[ref]$errors); $names=@(foreach ($node in $ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]},$true)) { $node.GetCommandName() }); [Console]::WriteLine(([string]@($errors).Count)+":"+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($names -join [char]0)))) }';
+    const input = commands.map(command => Buffer.from(command, 'utf8').toString('base64')).join(';');
+    const output = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', windowsHide: true, timeout: 5000, env: { ...process.env, GROUNDHOG_CURL_TEST: input } });
+    const parsed = output.trim().split(/\r?\n/).map(line => {
+      const separator = line.indexOf(':'); const names = Buffer.from(line.slice(separator + 1), 'base64').toString('utf8');
+      return { names: names ? names.split('\0') : [], errors: Number(line.slice(0, separator)) };
+    });
     expect(parsed).toEqual(commands.map(() => ({ names: ['curl.exe'], errors: 0 })));
   });
   it('finds C# tunnel literals and rate-limits error/disconnect notifications with fake time', () => {
