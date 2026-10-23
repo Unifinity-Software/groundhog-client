@@ -217,6 +217,68 @@ public sealed class IdeBackendTests
         Assert.False(fixture.Handler.AuthenticatedServiceInfo);
     }
 
+    [Theory(Timeout = 10_000)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Failed_refresh_keeps_remote_updates_alive_after_relogin_and_allows_clean_EOF(bool workspaceEvents, bool timeout)
+    {
+        await using var fixture = new Fixture();
+        fixture.Handler.RefreshTokens = true;
+        fixture.Handler.WorkspaceEvents = workspaceEvents;
+        fixture.Handler.RefreshError = timeout ? new TaskCanceledException("Refresh timed out.") : new HttpRequestException("Refresh unavailable.");
+        fixture.Store.Save(fixture.Store.Read()! with { Expires = fixture.Time.GetUtcNow().AddMinutes(4),
+            RefreshToken = "private-refresh-token", RefreshSupported = true });
+        await fixture.InitializeAsync();
+        fixture.Time.Advance(TimeSpan.FromSeconds(30));
+        await fixture.Handler.RefreshFailuresReached.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        fixture.Handler.RefreshError = null;
+        await fixture.CallAsync("auth/login", new { });
+        fixture.Time.Advance(TimeSpan.FromSeconds(1));
+        await fixture.AuthChanged.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var changed = fixture.NextTunnelChange();
+        fixture.Time.Advance(TimeSpan.FromSeconds(30));
+        await changed.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.True(workspaceEvents ? fixture.Handler.EventStreams > 0 : fixture.Handler.Lists > 0);
+        await fixture.ToServer.Writer.CompleteAsync();
+        await fixture.Server.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.True(fixture.Server.IsCompletedSuccessfully);
+        Assert.DoesNotContain("private-refresh-token", fixture.Output, StringComparison.Ordinal);
+    }
+
+    [Theory(Timeout = 10_000)]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Rejected_refresh_reports_expiry_then_relogin_resumes_remote_updates(bool workspaceEvents)
+    {
+        await using var fixture = new Fixture();
+        fixture.Handler.RefreshTokens = true;
+        fixture.Handler.WorkspaceEvents = workspaceEvents;
+        fixture.Handler.RejectRefresh = true;
+        fixture.Store.Save(fixture.Store.Read()! with { Expires = fixture.Time.GetUtcNow().AddMinutes(4),
+            RefreshToken = "private-refresh-token", RefreshSupported = true });
+        await fixture.InitializeAsync();
+        fixture.Time.Advance(TimeSpan.FromSeconds(30));
+        await fixture.AuthExpired.Task.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Null(fixture.Store.Read()!.RefreshToken);
+        Assert.True(fixture.Store.Read()!.Expires <= fixture.Time.GetUtcNow());
+
+        fixture.Handler.RejectRefresh = false;
+        await fixture.CallAsync("auth/login", new { });
+        fixture.Time.Advance(TimeSpan.FromSeconds(1));
+        await fixture.AuthChanged.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var changed = fixture.NextTunnelChange();
+        fixture.Time.Advance(TimeSpan.FromSeconds(30));
+        await changed.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.True(workspaceEvents ? fixture.Handler.EventStreams > 0 : fixture.Handler.Lists > 0);
+        await fixture.ToServer.Writer.CompleteAsync();
+        await fixture.Server.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.True(fixture.Server.IsCompletedSuccessfully);
+        Assert.DoesNotContain("private-refresh-token", fixture.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Tunnel_target_metadata_reuses_only_safe_same_relay_saved_profiles()
     {
@@ -537,10 +599,14 @@ public sealed class IdeBackendTests
         internal RelayHandler Handler { get; } = new();
         internal FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero));
         internal TaskCompletionSource AuthChanged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource AuthExpired { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource RequestReceived { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource WorkspaceEventReceived { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal ConcurrentQueue<JsonElement> Requests { get; } = new();
         internal int Changes { get; private set; }
+        private TaskCompletionSource _tunnelChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal Task NextTunnelChange()
+        { _tunnelChanged = new(TaskCreationOptions.RunContinuationsAsynchronously); return _tunnelChanged.Task; }
         internal SessionRegistration[] Registrations { get; set; } = [];
         internal Task NextRequest()
         { RequestReceived = new(TaskCreationOptions.RunContinuationsAsynchronously); return RequestReceived.Task; }
@@ -558,9 +624,10 @@ public sealed class IdeBackendTests
             Register("auth/changed", value =>
             {
                 if (value.GetProperty("state").GetString() == "signedIn") { AuthChanged.TrySetResult(); }
+                if (value.GetProperty("state").GetString() == "expired") { AuthExpired.TrySetResult(); }
             });
             Register("agents/changed", value => { AgentChanges.Enqueue(value.Clone()); _poll.TrySetResult(); });
-            Register("tunnels/changed", _ => { if (++Changes >= 2) { WorkspaceEventReceived.TrySetResult(); } });
+            Register("tunnels/changed", _ => { _tunnelChanged.TrySetResult(); if (++Changes >= 2) { WorkspaceEventReceived.TrySetResult(); } });
             Register("requests/event", value => { Requests.Enqueue(value.Clone()); RequestReceived.TrySetResult(); });
             Register("connection/event", value => _connection.TrySetResult(value.Clone()));
             _rpc.StartListening();
@@ -611,6 +678,10 @@ public sealed class IdeBackendTests
         internal bool WorkspaceEvents { get; set; }
         internal bool RefreshTokens { get; set; }
         internal int Refreshes { get; private set; }
+        internal Exception? RefreshError { get; set; }
+        internal bool RejectRefresh { get; set; }
+        private int _failedRefreshes;
+        internal TaskCompletionSource RefreshFailuresReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool AuthenticatedServiceInfo { get; private set; }
         internal bool DetailsTruncated { get; set; }
         internal Task<string> DeviceRequest { get; private set; } = Task.FromResult("");
@@ -622,6 +693,13 @@ public sealed class IdeBackendTests
             if (path == "/api/service-info" && request.Headers.Authorization is not null)
             { AuthenticatedServiceInfo = true; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)); }
             if (path == "/api/cli/device") { DeviceRequest = request.Content!.ReadAsStringAsync(cancellationToken); }
+            if (path == "/api/cli/refresh" && RejectRefresh)
+            { return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)); }
+            if (path == "/api/cli/refresh" && RefreshError is { } refreshError)
+            {
+                if (Interlocked.Increment(ref _failedRefreshes) >= 2) { RefreshFailuresReached.TrySetResult(); }
+                return Task.FromException<HttpResponseMessage>(refreshError);
+            }
             if (request.RequestUri.Query.Contains("limit=1000", StringComparison.Ordinal))
             { return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)); }
             if (path.EndsWith("/requests/stream", StringComparison.Ordinal))

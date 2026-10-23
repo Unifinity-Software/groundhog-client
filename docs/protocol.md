@@ -209,6 +209,10 @@ IDE and background processes. Each waiter reads the credential again after acqui
 process's rotated successor rather than replaying an old refresh token. Access and refresh tokens share the existing
 protected credential store and never enter project files, session discovery, IDE messages or logs.
 
+The IDE backend retains its authentication and remote-update loops after a management/refresh failure or client
+timeout. A rejected refresh reports expired authentication; signing in again restores updates in the existing backend
+process. Transient failures retain the normal polling/reconnect intervals, and EOF cancels the loops cleanly.
+
 Credentials and polling secrets are never placed in URLs. Storage holds only their SHA-256 hashes, expiry,
 and the approved identity claims. Authorization records are global authentication infrastructure; all tunnel,
 request and usage data remains workspace-partitioned. Expired authentication records are cleaned daily in

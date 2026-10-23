@@ -487,7 +487,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
             {
                 await Task.Delay(TimeSpan.FromSeconds(2), _time, _stop.Token);
                 try { await _authentication.GetSessionAsync(_stop.Token); }
-                catch (Exception ex) when (ex is ManagementException or HttpRequestException) { }
+                catch (Exception ex) when (BackgroundFailure(ex, _stop.Token)) { }
                 var auth = JsonSerializer.Serialize(Auth());
                 if (auth != _lastAuth) { await EmitAuthAsync(); }
                 var agents = await AgentsAsync(_stop.Token, includeTerminal: true);
@@ -512,18 +512,20 @@ internal sealed partial class IdeServices : IAsyncDisposable
                 }
                 await Task.Delay(TimeSpan.FromSeconds(30), _time, _stop.Token);
                 if (Auth().State != "signedIn") { continue; }
-                var session = await SessionAsync(_stop.Token);
-                if (session.Workspace is not { } workspace) { continue; }
                 try
                 {
+                    var session = await SessionAsync(_stop.Token);
+                    if (session.Workspace is not { } workspace) { continue; }
                     using var client = _authentication.CreateClient(session);
                     var tunnels = await client.SendAsync<TunnelInfo[]>(HttpMethod.Get, $"/api/w/{Uri.EscapeDataString(workspace)}/tunnels", null, _stop.Token);
                     var state = JsonSerializer.Serialize(tunnels.Select(t => Tunnel(workspace, t, session, [])));
                     if (state != _lastTunnels) { _lastTunnels = state; await Notify("tunnels/changed", new { workspace }); }
                 }
                 catch (ManagementException ex) when (ex.Status == HttpStatusCode.Unauthorized)
-                { await Notify("auth/changed", new IdeAuth("expired", session.Workspace, session.Expires)); }
-                catch (Exception ex) when (ex is ManagementException or HttpRequestException or IOException) { }
+                { await EmitExpiredAsync(); }
+                catch (LocalRpcException ex) when (ex.ErrorCode is -32010 or -32011)
+                { await EmitAuthAsync(); }
+                catch (Exception ex) when (BackgroundFailure(ex, _stop.Token) || ex is IOException) { }
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
@@ -535,6 +537,16 @@ internal sealed partial class IdeServices : IAsyncDisposable
         var status = Auth(); _lastAuth = JsonSerializer.Serialize(status);
         await Notify("auth/changed", status);
     }
+
+    private Task EmitExpiredAsync()
+    {
+        var session = _credentials.Read();
+        return Notify("auth/changed", new IdeAuth("expired", session?.Workspace, session?.Expires));
+    }
+
+    private static bool BackgroundFailure(Exception exception, CancellationToken cancellation) =>
+        exception is ManagementException or HttpRequestException
+        || exception is TaskCanceledException && !cancellation.IsCancellationRequested;
 
     private async Task<LoginSession> UpdateSessionAsync(LoginSession expected, Func<LoginSession, LoginSession> update, CancellationToken ct) =>
         await _credentials.UpdateAsync(fresh => fresh is null || fresh.Relay != expected.Relay || fresh.SessionId != expected.SessionId
@@ -627,11 +639,15 @@ internal sealed partial class IdeServices : IAsyncDisposable
         { wait = ex.RetryAfter is { } after && after > TimeSpan.Zero ? after : TimeSpan.FromSeconds(5); }
         catch (ManagementException ex) when (ex.Status == HttpStatusCode.Unauthorized)
         {
-            var session = _credentials.Read();
-            await Notify("auth/changed", new IdeAuth("expired", session?.Workspace, session?.Expires));
+            await EmitExpiredAsync();
             wait = TimeSpan.FromSeconds(30);
         }
-        catch (Exception ex) when (ex is ManagementException or HttpRequestException or IOException) { }
+        catch (LocalRpcException ex) when (ex.ErrorCode is -32010 or -32011)
+        {
+            await EmitAuthAsync();
+            wait = TimeSpan.FromSeconds(30);
+        }
+        catch (Exception ex) when (BackgroundFailure(ex, ct) || ex is IOException) { }
         await Task.Delay(wait, _time, _stop.Token);
     }
 }

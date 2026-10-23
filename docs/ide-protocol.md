@@ -56,6 +56,10 @@ The implemented request-detail, capture and visitor-access methods are advertise
 an optional endpoint returns `-32014`. Reserved methods return `-32014` until their capability is advertised; clients
 must not infer support from CLI version.
 
+Transient management or refresh failures, including client timeouts, do not terminate background auth polling or
+remote tunnel updates. Rejected refresh reports expired authentication; a later successful sign-in resumes updates
+in the same backend process. Retry intervals remain unchanged, and stdin EOF still cancels the background work.
+
 ## Shared objects and security
 
 A workspace is `{ "slug": "example", "name": "Example", "role": "owner" }`.
