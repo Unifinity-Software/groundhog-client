@@ -136,6 +136,15 @@ backends. Every runtime must pass version, IDE initialize/auth/EOF and read-only
 opens the real bundled extension host. Publishing waits for all six VSIX artifacts and full validation;
 reruns safely skip already-published target versions. Normal PR CI remains one job.
 
+Marketplace upload messages confirm HTTP acceptance, not public availability. The publisher checks upload
+status explicitly because its SDK can otherwise treat HTTP 404 as success. Verify all six target versions
+through anonymous catalog and package downloads after publication; do not declare an upload-only release complete.
+For a partial Marketplace release with unchanged approved artifacts, dispatch **Release VS Code** on `master`
+with `recovery_run_id` set to the successful original tag-push run and `recovery_tag` to its exact tag.
+Recovery verifies the original tested merge, archive digests and six VSIX identities, then publishes those
+original bytes to Marketplace only with `--skip-duplicate`. It does not rebuild packages or publish to Open VSX.
+Expired artifacts, changed tags or failed original runs require a separate reviewed release decision.
+
 The supported backend profile is `eng/ide-bundle.pubxml`. It creates a compressed self-contained single-file
 application, with **trimming disabled**: existing CLI serializers and RPC dependencies need reflection, and
 attempting to trim currently fails warning-as-error validation. Do not suppress these warnings or describe
