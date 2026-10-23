@@ -117,8 +117,9 @@ tracks availability. Once the publisher's trusted policy can be configured for t
 The job has `id-token: write`; an OIDC failure stops publishing without falling back to a token.
 
 For the first Open VSX release, add an `OVSX_PAT` secret to the GitHub `vscode` environment and publish with
-ordinary token authentication. Open VSX requires at least one active extension version before a trusted publisher
-can be registered. After that release, register this repository and workflow for the extension
+ordinary token authentication. A namespace contributor can publish while an ownership claim is pending; the
+extension remains unverified until ownership is granted. Trusted publishing requires namespace ownership, a signed
+Publisher Agreement and at least one active extension version. After those prerequisites are satisfied, register this repository and workflow for the extension
 `unifinity.groundhog`, pin the `vscode` environment, and remove `OVSX_PAT`; subsequent runs use
 `--trusted-publishing`. Keep at least one version active so token exchange remains available.
 See the [Open VSX prerequisites](https://github.com/eclipse-openvsx/openvsx/wiki/Trusted-Publishing#before-you-start),
