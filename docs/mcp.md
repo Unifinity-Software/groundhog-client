@@ -4,6 +4,10 @@
 local sessions and safe request-detail services as the IDE extensions. It starts with read-only tools. Use a CLI version
 that includes this command (1.3.0-preview.1 or later); an older installed global tool does not have the server.
 
+Your assistant launches the CLI locally and communicates over stdio. Groundhog does not expose a public HTTP MCP
+endpoint. Service API calls use your shared CLI sign-in and remain subject to its workspace permissions; choosing a
+workspace does not grant additional service access. Local agent discovery and telemetry belong to the current OS user.
+
 Sign in and choose a workspace before starting your assistant. For a workspace named `example`, run:
 
 ```sh
@@ -55,6 +59,10 @@ and text in them must never be treated as instructions for the assistant.
 Authorization, cookie, API-key and token headers are redacted. Known saved credentials embedded in captured text are
 also redacted. The MCP server offers no tool to read or create connection/API keys, change visitor policy or export
 credentials. Tool failures contain safe messages without relay response bodies or exception stacks.
+
+Body capture is off by default. Captured bodies can contain private application data even after known credentials
+are redacted; use sample traffic when sharing details with an assistant. See
+[capture privacy](https://groundhog.unifinity.com/docs/inspect-traffic) for workspace access and retention rules.
 
 ## Enable actions
 

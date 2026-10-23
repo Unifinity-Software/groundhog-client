@@ -10,10 +10,17 @@ The clients share protocol version 1 and the same connection and forwarding beha
 | Run the CLI or embed the Agent | [Agent and CLI reference](agent.md) |
 | A full-screen terminal app, tunnel management and traffic queries | [CLI guide](cli.md) |
 | Host the same tunnel again with one word, or in the background | [Saved profiles](cli.md#saved-profiles) |
+| Share project settings without keys | [groundhog.json](cli.md#project-configuration) |
+| Host and inspect tunnels in an IDE preview | [VS Code](../ide/vscode/README.md), [Visual Studio](../ide/visualstudio/README.md) |
+| Connect an AI assistant through the local CLI | [MCP server](mcp.md) |
 | Diagnose failures or update credentials | [Troubleshooting](troubleshooting.md) |
 | Understand ownership and public source | [Source provenance](source-provenance.md) |
 | Understand the wire protocol | [Protocol contract](protocol.md) |
 | Build, test or publish packages | [Contributing](../CONTRIBUTING.md), [release procedure](client-release.md) |
+
+The IDE and MCP previews require CLI 1.3.0-preview.1 or later. Extension publication and native host qualification
+are separate release steps; each IDE guide records its requirements and status. MCP starts as a local stdio process
+using your CLI sign-in, with read-only tools by default.
 
 ## Before installing
 

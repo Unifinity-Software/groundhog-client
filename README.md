@@ -67,6 +67,12 @@ service automatically.
 Start with the [client handbook](docs/README.md) for client selection and an end-to-end verification checklist.
 Use [troubleshooting](docs/troubleshooting.md) for key changes, HTTPS, reconnecting and public-host errors.
 
+CLI **1.3.0-preview.1 or later** supports the [VS Code preview](ide/vscode/README.md),
+[Visual Studio preview](ide/visualstudio/README.md) and [local MCP server](docs/mcp.md) for AI assistants.
+Follow each extension's guide for package availability and supported-host qualification; these are separate from
+the CLI package release. Share a tunnel's settings through [groundhog.json](docs/cli.md#project-configuration).
+The MCP server uses the CLI's sign-in and starts read-only over local stdio; actions require opt-in and confirmation.
+
 ## Development
 
 ```text
