@@ -6,7 +6,8 @@ export class EventEmitter<T> {
   dispose(): void { this.listeners.clear(); }
 }
 export class CancellationError extends Error {}
-export const window = { showInformationMessage: vi.fn(async () => 'Copy code and open browser') };
+export const window = { showInformationMessage: vi.fn(async () => 'Copy code and open browser'), createWebviewPanel: vi.fn(), showWarningMessage: vi.fn(), showQuickPick: vi.fn() };
+export const ViewColumn = { Beside: 2 };
 export const env = { clipboard: { writeText: vi.fn(async () => {}) }, openExternal: vi.fn(async () => true) };
 export const Uri = { parse: (value: string) => value };
 export class TreeItem { constructor(public label: string, public collapsibleState: number) {} }
@@ -23,4 +24,4 @@ export const languages = {
   registerCodeActionsProvider: vi.fn(() => ({ dispose: vi.fn() }))
 };
 Object.assign(Uri, { joinPath: (base: { toString(): string }, path: string) => ({ toString: () => base.toString() + '/' + path }) });
-export const workspace = { openTextDocument: vi.fn() };
+export const workspace = { openTextDocument: vi.fn(), findFiles: vi.fn(), isTrusted: true };

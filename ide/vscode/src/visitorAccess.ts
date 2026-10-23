@@ -45,7 +45,7 @@ export class VisitorAccessPanels implements vscode.Disposable {
     panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'access.js');
   }
   private async presentKey(tunnel: Tunnel, key: string): Promise<void> {
-    const choice = await vscode.window.showInformationMessage('Your visitor API key is available once. Choose where to keep it.', { modal: true }, 'Copy key', 'Save to user secrets');
+    const choice = await vscode.window.showInformationMessage('Your visitor API key is shown once. Copy it or save it now.', { modal: true, detail: key }, 'Copy key', 'Save to user secrets');
     if (choice === 'Copy key') await vscode.env.clipboard.writeText(key);
     if (choice === 'Save to user secrets') {
       if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before saving a visitor API key to user secrets.');

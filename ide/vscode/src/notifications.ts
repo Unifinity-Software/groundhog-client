@@ -1,3 +1,12 @@
+import { tunnelConnected } from './actions';
+import { Agent, Tunnel } from './protocol';
+
+export function tunnelCodeLensTitle(tunnel: Tunnel, agents: Agent[]): string {
+  const state = agents.find(agent => agent.name === tunnel.name)?.state;
+  const label = tunnelConnected(tunnel, agents) ? '● connected' : state === 'Connecting' ? '○ connecting' : state === 'Reconnecting' ? '○ reconnecting' : '○ offline';
+  return `${label} · ${tunnel.url}`;
+}
+
 export class NotificationPolicy {
   private readonly lastNotice = new Map<string, number>();
   private readonly lastFailure = new Map<string, number>();

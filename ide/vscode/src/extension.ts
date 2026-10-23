@@ -9,8 +9,8 @@ import { ExplorerNode, TunnelExplorer } from './explorer';
 import { DebugHosting, ProjectConfig } from './debug';
 import { InspectorPanels } from './inspector';
 import { ActiveRequestStats } from './stats';
-import { NotificationPolicy, tunnelLiterals } from './notifications';
-import { tunnelConnected, tunnelLocation } from './actions';
+import { NotificationPolicy, tunnelCodeLensTitle, tunnelLiterals } from './notifications';
+import { tunnelConnected } from './actions';
 import { VisitorAccessPanels } from './visitorAccess';
 import { GroundhogDiagnostics } from './diagnostics';
 
@@ -173,8 +173,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       provideCodeLenses: document => tunnelLiterals(document.getText()).flatMap(({ name, offset }) => {
         const tunnel = explorer.tunnels.find(item => item.name === name); if (!tunnel) return [];
         const position = document.positionAt(offset); const range = new vscode.Range(position, position);
-        const location = tunnelLocation(tunnel, explorer.agents); const node: ExplorerNode = { kind: 'tunnel', tunnel };
-        return [new vscode.CodeLens(range, { title: `${location === 'offline' ? '○ offline' : '● connected'} · ${tunnel.url}`, command: 'groundhog.copy', arguments: [node] }), new vscode.CodeLens(range, { title: 'Open', command: 'groundhog.open', arguments: [node] }), new vscode.CodeLens(range, { title: 'Requests', command: 'groundhog.requests', arguments: [node] })];
+        const node: ExplorerNode = { kind: 'tunnel', tunnel };
+        return [new vscode.CodeLens(range, { title: tunnelCodeLensTitle(tunnel, explorer.agents), command: 'groundhog.copy', arguments: [node] }), new vscode.CodeLens(range, { title: 'Open', command: 'groundhog.open', arguments: [node] }), new vscode.CodeLens(range, { title: 'Requests', command: 'groundhog.requests', arguments: [node] })];
       })
     })
   );

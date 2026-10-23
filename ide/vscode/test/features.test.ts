@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GroundhogAuthentication } from '../src/auth';
 import { DebugHosting } from '../src/debug';
 import { MockBackend } from '../src/mockBackend';
-import { NotificationPolicy, tunnelLiterals } from '../src/notifications';
+import { NotificationPolicy, tunnelCodeLensTitle, tunnelLiterals } from '../src/notifications';
 import { asCurl, localTarget, parseHeaders, RequestActions, signatureWarning } from '../src/requestActions';
 import { ActiveRequestStats } from '../src/stats';
 import { selectCli } from '../src/cliSelection';
@@ -12,6 +12,16 @@ import { execFileSync } from 'node:child_process';
 afterEach(() => vi.useRealTimers());
 async function stoppedBackend() { const backend = new MockBackend(); await backend.request('agents/stop', { workspace: 'example', name: 'my-tunnel' }); return backend; }
 describe('IDE feature behavior', () => {
+  it('shows actual local connection transitions in CodeLens instead of stale connected relay state', async () => {
+    const backend = new MockBackend(); const { tunnels, agents } = await backend.request('tunnels/list', { workspace: 'example' });
+    expect(tunnelCodeLensTitle(tunnels[0], agents)).toBe(`● connected · ${tunnels[0].url}`);
+    for (const state of ['Connecting', 'Reconnecting', 'Stopped']) {
+      expect(tunnelCodeLensTitle(tunnels[0], [{ ...agents[0], state }])).toBe(`○ ${state === 'Stopped' ? 'offline' : state.toLowerCase()} · ${tunnels[0].url}`);
+    }
+    expect(tunnelCodeLensTitle(tunnels[1], [])).toBe(`● connected · ${tunnels[1].url}`);
+    expect(tunnelCodeLensTitle(tunnels[2], [])).toBe(`○ offline · ${tunnels[2].url}`);
+    backend.dispose();
+  });
   it('selects a newer global CLI, bundled fallback and authoritative configured override', async () => {
     const detect = vi.fn(async (path: string) => ({ available: true as const, version: path === 'groundhog' ? '1.4.0' : '1.3.0-preview.1' }));
     expect((await selectCli('groundhog', '/bundle', '1.3.0-preview.1', detect)).path).toBe('groundhog');
