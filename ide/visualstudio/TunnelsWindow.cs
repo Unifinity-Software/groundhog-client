@@ -45,7 +45,8 @@ internal sealed class TunnelsControl : UserControl
     private bool _busy;
     private bool _subscribed;
     private readonly SignInState _signIn = new();
-    internal static TunnelNode? SelectedTunnel { get; private set; }
+    private static readonly TunnelSelection Selection = new();
+    internal static TunnelNode? SelectedTunnel => Selection.Current;
     private GroundhogPackage Package => GroundhogPackage.Current ?? throw new InvalidOperationException("Groundhog package is not available.");
 
     internal TunnelsControl()
@@ -65,7 +66,7 @@ internal sealed class TunnelsControl : UserControl
         _content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
         _content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         AutomationProperties.SetName(_tree, "Workspaces and tunnels");
-        _tree.SelectedItemChanged += (_, _) => { SelectedTunnel = (_tree.SelectedItem as TreeViewItem)?.Tag as TunnelNode; };
+        _tree.SelectedItemChanged += (_, _) => Selection.Select((_tree.SelectedItem as TreeViewItem)?.Tag as TunnelNode);
         _tree.MouseDoubleClick += (_, _) => { if (SelectedTunnel is { } tunnel) { Run(() => InspectAsync(tunnel)); } };
         _content.Children.Add(_tree);
         panel.Children.Add(_content);
@@ -123,14 +124,15 @@ internal sealed class TunnelsControl : UserControl
         {
             await Package.EnsureBackendAsync(_stop.Token);
             var auth = await Package.Backend.RequestAsync("auth/status", new { }, _stop.Token);
-            _tree.Items.Clear();
             var state = (string?)auth["state"];
             _notice.Text = _signIn.Notice(state, DateTimeOffset.UtcNow);
-            if (state != "signedIn") { return; }
+            if (state != "signedIn") { Selection.Rebuild([], () => _tree.Items.Clear()); return; }
             if (Package.ActiveName is null && await Package.StartupDirectoryAsync(_stop.Token) is { } directory
                 && ProjectSettings.ForDebug(directory, null, null) is { } configured && (string?)auth["workspace"] is { } defaultWorkspace)
             { Package.TrackActive(defaultWorkspace, configured.Name); }
             var workspaces = await Package.Backend.RequestAsync("workspaces/list", new { }, _stop.Token);
+            var groups = new List<TreeViewItem>();
+            var items = new List<TreeViewItem>();
             foreach (var workspace in workspaces["workspaces"] ?? new JArray())
             {
                 var slug = (string?)workspace["slug"] ?? "";
@@ -150,10 +152,23 @@ internal sealed class TunnelsControl : UserControl
                     var item = new TreeViewItem { Header = name + "  -  " + StateLabel(tunnel, agent), Tag = node, ToolTip = node.Url };
                     item.ContextMenu = Menu(node, tunnel["actions"]?.Values<string>().OfType<string>().ToArray() ?? []);
                     group.Items.Add(item);
+                    items.Add(item);
                 }
                 if (group.Items.Count == 0) { group.Items.Add(new TreeViewItem { Header = "No tunnels. Use Create tunnel to add one.", IsEnabled = false }); }
-                _tree.Items.Add(group);
+                groups.Add(group);
             }
+            var selected = Selection.Rebuild(items.Select(item => (TunnelNode)item.Tag), () =>
+            {
+                _tree.Items.Clear();
+                foreach (var group in groups) { _tree.Items.Add(group); }
+            });
+            if (items.FirstOrDefault(item => ReferenceEquals(item.Tag, selected)) is { } selectedItem)
+            { selectedItem.IsSelected = true; }
+        }
+        catch
+        {
+            Selection.Rebuild([], () => _tree.Items.Clear());
+            throw;
         }
         finally { _busy = false; }
     }

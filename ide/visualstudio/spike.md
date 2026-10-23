@@ -13,7 +13,7 @@ no Microsoft sample implementation was copied.
 The documented new-SDK prerequisite is Visual Studio 2022 17.9 Preview 1 or newer. Groundhog chooses SDK 17.14.40608 and
 an extension minimum of 17.14, targeting .NET Framework 4.7.2 with `VssdkCompatibleExtension=true` and
 `RequiresInProcessHosting=true`. The VSIX declares Windows x64 targets through Visual Studio 2026. Actual host validation
-is still needed on both VS generations; the declared range is not a claim that those runtime checks have passed.
+remains incomplete on both VS generations; the declared range is not a claim that the full runtime checklist has passed.
 
 The layout is one `ide/visualstudio` SDK project containing the native package, tool window, debugger adapter and stdio
 adapter. `ide/webview` owns the browser code. Its built bundle is included as VSIX content, keeping Node outside the
@@ -32,8 +32,10 @@ requests depend on the tunnel; automatic pre-launch hosting is not supported in 
 The spike built an actual VSIX locally using `dotnet build`, including generated package/tool-window registrations and
 compiled View-menu commands. This succeeded without installing Visual Studio. The final standalone verification also
 asserts that the package, native tool-window registration, new SDK metadata, license and shared inspector files are in
-the VSIX. Visual Studio Community 2026 has since been installed, but actual host qualification is pending.
-These checks cannot prove Visual Studio host loading or rendering.
+the VSIX. Experimental extension loading has since passed on Visual Studio 2022 17.14.37806.7 and Visual Studio 2026
+18.11.12315.225, with debugger-triggered hosting and basic HTTP inspection exercised. The full host smoke checklist in
+[the native README](README.md#host-smoke-checklist) and publication qualification remain pending. Standalone checks
+cannot establish the remaining IDE behavior.
 
 Public sources:
 

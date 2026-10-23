@@ -1,7 +1,8 @@
 # Groundhog for Visual Studio
 
-This preview targets Visual Studio 2022 17.14 or newer on Windows x64. The VSIX also declares the Visual Studio 2026
-installation range; that host has not been exercised in this development environment. Use **View > Groundhog Tunnels**.
+This preview targets Visual Studio 2022 17.14 or newer and Visual Studio 2026 on Windows x64.
+Both generations have loaded the extension in experimental instances; the full host smoke checklist below remains
+required before publication. Use **View > Groundhog Tunnels**.
 The tool window groups tunnels by workspace and shows connection state alongside local CLI, Aspire and remote hosting. Its context menu offers
 hosting, stopping, restarting, opening/copying URLs, key entry and authorized rename/delete actions.
 
@@ -29,7 +30,8 @@ projects or ambiguous launch profiles need explicit project configuration. The e
 and source settings path for approval before it starts forwarding public requests.
 Manual hosting starts with the known local agent or saved-profile target. When that target is unknown, its URL prompt
 uses matching `groundhog.json` settings, then an unambiguous Project `applicationUrl`, before the editable default.
-Selecting a tunnel in another workspace preserves that workspace for the launch-settings fallback. The status bar
+Selecting a tunnel in another workspace preserves that workspace for the launch-settings fallback. The selection
+survives refreshes and tool-window closure while the tunnel still exists. The status bar
 tracks the active tunnel's connection state and recent request count when refreshing or receiving backend changes.
 
 **Host when debugging** and **Stop after debugging** are configurable under **Tools > Options > Groundhog**. Hosting
@@ -76,7 +78,6 @@ Studio 2026. Limit the smoke to one small project and one tunnel; no load or sle
 5. Start an Aspire AppHost and verify its tunnel is visible, labels Aspire, and cannot be stopped through this extension.
 6. Close the tool window and Visual Studio; verify the stdio child exits while independent hosting agents remain running.
 
-Visual Studio Community 2026 is installed in the development environment. Actual host qualification is pending.
-Compilation, VSIX packaging and standalone checks passed; debugger callbacks, actual IDE
-rendering, install/uninstall and version-specific host loading remain a release validation gap until the checklist runs
-on those hosts. See [the spike](spike.md).
+Experimental host loading passed on Visual Studio 2022 17.14.37806.7 and Visual Studio 2026 18.11.12315.225.
+Debugger-triggered hosting and basic HTTP inspection have also been exercised. Compilation, VSIX packaging and
+standalone checks passed; the complete checklist and publication qualification remain pending. See [the spike](spike.md).

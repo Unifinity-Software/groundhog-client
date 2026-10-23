@@ -205,6 +205,35 @@ public static class NativeBehaviorSmoke {
         if ((string)prefill.Invoke(null,new object[] {project,"selected"}) != "http://localhost:5178") throw new Exception("Start did not prefill the unambiguous application target.");
         var selected = debug.Invoke(null,new object[] {project,"selected","another-workspace"});
         if ((string)Read(selected,"Workspace") != "another-workspace") throw new Exception("Debugger targeted the default workspace instead of the selected tunnel's workspace.");
+        var nodeType = assembly.GetType("Groundhog.VisualStudio.TunnelNode", true);
+        Func<string,string,object> node = (workspace,target) => Activator.CreateInstance(nodeType,Instance | BindingFlags.Public,null,
+            new object[] {workspace,"selected","https://selected.groundhog.unifinity.com",true,target,"cli",false,true},null);
+        var previousNode = node("another-workspace","http://localhost:5177");
+        var freshNode = node("another-workspace","http://localhost:5178");
+        var otherWorkspaceNode = node("other-workspace","http://localhost:9999");
+        var selectionType = assembly.GetType("Groundhog.VisualStudio.TunnelSelection", true);
+        var tunnelSelection = Activator.CreateInstance(selectionType,true);
+        var selectTunnel = selectionType.GetMethod("Select",Instance);
+        var rebuild = selectionType.GetMethod("Rebuild",Instance);
+        var nodes = Array.CreateInstance(nodeType,2); nodes.SetValue(otherWorkspaceNode,0); nodes.SetValue(freshNode,1);
+        selectTunnel.Invoke(tunnelSelection,new object[] {previousNode});
+        Action clearTree = () => {
+            if (Read(tunnelSelection,"Current") != null) throw new Exception("A stale tunnel remained actionable during tree replacement.");
+            selectTunnel.Invoke(tunnelSelection,new object[] {null});
+        };
+        var restored = rebuild.Invoke(tunnelSelection,new object[] {nodes,clearTree});
+        if (!Object.ReferenceEquals(restored,freshNode) || !Object.ReferenceEquals(Read(tunnelSelection,"Current"),freshNode))
+            throw new Exception("Refresh lost the selected tunnel identity or retained its stale node.");
+        var fallback = debug.Invoke(null,new object[] {project,Read(restored,"Name"),Read(restored,"Workspace")});
+        if ((string)Read(fallback,"Workspace") != "another-workspace") throw new Exception("Refresh lost launchSettings fallback selection.");
+        var remainingNodes = Array.CreateInstance(nodeType,1); remainingNodes.SetValue(otherWorkspaceNode,0);
+        if (rebuild.Invoke(tunnelSelection,new object[] {remainingNodes,clearTree}) != null || Read(tunnelSelection,"Current") != null)
+            throw new Exception("A removed tunnel selected the same name from another workspace.");
+        if (rebuild.Invoke(tunnelSelection,new object[] {nodes,clearTree}) != null)
+            throw new Exception("A removed selection was silently restored after a later refresh.");
+        selectTunnel.Invoke(tunnelSelection,new object[] {freshNode});
+        if (rebuild.Invoke(tunnelSelection,new object[] {Array.CreateInstance(nodeType,0),clearTree}) != null || Read(tunnelSelection,"Current") != null)
+            throw new Exception("Sign-out retained a selected tunnel.");
         File.WriteAllText(launch,"{\"profiles\":{\"App\":{\"commandName\":\"Project\",\"applicationUrl\":\"http://localhost:5178;https://localhost:7132\"}}}");
         if (debug.Invoke(null,new object[] {project,"selected","another-workspace"}) != null) throw new Exception("An ambiguous launch target was guessed.");
 
@@ -212,9 +241,9 @@ public static class NativeBehaviorSmoke {
         var disconnected = (string)label.Invoke(null,new object[] {JObject.Parse("{\"state\":\"connected\"}"),JObject.Parse("{\"source\":\"cli\",\"state\":\"Reconnecting\"}")});
         if (!disconnected.Contains("Reconnecting") || !disconnected.Contains("on this computer")) throw new Exception("Local tree state was hidden by its location label.");
 
-        var selectionType = assembly.GetType("Groundhog.VisualStudio.DetailSelection", true);
-        var selection = Activator.CreateInstance(selectionType,true); var begin = selectionType.GetMethod("Begin",Instance);
-        var complete = selectionType.GetMethod("Complete",Instance); var action = selectionType.GetMethod("ActionId",Instance);
+        var detailSelectionType = assembly.GetType("Groundhog.VisualStudio.DetailSelection", true);
+        var selection = Activator.CreateInstance(detailSelectionType,true); var begin = detailSelectionType.GetMethod("Begin",Instance);
+        var complete = detailSelectionType.GetMethod("Complete",Instance); var action = detailSelectionType.GetMethod("ActionId",Instance);
         var a = begin.Invoke(selection,null); var b = begin.Invoke(selection,null);
         if (!(bool)complete.Invoke(selection,new object[] {b,JObject.Parse("{\"requestId\":\"b\"}")}) || (bool)complete.Invoke(selection,new object[] {a,JObject.Parse("{\"requestId\":\"a\"}")})) throw new Exception("A late detail response replaced the selected request.");
         if ((string)action.Invoke(selection,new object[] {"b"}) != "b") throw new Exception("Selected request action lost its identity.");
