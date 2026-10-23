@@ -8,7 +8,9 @@ It reuses the CLI credential store and agent sessions. This contract is separate
 
 Each message is UTF-8 JSON preceded by ASCII `Content-Length: <byte count>\r\n\r\n`. The count measures JSON bytes,
 not characters. There is no trailing delimiter. Readers must handle partial reads and multiple frames in one read.
-Header names are case insensitive. An optional `Content-Type: application/vscode-jsonrpc; charset=utf-8` is accepted.
+Exactly one optional UTF-8 preamble (`EF BB BF`) is accepted before the first header, for .NET Framework process
+wrappers that emit it before exposing their raw stdin stream. It is never emitted by the backend. Repeated, truncated
+or midstream preambles and non-ASCII header bytes terminate the connection. Header names are case insensitive. An optional `Content-Type: application/vscode-jsonrpc; charset=utf-8` is accepted.
 Messages are limited to 1 MiB and headers to 8 KiB; an invalid length, oversized frame, unsupported encoding or
 truncated frame terminates the connection without echoing its contents. A valid frame containing malformed JSON
 returns `-32700` with `id: null`. JSON-RPC batches are unsupported (`-32600`).

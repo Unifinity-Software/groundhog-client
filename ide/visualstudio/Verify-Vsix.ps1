@@ -28,7 +28,11 @@ $temporary = [IO.Path]::GetFullPath((Join-Path $env:TEMP ('groundhog-vs-smoke-' 
 $tempPrefix = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\groundhog-vs-smoke-'
 if (-not $temporary.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid smoke directory.' }
 [IO.Directory]::CreateDirectory($temporary) | Out-Null
+$originalInputEncoding = [Console]::InputEncoding
 try {
+    # This isolated verifier process exercises the UTF-8 Windows environment that makes .NET Framework
+    # Process.Start write a preamble before the shipping client accesses StandardInput.BaseStream.
+    [Console]::InputEncoding = New-Object Text.UTF8Encoding($true)
     $peer = Join-Path $temporary 'groundhog-peer.exe'
     Add-Type -OutputAssembly $peer -OutputType ConsoleApplication -ReferencedAssemblies System.Web.Extensions -TypeDefinition @'
 using System;
@@ -63,9 +67,20 @@ public class GroundhogPeer {
         Phase("stdio-start");
         var input = Console.OpenStandardInput(); var output = Console.OpenStandardOutput();
         var json = new JavaScriptSerializer();
+        var firstByte = true;
         while (true) {
             var header = new StringBuilder(); int value;
-            while ((value = input.ReadByte()) >= 0) { header.Append((char)value); if (header.ToString().EndsWith("\r\n\r\n")) break; }
+            while ((value = input.ReadByte()) >= 0) {
+                if (firstByte) {
+                    firstByte = false;
+                    if (value == 0xef) {
+                        if (input.ReadByte() != 0xbb || input.ReadByte() != 0xbf) throw new InvalidDataException();
+                        Phase("utf8-preamble"); continue;
+                    }
+                }
+                if (value > 0x7f) throw new InvalidDataException();
+                header.Append((char)value); if (header.ToString().EndsWith("\r\n\r\n")) break;
+            }
             if (value < 0) { Phase("input-ended"); return; }
             Phase("header-read");
             int length = 0;
@@ -271,6 +286,7 @@ public static class NativeBehaviorSmoke {
     }
     throw
 } finally {
+    [Console]::InputEncoding = $originalInputEncoding
     if ($temporary.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $temporary -Recurse -Force }
     if (Test-Path -LiteralPath $temporary) { throw "Smoke cleanup failed: $temporary" }
 }

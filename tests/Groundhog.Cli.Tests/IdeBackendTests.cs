@@ -495,6 +495,28 @@ public sealed class IdeBackendTests
         Assert.EndsWith(text, Encoding.UTF8.GetString(copy.ToArray()), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Framing_accepts_only_one_optional_initial_UTF8_preamble()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var body = Encoding.UTF8.GetBytes("{\"name\":\"é\"}");
+        var frame = Encoding.ASCII.GetBytes($"Content-Length: {body.Length}\r\n\r\n").Concat(body).ToArray();
+        byte[] preamble = [0xef, 0xbb, 0xbf];
+        using (var input = new IdeInputStream(new MemoryStream(preamble.Concat(frame).Concat(frame).ToArray())))
+        {
+            using var output = new MemoryStream();
+            await input.CopyToAsync(output, ct);
+            Assert.Equal(frame.Concat(frame), output.ToArray());
+        }
+        byte[][] invalid = [preamble.Concat(preamble).Concat(frame).ToArray(), frame.Concat(preamble).Concat(frame).ToArray(),
+            [0xef], [0xef, 0xbb], [0xef, 0xbb, 0, .. frame]];
+        foreach (var bytes in invalid)
+        {
+            using var input = new IdeInputStream(new MemoryStream(bytes));
+            await Assert.ThrowsAnyAsync<IOException>(() => input.CopyToAsync(Stream.Null, ct));
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         internal const string Token = "private-access-token";

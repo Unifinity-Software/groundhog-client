@@ -273,3 +273,6 @@ See the IDE contract for state transitions and terminal notice behavior.
 On Unix, the current-user local session pipe keeps its listener alive for the lifetime of the agent. Each bounded request
 uses a separate accepted connection, so closing one client does not discard queued status clients. Windows keeps its
 per-request handle lifecycle; both platforms retain the same two-second request deadline, including response I/O.
+
+The IDE stdio reader accepts exactly one optional UTF-8 preamble at stream start for .NET Framework process wrappers.
+All frame headers remain ASCII and retain their 8 KiB bound; repeated, malformed or midstream preambles are rejected.

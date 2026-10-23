@@ -8,6 +8,7 @@ internal sealed class IdeInputStream(Stream input) : Stream
 {
     private byte[] _frame = [];
     private int _position;
+    private bool _started;
     public override bool CanRead => true;
     public override bool CanSeek => false;
     public override bool CanWrite => false;
@@ -29,6 +30,20 @@ internal sealed class IdeInputStream(Stream input) : Stream
                     if (header.Count == 0) { return 0; }
                     throw new IOException("Truncated protocol header.");
                 }
+                if (!_started)
+                {
+                    _started = true;
+                    // .NET Framework Process.Start can write its UTF-8 StreamWriter preamble before callers
+                    // access StandardInput.BaseStream. Accept that fixed prefix once, only at stream start.
+                    if (single[0] == 0xef)
+                    {
+                        var tail = new byte[2];
+                        await input.ReadExactlyAsync(tail, cancellationToken);
+                        if (tail[0] != 0xbb || tail[1] != 0xbf) { throw new IOException("Invalid protocol preamble."); }
+                        continue;
+                    }
+                }
+                if (single[0] > 0x7f) { throw new IOException("Invalid protocol header."); }
                 header.Add(single[0]);
                 if (header.Count > 8192) { throw new IOException("Protocol header too large."); }
                 if (header.Count >= 4 && header[^4] == 13 && header[^3] == 10 && header[^2] == 13 && header[^1] == 10) { break; }
