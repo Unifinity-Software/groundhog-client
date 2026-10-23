@@ -274,6 +274,58 @@ public static class NativeBehaviorSmoke {
             throw 'Copied PowerShell curl command did not preserve the request as literal arguments.'
         }
     }
+    # Reuse this PowerShell 5 host for the actual TypeScript formatter's platform checks.
+    $curlWatch = [Diagnostics.Stopwatch]::StartNew()
+    $curlEmitter = [IO.Path]::GetFullPath((Join-Path $projectRoot '../vscode/test/emit-powershell-curl-cases.mjs'))
+    $curlProcess = New-Object Diagnostics.Process
+    $curlProcess.StartInfo = New-Object Diagnostics.ProcessStartInfo
+    $curlProcess.StartInfo.FileName = (Get-Command node.exe -ErrorAction Stop).Source
+    $curlProcess.StartInfo.Arguments = '"' + $curlEmitter + '"'
+    $curlProcess.StartInfo.UseShellExecute = $false
+    $curlProcess.StartInfo.CreateNoWindow = $true
+    $curlProcess.StartInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+    $curlProcess.StartInfo.RedirectStandardOutput = $true
+    $curlProcess.StartInfo.RedirectStandardError = $true
+    $curlProcess.StartInfo.StandardOutputEncoding = New-Object Text.UTF8Encoding($false)
+    $curlProcess.StartInfo.StandardErrorEncoding = New-Object Text.UTF8Encoding($false)
+    $curlStarted = $false
+    try {
+        $curlStarted = $curlProcess.Start()
+        if (-not $curlStarted) { throw 'Could not start the TypeScript curl case emitter.' }
+        $curlOutput = $curlProcess.StandardOutput.ReadToEndAsync()
+        $curlErrors = $curlProcess.StandardError.ReadToEndAsync()
+        if (-not $curlProcess.WaitForExit(5000)) { throw 'TypeScript curl case emitter exceeded its five-second limit.' }
+        $curlReads = [Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]@($curlOutput, $curlErrors))
+        $curlRemaining = [Math]::Max(1, 5000 - [int]$curlWatch.ElapsedMilliseconds)
+        if (-not $curlReads.Wait($curlRemaining)) { throw 'TypeScript curl case emitter did not close its output.' }
+        if ($curlProcess.ExitCode -ne 0) { throw 'TypeScript curl case emitter failed; install the VS Code npm dependencies first.' }
+        $curlText = $curlOutput.GetAwaiter().GetResult()
+        if ($curlText.Length -gt 8192) { throw 'TypeScript curl case emitter returned oversized output.' }
+        $curlCases = $curlText | ConvertFrom-Json
+    } finally {
+        if ($curlStarted -and -not $curlProcess.HasExited) {
+            $curlProcess.Kill()
+            if (-not $curlProcess.WaitForExit(5000)) { throw 'TypeScript curl case emitter did not stop.' }
+        }
+        $curlProcess.Dispose()
+    }
+    if (@($curlCases.cases).Count -ne 3 -or ($curlCases.cases.field -join ',') -cne 'body,header,path') {
+        throw 'TypeScript curl cases must cover all three hostile fields.'
+    }
+    foreach ($case in $curlCases.cases) {
+        $tokens = $null; $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseInput($case.command, [ref]$tokens, [ref]$errors)
+        $commands = @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true))
+        if (@($errors).Count -ne 0 -or $commands.Count -ne 1 -or $commands[0].GetCommandName() -cne 'curl.exe') {
+            throw "TypeScript curl AST check failed for the hostile $($case.field) field."
+        }
+    }
+    $tokens = $null; $errors = $null
+    $control = [Management.Automation.Language.Parser]::ParseInput($curlCases.unsafeControl, [ref]$tokens, [ref]$errors)
+    $controlNames = @($control.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() })
+    if (@($errors).Count -ne 0 -or ($controlNames -join ',') -cne 'curl.exe,Write-Output') { throw 'The unsafe curl AST control was not detected.' }
+    $curlWatch.Stop()
+    Write-Output ('TypeScript curl AST checks passed: body, header, path and unsafe control ({0} ms).' -f $curlWatch.ElapsedMilliseconds)
     Write-Output 'VSIX registration, shared inspector, framed-stdio early events and PowerShell quoting smoke passed.'
 } catch {
     # Surface only bounded fixed phases from our synthetic peer. The shipping client still discards stderr.
