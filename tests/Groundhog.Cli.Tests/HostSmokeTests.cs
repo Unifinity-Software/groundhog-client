@@ -42,6 +42,16 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
         }
     }
 
+    [Fact]
+    public async Task Host_readiness_reports_an_exited_CLI_without_waiting_for_a_connection()
+    {
+        var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => AwaitReadinessAsync(ready.Task,
+            Task.FromResult(ExitCodes.BadArguments), TestContext.Current.CancellationToken));
+        Assert.Contains("exited with code 2 before connecting", error.Message, StringComparison.Ordinal);
+        Assert.False(ready.Task.IsCompleted);
+    }
+
     [Fact(Timeout = 30_000)]
     public async Task Host_forwards_a_request_and_stops_when_replaced()
     {
@@ -54,6 +64,9 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
             "--relay", fixture.Relay.Address.ToString(), "--pool", "1"];
 
         Process? process = null;
+        string? home = null;
+        var phase = "starting CLI";
+        var tunnel = fixture.Relay.Tunnel("cli-smoke");
         Task<int> running;
         if (string.IsNullOrEmpty(executable))
         {
@@ -62,9 +75,11 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
         }
         else
         {
+            home = Path.Combine(Path.GetTempPath(), "groundhog-host-smoke-" + Guid.NewGuid().ToString("N"));
             var start = new ProcessStartInfo(executable)
             {
                 UseShellExecute = false,
+                CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
@@ -74,14 +89,16 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
             }
 
             start.Environment["GROUNDHOG_KEY"] = fixture.Key;
+            start.Environment["GROUNDHOG_HOME"] = home;
             process = Process.Start(start) ?? throw new InvalidOperationException("CLI did not start.");
             running = CaptureProcessAsync(process, output, error, cancellation);
         }
 
         try
         {
-            var tunnel = fixture.Relay.Tunnel("cli-smoke");
-            var connection = await tunnel.Connections.Reader.ReadAsync(cancellation);
+            phase = "waiting for relay connection";
+            var connection = await AwaitReadinessAsync(tunnel.Connections.Reader.ReadAsync(cancellation).AsTask(), running, cancellation);
+            phase = "reading connect metadata";
             var attempt = await tunnel.Attempts.Reader.ReadAsync(cancellation);
             Assert.Equal("Groundhog.Cli", attempt.ClientPackage);
             Assert.False(string.IsNullOrEmpty(attempt.ClientVersion));
@@ -91,12 +108,15 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
                 VersionPolicy = HttpVersionPolicy.RequestVersionExact,
             };
             request.Headers.Add("X-Forwarded-Host", "cli-smoke.groundhog.unifinity.com");
+            phase = "forwarding HTTP request";
             using var response = await connection.Client.SendAsync(request, cancellation);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal("cli-smoke.groundhog.unifinity.com|/echo?code=sample|cli-smoke.groundhog.unifinity.com",
                 await response.Content.ReadAsStringAsync(cancellation));
 
+            phase = "sending SessionReplaced";
             await connection.CloseAsync(GroundhogCloseCodes.SessionReplaced, cancellation);
+            phase = "waiting for CLI exit";
             Assert.Equal(ExitCodes.Stopped, await running.WaitAsync(cancellation));
             Assert.Contains("https://cli-smoke.groundhog.unifinity.com", output.ToString(), StringComparison.Ordinal);
             Assert.DoesNotContain(fixture.Key, output.ToString() + error, StringComparison.Ordinal);
@@ -110,18 +130,45 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
                 await process.WaitForExitAsync(CancellationToken.None);
             }
 
-            process?.Dispose();
+            try { await running; }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            finally
+            {
+                // The child has a private home; all captured traffic belongs to this synthetic fixture. Keep the
+                // original raw-output secret assertions above, and redact before emitting bounded diagnostics.
+                static string Safe(string text, string key) => new string(text.Replace(key, "[redacted]", StringComparison.Ordinal)
+                    .Where(c => !char.IsControl(c) || c is '\r' or '\n' or '\t').Take(8192).ToArray());
+                TestContext.Current.TestOutputHelper?.WriteLine($"Host smoke phase: {phase}; attempts: {tunnel.AttemptCount}; "
+                    + $"process exit: {(process is null ? "in-process" : process.HasExited ? process.ExitCode : "running")}. "
+                    + $"stdout: {Safe(output.ToString(), fixture.Key)} stderr: {Safe(error.ToString(), fixture.Key)}");
+                process?.Dispose();
+                if (home is not null && Directory.Exists(home))
+                {
+                    using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await CliProcess.DeleteExitedDirectoryAsync(home, cleanup.Token);
+                }
+            }
         }
+    }
+
+    private static async Task<T> AwaitReadinessAsync<T>(Task<T> readiness, Task<int> running, CancellationToken cancellation)
+    {
+        var completed = await Task.WhenAny(readiness, running).WaitAsync(cancellation);
+        if (completed == readiness || readiness.IsCompletedSuccessfully) { return await readiness; }
+        var exit = await running;
+        throw new InvalidOperationException($"CLI exited with code {exit} before connecting to the fake relay.");
     }
 
     private static async Task<int> CaptureProcessAsync(Process process, StringWriter output, StringWriter error,
         CancellationToken cancellation)
     {
-        var stdout = process.StandardOutput.ReadToEndAsync(cancellation);
-        var stderr = process.StandardError.ReadToEndAsync(cancellation);
-        await process.WaitForExitAsync(cancellation);
-        output.Write(await stdout);
-        error.Write(await stderr);
-        return process.ExitCode;
+        static async Task CopyAsync(StreamReader reader, StringWriter destination)
+        {
+            while (await reader.ReadLineAsync() is { } line) { destination.WriteLine(line); }
+        }
+        var stdout = CopyAsync(process.StandardOutput, output);
+        var stderr = CopyAsync(process.StandardError, error);
+        try { await process.WaitForExitAsync(cancellation); return process.ExitCode; }
+        finally { await Task.WhenAll(stdout, stderr); }
     }
 }
