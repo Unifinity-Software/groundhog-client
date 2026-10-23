@@ -14,7 +14,7 @@ internal static class RemoteCommands
 
     internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, CancellationToken cancellation,
         CredentialStore? credentialStore = null, Func<string, string?, ManagementClient>? createClient = null,
-        Func<string, string>? userSecretsPath = null)
+        Func<string, string>? userSecretsPath = null, IRotationHost? rotationHost = null)
     {
         if (args.Contains("--help", StringComparer.Ordinal)) { output.Write(GroundhogCommand.Usage); return 0; }
         var rest = args[1..];
@@ -35,7 +35,10 @@ internal static class RemoteCommands
         }
         else if (args[0] == "stats") { options.RequireKnown("--remote", "--workspace", "--output"); }
         else if (args[0] == "access") { options.RequireKnown("--relay", "--workspace", "--output", "--agent-managed"); }
-        else { options.RequireKnown("--relay", "--workspace", "--output", "--yes", "--status", "--project", "--name-parameter", "--key-parameter"); }
+        else { options.RequireKnown("--relay", "--workspace", "--output", "--yes", "--status", "--project", "--name-parameter", "--key-parameter", "--no-downtime", "--timeout"); }
+        var noDowntime = options.Has("--no-downtime");
+        if ((noDowntime || options.Has("--timeout")) && !(args[0] == "key" && options.Positional is ["rotate", _] && noDowntime))
+        { throw new UsageException("--no-downtime and --timeout are only supported by key rotate --no-downtime."); }
         if (options.Get("--output") is { } format && format != "json")
         {
             throw new ArgumentException("Unsupported output format.");
@@ -63,18 +66,11 @@ internal static class RemoteCommands
 
             return await LoginAsync(options.Get("--relay") ?? GroundhogService.DefaultRelayAddress, store, output, cancellation);
         }
+        var authentication = new SessionAuthentication(store, createClient);
         var session = store.Read();
         if (args[0] == "logout")
         {
-            try
-            {
-                if (session is not null)
-                {
-                    using var revoke = createClient(session.Relay, session.Token);
-                    await revoke.SendAsync<object>(HttpMethod.Post, "/api/cli/logout", null, cancellation);
-                }
-            }
-            finally { store.Delete(); }
+            await authentication.LogoutAsync(cancellation);
             output.WriteLine("Signed out; saved CLI credentials and tunnel keys removed."); return 0;
         }
         // A saved key outlives the sign-in, so key copy needs neither a valid session nor the service when the
@@ -84,6 +80,7 @@ internal static class RemoteCommands
             return CopyKey(session, copyWorkspace, copyName, projectSecrets!, output);
         }
 
+        session = await authentication.GetSessionAsync(cancellation);
         if (session is null || session.Expires <= DateTimeOffset.UtcNow)
         {
             throw new ManagementException("Run groundhog login to access remote tunnels.");
@@ -94,7 +91,7 @@ internal static class RemoteCommands
             throw new ManagementException("Saved credentials belong to another relay. Run login --relay for that relay.");
         }
 
-        using var client = createClient(session.Relay, session.Token);
+        using var client = authentication.CreateClient(session);
         if (args[0] is "whoami" or "workspace")
         {
             var account = await client.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, cancellation);
@@ -105,7 +102,7 @@ internal static class RemoteCommands
                     throw new ManagementException("No accessible workspace with that slug.");
                 }
 
-                store.Save(session with { Workspace = slug }); output.WriteLine("Workspace selected."); return 0;
+                await UpdateSessionAsync(store, session, fresh => fresh with { Workspace = slug }, cancellation); output.WriteLine("Workspace selected."); return 0;
             }
             if (options.Positional.Length != 0 && options.Positional is not ["list"])
             {
@@ -283,7 +280,7 @@ internal static class RemoteCommands
                 break;
             case "create":
                 var created = await client.SendAsync<TunnelCreated>(HttpMethod.Post, collection, new { Name = name }, cancellation);
-                SaveKey(store, session, workspaceSlug, created.Tunnel.Name, created.ConnectionKey);
+                await SaveKeyAsync(store, session, workspaceSlug, created.Tunnel.Name, created.ConnectionKey, cancellation);
                 output.WriteLine("Tunnel created. Its connection key was saved securely for hosting.");
                 if (projectSecrets is null)
                 {
@@ -296,19 +293,21 @@ internal static class RemoteCommands
                 break;
             case "rename":
                 var renamed = await client.SendAsync<TunnelInfo>(HttpMethod.Patch, path, new { Name = positional[1] }, cancellation);
-                if (session.TunnelKeys.Remove(KeyId(workspaceSlug, name), out var renamedKey))
+                await UpdateSessionAsync(store, session, fresh =>
                 {
-                    SaveKey(store, session, workspaceSlug, renamed.Name, renamedKey);
-                }
+                    if (fresh.TunnelKeys.Remove(KeyId(workspaceSlug, name), out var renamedKey))
+                    { fresh.TunnelKeys[KeyId(workspaceSlug, renamed.Name)] = renamedKey; }
+                    return fresh;
+                }, cancellation);
                 output.WriteLine($"Tunnel renamed to {Plain(renamed.Name)}. Update saved hosting profiles.");
                 break;
             case "delete":
                 await client.SendAsync<object>(HttpMethod.Delete, path, null, cancellation);
-                session.TunnelKeys.Remove(KeyId(workspaceSlug, name)); store.Save(session);
+                await UpdateSessionAsync(store, session, fresh => { fresh.TunnelKeys.Remove(KeyId(workspaceSlug, name)); return fresh; }, cancellation);
                 output.WriteLine("Tunnel deleted."); break;
             case "key" when positional[0] == "add":
                 var added = await AddKeyAsync(client, path, name, cancellation);
-                SaveKey(store, session, workspaceSlug, name, added.ConnectionKey);
+                await SaveKeyAsync(store, session, workspaceSlug, name, added.ConnectionKey, cancellation);
                 output.WriteLine("Key added and saved securely on this computer, replacing the key saved here before.");
                 output.WriteLine("Agents already connected stay connected, and the old key keeps working until you revoke it.");
                 output.WriteLine($"Restart hosting with the new key, then run groundhog key list {Plain(name)} to find the old key's ID and " +
@@ -339,18 +338,27 @@ internal static class RemoteCommands
                 // The saved key stays: its ID can't be worked out from the key, so it may be the key that's still live.
                 output.WriteLine($"Key {revokedId[..8]} revoked. Agents that used it were disconnected.");
                 break;
+            case "key" when positional[0] == "rotate" && noDowntime:
+                var timeout = options.Get("--timeout") is { } seconds && double.TryParse(seconds, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+                    ? value : options.Has("--timeout") ? double.NaN : 30;
+                if (!double.IsFinite(timeout) || timeout is < 1 or > 120) { throw new UsageException("Rotation timeout must be from 1 to 120 seconds."); }
+                await new KeyRotation(store.DirectoryPath, client, rotationHost).RunAsync(session, workspaceSlug, name, TimeSpan.FromSeconds(timeout), cancellation);
+                if (projectSecrets is not null && store.Read()?.TunnelKeys.GetValueOrDefault(KeyId(workspaceSlug, name)) is { } replacementKey)
+                { projectSecrets.Write(name, replacementKey, output); }
+                output.WriteLine("Key rotated. The replacement local agent is connected and the old key was revoked.");
+                break;
             case "key":
                 if (positional[0] == "rotate")
                 {
                     var rotated = await client.SendAsync<TunnelCreated>(HttpMethod.Post, path + "/rotate-key", null, cancellation);
-                    SaveKey(store, session, workspaceSlug, name, rotated.ConnectionKey);
+                    await SaveKeyAsync(store, session, workspaceSlug, name, rotated.ConnectionKey, cancellation);
                     output.WriteLine("Key rotated and saved securely. Restart hosting to use the new key.");
                     projectSecrets?.Write(name, rotated.ConnectionKey, output);
                 }
                 else
                 {
                     await client.SendAsync<TunnelInfo>(HttpMethod.Post, path + "/revoke-key", null, cancellation);
-                    session.TunnelKeys.Remove(KeyId(workspaceSlug, name)); store.Save(session);
+                    await UpdateSessionAsync(store, session, fresh => { fresh.TunnelKeys.Remove(KeyId(workspaceSlug, name)); return fresh; }, cancellation);
                     output.WriteLine("Tunnel keys revoked.");
                 }
                 break;
@@ -445,11 +453,12 @@ internal static class RemoteCommands
         projectSecrets.Write(name, key, output);
         return 0;
     }
-    private static void SaveKey(CredentialStore store, LoginSession session, string workspace, string name, string key)
-    {
-        session.TunnelKeys[KeyId(workspace, name)] = key;
-        store.Save(session);
-    }
+    private static Task SaveKeyAsync(CredentialStore store, LoginSession session, string workspace, string name, string key, CancellationToken cancellation) =>
+        UpdateSessionAsync(store, session, fresh => { fresh.TunnelKeys[KeyId(workspace, name)] = key; return fresh; }, cancellation);
+
+    private static Task UpdateSessionAsync(CredentialStore store, LoginSession expected, Func<LoginSession, LoginSession> update, CancellationToken cancellation) =>
+        store.UpdateAsync(fresh => fresh is not null && fresh.SessionId == expected.SessionId && fresh.Relay == expected.Relay
+            ? update(fresh) : fresh, cancellation);
     private static string Plain(string value) => new(value.Where(c => !char.IsControl(c)).ToArray());
 
     /// <summary>
@@ -493,7 +502,8 @@ internal static class RemoteCommands
         Action<SignInChallenge>? challenge = null)
     {
         using var client = new ManagementClient(relay);
-        var authorization = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device", new { }, cancellation);
+        var authorization = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device",
+            new { clientName = "Groundhog CLI " + UpdateCommands.Version }, cancellation);
         var verification = new Uri(authorization.VerificationUri);
         if (verification.GetLeftPart(UriPartial.Authority) != new Uri(relay).GetLeftPart(UriPartial.Authority)
             || verification.AbsolutePath != "/cli-login" || authorization.ExpiresIn is < 1 or > 600 || authorization.Interval is < 1 or > 30)
@@ -537,8 +547,10 @@ internal static class RemoteCommands
 
                 using var signedIn = new ManagementClient(relay, grant.AccessToken);
                 var account = await signedIn.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, timeout.Token);
-                store.Save(new(relay, grant.AccessToken, DateTimeOffset.UtcNow.AddSeconds(grant.ExpiresIn),
-                    account.Workspaces.Length == 1 ? account.Workspaces[0].Slug : null, new()));
+                var supportsRefresh = grant.RefreshToken is not null && await new SessionAuthentication(store).SupportsRefreshAsync(relay, timeout.Token);
+                await store.UpdateAsync(_ => new(relay, grant.AccessToken, DateTimeOffset.UtcNow.AddSeconds(grant.ExpiresIn),
+                    account.Workspaces.Length == 1 ? account.Workspaces[0].Slug : null, new(),
+                    supportsRefresh ? grant.RefreshToken : null, supportsRefresh, Guid.NewGuid().ToString("N")), timeout.Token);
                 output.WriteLine("Signed in. Run groundhog list or workspace list.");
                 return 0;
             }

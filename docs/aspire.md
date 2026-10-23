@@ -410,6 +410,14 @@ query strings, headers and bodies are omitted. WebSocket duration covers the ful
 closes. The `Connected:` line includes the public URL for opening the live app; individual lines describe completed
 traffic and do not link to stored request details.
 
+### CLI and IDE discovery
+
+Running tunnels register a named pipe restricted to the current OS user. `groundhog ps` labels them as Aspire;
+`groundhog status my-tunnel` and `groundhog requests my-tunnel` show their connection and recent request metadata.
+The local registration contains no connection keys, headers or bodies, and request query strings are omitted.
+`groundhog stop my-tunnel` refuses to stop an Aspire tunnel and names its AppHost process. Stop or restart the tunnel
+from Aspire instead. Library hosts can disable local discovery with `GroundhogAgentOptions.RegisterLocalSession = false`.
+
 ## Deploying
 
 A tunnel is for local development. In publish mode the agent never starts, and the deployment manifest leaves out the

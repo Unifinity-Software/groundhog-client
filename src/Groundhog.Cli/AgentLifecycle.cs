@@ -1,3 +1,4 @@
+using Groundhog.Agent;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -5,17 +6,57 @@ namespace Groundhog.Cli;
 
 internal static class AgentLifecycle
 {
-    internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, CancellationToken cancellation)
+    internal static async Task<int> RunAsync(string[] args, TextWriter output, TextWriter error, CancellationToken cancellation,
+        Action<int>? started = null)
     {
         if (args.Contains("--help", StringComparer.Ordinal)) { output.Write(GroundhogCommand.Usage); return 0; }
-        var options = Options.Parse(args[1..]);
-        options.RequireKnown("--condition", "--timeout");
-        if (options.Positional is not [var name])
+        var hostArgs = new List<string>();
+        string? timeoutText = null;
+        for (var i = 1; i < args.Length; i++)
         {
-            throw new ArgumentException("Give one profile or tunnel name.");
+            if (args[i] == "--timeout")
+            {
+                if (timeoutText is not null || ++i >= args.Length) { throw new UsageException("Give --timeout once with seconds."); }
+                timeoutText = args[i];
+            }
+            else if (args[i].StartsWith("--timeout=", StringComparison.Ordinal))
+            {
+                if (timeoutText is not null) { throw new UsageException("Give --timeout once."); }
+                timeoutText = args[i][10..];
+            }
+            else { hostArgs.Add(args[i]); }
         }
-
-        var seconds = options.Get("--timeout") is { } text ? double.Parse(text, CultureInfo.InvariantCulture) : 30;
+        var options = args[0] == "wait" ? Options.Parse([.. hostArgs]) : Options.Parse([]);
+        options.RequireKnown("--condition");
+        var resolved = args[0] == "wait" ? [.. hostArgs] : ProjectConfiguration.ResolveHostArguments([.. hostArgs], new(ProfileStore.DefaultDirectory), Environment.CurrentDirectory);
+        string name;
+        if (args[0] == "wait")
+        {
+            name = options.Positional is [var waitName] ? waitName : throw new UsageException("Give one tunnel name.");
+        }
+        else
+        {
+            var (parsed, problem, _) = HostArguments.Parse(resolved, variable =>
+            {
+                var value = Environment.GetEnvironmentVariable(variable);
+                return variable == HostArguments.KeyVariable && string.IsNullOrWhiteSpace(value)
+                    ? GroundhogCommand.StoredKey(resolved) : value;
+            });
+            if (parsed is null)
+            {
+                if (problem?.StartsWith("No connection key:", StringComparison.Ordinal) == true)
+                {
+                    var candidate = HostArguments.Parse(resolved, _ => Groundhog.Protocol.ConnectionKey.Generate()).Arguments;
+                    throw new UsageException($"no connection key for {candidate?.Name ?? "this tunnel"}. Set {HostArguments.KeyVariable}, "
+                        + "or host the tunnel once from groundhog dashboard to save its key on this computer.");
+                }
+                throw new UsageException(problem ?? "Invalid host options.");
+            }
+            name = parsed.Name;
+            _ = new Groundhog.Agent.GroundhogAgent(new() { TunnelName = name, LocalTarget = parsed.LocalTarget,
+                RelayAddress = parsed.Relay, Credential = new Groundhog.Agent.TunnelKeyCredential(parsed.Key), VisitorAccess = parsed.VisitorAccess });
+        }
+        var seconds = timeoutText is { } text ? double.Parse(text, CultureInfo.InvariantCulture) : 30;
         if (!double.IsFinite(seconds) || seconds <= 0 || seconds > 3600)
         {
             throw new ArgumentException("Invalid timeout.");
@@ -65,27 +106,22 @@ internal static class AgentLifecycle
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             { error.WriteLine("groundhog: readiness timeout. Run status and doctor."); return 1; }
         }
-        var profile = new ProfileStore(ProfileStore.DefaultDirectory).Read().SingleOrDefault(p => p.Name == name)
-            ?? throw new ArgumentException("Save a profile before background hosting.");
-        ProfileStore.Validate(profile);
-        // The background agent has no terminal to report a missing key on, so check before starting it.
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(HostArguments.KeyVariable))
-            && GroundhogCommand.StoredKey(profile.ToHostArguments()) is null)
-        {
-            error.WriteLine($"groundhog: no connection key for {name}. Set the {HostArguments.KeyVariable} environment variable, " +
-                "or host the tunnel once from the dashboard (groundhog dashboard), which saves its key on this computer.");
-            return ExitCodes.BadArguments;
-        }
-
         var existing = LocalSessions.Registrations().Where(r => r.Name == name).ToArray();
         foreach (var registration in existing)
         {
-            if (await LocalSessions.QueryAsync(registration, args[0] == "restart", cancellation) is null)
+            var snapshot = await LocalSessions.QueryAsync(registration, false, cancellation);
+            if (snapshot is null)
             {
                 continue;
             }
 
             if (args[0] == "start") { error.WriteLine("groundhog: a local agent is already running."); return 1; }
+            if (snapshot.Host == "Aspire")
+            {
+                error.WriteLine($"groundhog: {LocalSessions.StopRefusal(snapshot.ProcessName, snapshot.ProcessId)}");
+                return ExitCodes.BadArguments;
+            }
+            await LocalSessions.QueryAsync(registration, true, cancellation);
             while (await LocalSessions.QueryAsync(registration, false, deadline.Token) is not null)
             {
                 await Task.Delay(100, deadline.Token);
@@ -106,10 +142,11 @@ internal static class AgentLifecycle
         };
         if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
         {
-            start.ArgumentList.Add(typeof(GroundhogCommand).Assembly.Location);
+            start.ArgumentList.Add(CliPaths.AssemblyFile);
         }
 
-        start.ArgumentList.Add("__host-background"); start.ArgumentList.Add(name);
+        start.ArgumentList.Add("__host-background");
+        foreach (var argument in resolved) { start.ArgumentList.Add(argument); }
         using var process = Process.Start(start) ?? throw new IOException("Could not start CLI.");
         try
         {
@@ -117,7 +154,7 @@ internal static class AgentLifecycle
             {
                 var registration = LocalSessions.Registrations().FirstOrDefault(r => r.ProcessId == process.Id);
                 if (registration is not null && await LocalSessions.QueryAsync(registration, false, deadline.Token) is { State: "Connected" })
-                { output.WriteLine($"Started local agent (PID {process.Id}). Use status, logs, or stop {name}."); return 0; }
+                { started?.Invoke(process.Id); output.WriteLine($"Started local agent (PID {process.Id}). Use status, logs, or stop {name}."); return 0; }
                 await Task.Delay(200, deadline.Token);
             }
             error.WriteLine("groundhog: background host exited. Run host in the foreground to see the failure."); return 1;

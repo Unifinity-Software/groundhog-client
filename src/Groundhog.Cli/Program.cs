@@ -29,6 +29,15 @@ args = args.Where(arg => arg is not ("--no-interactive" or "--no-color" or "--no
 
 try
 {
+    if (args is ["ide", "--stdio"])
+    {
+        return await Groundhog.Cli.Ide.IdeServer.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(), stop.Token);
+    }
+    if (args is ["mcp"] or ["mcp", "--allow-actions"])
+    {
+        return await Groundhog.Cli.Ide.McpServer.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(),
+            args.Length == 2, stop.Token);
+    }
     if (checkForUpdates)
     {
         // A broken cache or unavailable NuGet feed must never prevent the requested command from running.
@@ -41,6 +50,12 @@ try
         {
             // The explicit update command reports these errors; a startup offer is optional.
         }
+    }
+    if (args is ["__host-background-stored", .. var storedArgs])
+    {
+        return await GroundhogCommand.RunAsync(["host", .. storedArgs],
+            variable => variable == HostArguments.KeyVariable ? null : Environment.GetEnvironmentVariable(variable),
+            TextWriter.Null, TextWriter.Null, stop.Token);
     }
     if (args is ["__host-background", .. var backgroundArgs])
     {

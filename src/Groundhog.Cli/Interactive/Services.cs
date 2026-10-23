@@ -141,9 +141,10 @@ internal interface IInteractiveServices
 }
 
 /// <summary>The real services: the hosted Groundhog service, this user's stores and local agents.</summary>
-internal sealed class HostedServices(UpdateCommands? updates = null) : IInteractiveServices
+internal sealed class HostedServices(UpdateCommands? updates = null, SessionAuthentication? authentication = null) : IInteractiveServices
 {
     private static string Home => ProfileStore.DefaultDirectory;
+    private SessionAuthentication Authentication => authentication ?? new(new CredentialStore(Home));
 
     public string Version => GroundhogAgent.Version;
 
@@ -152,11 +153,15 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
         LoginSession? session;
         try
         {
-            session = new CredentialStore(Home).Read();
+            session = await Authentication.GetSessionAsync(cancellation);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or CryptographicException)
         {
             return new(null, null, null, GroundhogService.DefaultRelayAddress, "Saved credentials could not be read. Sign in again.");
+        }
+        catch (Exception ex) when (ex is ManagementException or HttpRequestException or TaskCanceledException && !cancellation.IsCancellationRequested)
+        {
+            return new(null, null, null, GroundhogService.DefaultRelayAddress, "Sign-in could not be renewed. Check your network or sign in again.");
         }
 
         if (session is null)
@@ -171,7 +176,7 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
 
         try
         {
-            using var client = new ManagementClient(session.Relay, session.Token);
+            using var client = Authentication.CreateClient(session);
             var account = await client.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, cancellation);
             var workspace = session.Workspace ?? (account.Workspaces.Length == 1 ? account.Workspaces[0].Slug : null);
             return new(account, workspace, session.Expires, session.Relay, null);
@@ -188,13 +193,13 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
 
     public async Task<TunnelInfo[]> TunnelsAsync(string workspace, CancellationToken cancellation)
     {
-        using var client = Client();
+        using var client = await ClientAsync(cancellation);
         return await client.SendAsync<TunnelInfo[]>(HttpMethod.Get, $"/api/w/{Uri.EscapeDataString(workspace)}/tunnels", null, cancellation);
     }
 
     public async Task<TunnelInsight> TunnelAsync(string workspace, string name, CancellationToken cancellation)
     {
-        using var client = Client();
+        using var client = await ClientAsync(cancellation);
         var path = ManagementClient.TunnelPath(workspace, name);
         var tunnel = client.SendAsync<TunnelInfo>(HttpMethod.Get, path, null, cancellation);
         var usage = client.SendAsync<JsonElement>(HttpMethod.Get, path + "/usage", null, cancellation);
@@ -244,7 +249,7 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
     public async Task FollowRequestsAsync(string workspace, string name, IEnumerable<RemoteRequest> known,
         Action<RemoteRequest> onRequest, Action<LiveState> onState, CancellationToken cancellation)
     {
-        using var client = Client();
+        using var client = await ClientAsync(cancellation);
         var follower = new RequestFollower(
             token => client.OpenRequestStreamAsync(workspace, name, token),
             async token => (await client.SendAsync<RemoteSearchResult>(HttpMethod.Get, RecentRequests(workspace, name), null, token)).Entries,
@@ -312,9 +317,17 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
                 return false;
             }
 
-            session.TunnelKeys[RemoteCommands.KeyId(workspace, name)] = key;
-            store.Save(session);
-            return true;
+            var saved = false;
+            store.Update(fresh =>
+            {
+                if (fresh is not null && fresh.SessionId == session.SessionId && fresh.Relay == session.Relay)
+                {
+                    fresh.TunnelKeys[RemoteCommands.KeyId(workspace, name)] = key;
+                    saved = true;
+                }
+                return fresh;
+            });
+            return saved;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or CryptographicException)
         {
@@ -392,15 +405,15 @@ internal sealed class HostedServices(UpdateCommands? updates = null) : IInteract
     public Task<string?> AvailableUpdateAsync(CancellationToken cancellation) =>
         updates?.AvailableAsync(cancellation) ?? Task.FromResult<string?>(null);
 
-    private static ManagementClient Client()
+    private async Task<ManagementClient> ClientAsync(CancellationToken cancellation)
     {
-        var session = new CredentialStore(Home).Read();
+        var session = await Authentication.GetSessionAsync(cancellation);
         if (session is null || session.Expires <= DateTimeOffset.UtcNow)
         {
             throw new ManagementException("Sign in to see your remote tunnels.");
         }
 
-        return new ManagementClient(session.Relay, session.Token);
+        return Authentication.CreateClient(session);
     }
 
     private static async Task<CommandResult> CaptureAsync(Func<TextWriter, TextWriter, Task<int>> run)

@@ -1,0 +1,217 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Groundhog.Agent;
+
+namespace Groundhog.Cli.Ide;
+
+internal sealed partial class IdeServices
+{
+    internal async Task<IdeRequest[]> RecentRequestsAsync(JsonElement p, CancellationToken ct)
+    {
+        var session = await SessionAsync(ct);
+        var workspace = Workspace(p, session);
+        var name = Optional(p, "tunnel") ?? Optional(p, "name");
+        if (name is not null && !Groundhog.Protocol.TunnelName.IsValid(name))
+        { throw Fault(-32602, "invalidParams", "Invalid tunnel name."); }
+        var requests = new List<IdeRequest>();
+        if (name is not null)
+        {
+            foreach (var registration in _registrations().Where(r => r.Name == name))
+            {
+                if (await LocalSessions.QueryAsync(registration, false, ct) is { } snapshot)
+                { requests.AddRange(snapshot.Recent.Select(LocalRequest)); }
+            }
+        }
+        if (requests.Count == 0)
+        {
+            using var client = _authentication.CreateClient(session);
+            var path = $"/api/w/{Uri.EscapeDataString(workspace)}/requests?limit=200"
+                + (name is null ? "" : "&tunnel=" + Uri.EscapeDataString(name));
+            var records = await client.SendAsync<RemoteSearchResult>(HttpMethod.Get, path, null, ct);
+            requests.AddRange(records.Entries.Select(RemoteRequest));
+        }
+        var statusClass = Optional(p, "statusClass");
+        if (statusClass is not null && statusClass is not ("1xx" or "2xx" or "3xx" or "4xx" or "5xx"))
+        { throw Fault(-32602, "invalidParams", "Status class must be 1xx through 5xx."); }
+        DateTimeOffset? since = null;
+        if (Optional(p, "since") is { } sinceText)
+        {
+            if (!DateTimeOffset.TryParse(sinceText, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed))
+            { throw Fault(-32602, "invalidParams", "Since must be an ISO 8601 timestamp."); }
+            since = parsed;
+        }
+        return requests.DistinctBy(r => r.RequestId).Where(r => (statusClass is null || r.StatusCode / 100 == statusClass[0] - '0')
+                && (Optional(p, "method") is not { } method || r.Method.Equals(method, StringComparison.OrdinalIgnoreCase))
+                && (Optional(p, "path") is not { } path || r.Path.Contains(path, StringComparison.Ordinal))
+                && (since is null || r.Completed >= since))
+            .OrderByDescending(r => r.Completed).Take(200).Select(r => r with { Path = Redact(r.Path, session) }).ToArray();
+    }
+
+    private sealed class Subscription(CancellationTokenSource stop)
+    {
+        internal CancellationTokenSource Stop { get; } = stop;
+        internal Task Running { get; set; } = Task.CompletedTask;
+        internal SemaphoreSlim Events { get; } = new(1, 1);
+    }
+
+    private async Task<object> SubscribeAsync(JsonElement p, CancellationToken ct)
+    {
+        if (!await _subscriptionSlots.WaitAsync(0, ct))
+        { throw Fault(-32017, "conflict", "At most 16 request subscriptions can be open."); }
+        try { return await SubscribeCoreAsync(p, ct); }
+        catch { _subscriptionSlots.Release(); throw; }
+    }
+
+    private async Task<object> SubscribeCoreAsync(JsonElement p, CancellationToken ct)
+    {
+        var name = Name(p);
+        var session = _credentials.Read();
+        var workspace = Optional(p, "workspace") ?? session?.Workspace
+            ?? throw Fault(-32602, "invalidParams", "Choose a workspace.");
+        var source = Optional(p, "source") ?? "auto";
+        if (source is not ("auto" or "local" or "remote")) { throw Fault(-32602, "invalidParams", "Unknown request source."); }
+        SessionRegistration? local = null;
+        SessionSnapshot? snapshot = null;
+        if (source != "remote")
+        {
+            foreach (var r in _registrations().Where(r => r.Name == name))
+            {
+                if (await LocalSessions.QueryAsync(r, false, ct) is not { } s) { continue; }
+                if (local is not null) { throw Fault(-32017, "conflict", "Multiple local agents match this tunnel."); }
+                local = r; snapshot = s;
+            }
+        }
+        if (source == "local" && local is null) { throw Fault(-32018, "notFound", "No responsive local agent was found."); }
+        ManagementClient? client = null;
+        IdeRequest[] initial;
+        RemoteRequest[] recent = [];
+        if (local is not null)
+        {
+            initial = snapshot!.Recent.TakeLast(1000).Select(LocalRequest).ToArray();
+        }
+        else
+        {
+            session = await SessionAsync(ct);
+            client = _authentication.CreateClient(session);
+            try
+            {
+                recent = (await client.SendAsync<RemoteSearchResult>(HttpMethod.Get, SearchPath(workspace, name), null, ct)).Entries;
+                initial = recent.TakeLast(1000).Select(RemoteRequest).ToArray();
+            }
+            catch { client.Dispose(); throw; }
+        }
+        var id = "subscription-" + Guid.NewGuid().ToString("N");
+        var subscription = new Subscription(CancellationTokenSource.CreateLinkedTokenSource(_stop.Token));
+        if (!_subscriptions.TryAdd(id, subscription)) { client?.Dispose(); subscription.Stop.Dispose(); throw new InvalidOperationException(); }
+        subscription.Running = local is not null
+            ? FollowLocalAsync(id, subscription, local, snapshot!, initial)
+            : FollowRemoteAsync(id, subscription, client!, workspace, name, recent);
+        return new { subscriptionId = id, requests = initial, source = local is not null ? "local" : "remote" };
+    }
+
+    private async Task FollowLocalAsync(string id, Subscription subscription, SessionRegistration registration, SessionSnapshot initialSnapshot, IdeRequest[] initial)
+    {
+        var ct = subscription.Stop.Token;
+        var seen = initial.Select(r => r.RequestId).ToHashSet(StringComparer.Ordinal);
+        try
+        {
+            var previous = LocalConnection(initialSnapshot.State, initialSnapshot.StopReason);
+            await ConnectionAsync(id, subscription, previous.State, previous.Reason, previous.Code);
+            if (previous.State == "stopped") { return; }
+            while (true)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), _time, ct);
+                var terminal = TerminalStatusStore.Read(registration.Pipe, _time);
+                var snapshot = terminal is null ? await LocalSessions.QueryAsync(registration, false, ct) : null;
+                var current = LocalConnection(snapshot?.State ?? "Stopped", snapshot?.StopReason ?? terminal);
+                if (current != previous)
+                { await ConnectionAsync(id, subscription, current.State, current.Reason, current.Code); previous = current; }
+                if (snapshot is null) { return; }
+                var recent = snapshot.Recent.TakeLast(1000).Select(LocalRequest).ToArray();
+                foreach (var request in recent)
+                {
+                    if (seen.Add(request.RequestId)) { await EventAsync(id, subscription, "requests/event", new { subscriptionId = id, request }); }
+                }
+                seen.IntersectWith(recent.Select(r => r.RequestId));
+                if (current.State == "stopped") { return; }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is IOException or StreamJsonRpc.ConnectionLostException or ObjectDisposedException) { }
+    }
+
+    private async Task FollowRemoteAsync(string id, Subscription subscription, ManagementClient client,
+        string workspace, string name, RemoteRequest[] initial)
+    {
+        using (client)
+        {
+            var ct = subscription.Stop.Token;
+            var follower = new RequestFollower(token => client.OpenRequestStreamAsync(workspace, name, token),
+                async token => (await client.SendAsync<RemoteSearchResult>(HttpMethod.Get, SearchPath(workspace, name), null, token)).Entries, _time);
+            follower.Seen(initial);
+            try
+            {
+                // RequestFollower callbacks are synchronous; serialize delivery through the bounded stream instead of
+                // creating an unbounded queue of pending notification tasks when the IDE stops reading stdout.
+                await follower.RunAsync(request => EventAsync(id, subscription, "requests/event", new
+                { subscriptionId = id, request = RemoteRequest(request) }).GetAwaiter().GetResult(),
+                    state => ConnectionAsync(id, subscription, state.Status.ToString().ToLowerInvariant(), state.Message).GetAwaiter().GetResult(), ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+            catch (Exception ex) when (ex is IOException or StreamJsonRpc.ConnectionLostException or ObjectDisposedException) { }
+        }
+    }
+
+    private static (string State, string? Reason, string? Code) LocalConnection(string state, GroundhogAgentStopReason? reason)
+    {
+        var safe = SafeStopReason(reason);
+        return state switch
+        {
+            "Connected" => ("live", null, null),
+            "Stopped" => ("stopped", safe.Text ?? "The local agent stopped.", safe.Code),
+            _ => ("reconnecting", "The local agent is reconnecting.", null)
+        };
+    }
+
+    private Task ConnectionAsync(string id, Subscription subscription, string state, string? reason = null, string? reasonCode = null) =>
+        EventAsync(id, subscription, "connection/event", new { subscriptionId = id, state, reason, reasonCode });
+
+    private async Task EventAsync(string id, Subscription subscription, string method, object parameters)
+    {
+        await subscription.Events.WaitAsync(subscription.Stop.Token);
+        try
+        {
+            if (_subscriptions.ContainsKey(id))
+            {
+                // Cancel a blocked writer on disconnect/unsubscribe. There is only one write in flight per follower.
+                await Notify(method, parameters).WaitAsync(subscription.Stop.Token);
+            }
+        }
+        finally { subscription.Events.Release(); }
+    }
+
+    private async Task<object> UnsubscribeAsync(string id)
+    {
+        if (!_subscriptions.TryRemove(id, out var subscription)) { return Empty; }
+        await subscription.Stop.CancelAsync();
+        try { await subscription.Running; }
+        catch (OperationCanceledException) { }
+        await subscription.Events.WaitAsync();
+        subscription.Events.Release();
+        subscription.Events.Dispose(); subscription.Stop.Dispose();
+        _subscriptionSlots.Release();
+        return Empty;
+    }
+
+    private static string SearchPath(string workspace, string name) =>
+        $"/api/w/{Uri.EscapeDataString(workspace)}/requests?tunnel={Uri.EscapeDataString(name)}&limit=200";
+    private static IdeRequest LocalRequest(RequestRecord request) => new(request.RequestId ?? StableId(request.Time, request.Method, request.Path,
+        request.Status, request.DurationMs), request.Time, request.Method, request.Path, request.Status, request.DurationMs, "local");
+    private static IdeRequest RemoteRequest(RemoteRequest request) => new(request.RequestId
+        ?? StableId(request.Completed, request.Method, request.Path, request.StatusCode, request.DurationMs),
+        request.Completed, request.Method, request.Path, request.StatusCode, request.DurationMs, "remote");
+    private static string StableId(DateTimeOffset time, string method, string path, int status, double duration) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { time, method, path, status, duration }))));
+}

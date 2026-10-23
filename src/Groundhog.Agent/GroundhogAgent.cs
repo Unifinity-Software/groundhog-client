@@ -51,6 +51,7 @@ public sealed class GroundhogAgent
     private readonly AgentMetrics _metrics;
     private readonly StatusFeed _status = new();
     private int _running;
+    internal SessionTelemetry Telemetry { get; }
 
     /// <summary>Creates an agent. Nothing connects until <see cref="RunAsync"/>.</summary>
     /// <param name="options">The settings. They're copied, so later changes to the object have no effect.</param>
@@ -61,6 +62,7 @@ public sealed class GroundhogAgent
         options.Validate();
         _options = new GroundhogAgentOptions
         {
+            RegisterLocalSession = options.RegisterLocalSession,
             RelayAddress = options.RelayAddress,
             TunnelName = options.TunnelName,
             Credential = options.Credential,
@@ -79,6 +81,8 @@ public sealed class GroundhogAgent
         };
         _logger = (options.LoggerFactory ?? NullLoggerFactory.Instance).CreateLogger("Groundhog.Agent");
         _metrics = AgentMetrics.Create(options.MeterFactory);
+        Telemetry = new(_options.TunnelName!, _options.LocalTarget!, _options.TimeProvider,
+            _options.Client.PackageId switch { "Groundhog.Cli" => "Cli", "Groundhog.Aspire.Hosting" => "Aspire", _ => "Agent" });
     }
 
     private static byte[]? ReadLocalCertificate(string? file)
@@ -162,13 +166,15 @@ public sealed class GroundhogAgent
                 _logger.LogWarning("Local TLS certificate validation is disabled for the loopback target.");
             }
 
-            var run = new AgentRun(_options, _status.Publish, OnRequestCompleted, _metrics, cancellationToken);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            await using var session = _options.RegisterLocalSession ? new LocalSessions(Telemetry, stop, _options.Credential as TunnelKeyCredential) : null;
+            var run = new AgentRun(_options, PublishStatus, OnRequestCompleted, _metrics, stop.Token);
             return await run.RunAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             // A bug rather than a network problem. Still end every status stream, then let the caller see it.
-            _status.Publish(new GroundhogAgentStatus(GroundhogAgentState.Stopped, Reason: $"The agent failed: {ex.Message}"));
+            PublishStatus(new GroundhogAgentStatus(GroundhogAgentState.Stopped, Reason: $"The agent failed: {ex.Message}"));
             throw;
         }
         finally
@@ -177,8 +183,15 @@ public sealed class GroundhogAgent
         }
     }
 
+    private void PublishStatus(GroundhogAgentStatus status)
+    {
+        Telemetry.OnStatus(status);
+        _status.Publish(status);
+    }
+
     private void OnRequestCompleted(GroundhogCompletedRequest request)
     {
+        Telemetry.OnRequest(request);
         _metrics.RequestCompleted(_options.TunnelName!, request);
         if (_options.OnRequestCompleted is not { } callback)
         {

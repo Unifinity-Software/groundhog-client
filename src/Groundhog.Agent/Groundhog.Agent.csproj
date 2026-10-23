@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Groundhog.Agent.Tests" />
+    <InternalsVisibleTo Include="Groundhog.Cli" />
+    <InternalsVisibleTo Include="Groundhog.Cli.Tests" />
   </ItemGroup>
 
 </Project>

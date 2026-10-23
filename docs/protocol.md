@@ -174,7 +174,9 @@ the relay's own address and never forwarded.
 This additive HTTPS API does not change hosting protocol version 1. Older relays can host tunnels without
 supporting CLI login. Management endpoints exist only on the relay's own host, never on visitor tunnel hosts.
 
-1. `POST /api/cli/device` (anonymous, empty JSON object) returns `deviceCode` (32 random bytes in canonical base64url),
+1. `POST /api/cli/device` (anonymous JSON object) accepts optional `clientName`, plain display text up to 128 characters,
+   for example `Groundhog CLI 1.3.0-preview.1` or `Groundhog for Visual Studio 0.1.0`. Older clients may send `{}`.
+   The relay treats this label as untrusted text and escapes it in browser/device listings. It returns `deviceCode` (32 random bytes in canonical base64url),
    `userCode` (12 uppercase hex characters), `verificationUri`, `expiresIn: 600` and `interval: 5`.
    The CLI opens the same-origin verification URL and displays the code. Neither code grants API access.
 2. `GET /cli-login?code=<userCode>` requires browser sign-in and shows an explicit approval page with the code.
@@ -188,8 +190,30 @@ supporting CLI login. Management endpoints exist only on the relay's own host, n
    and action permissions are checked on every request. CLI credentials cannot authorize `/api/platform`.
    A valid explicit CLI credential uses no browser cookies and does not require browser antiforgery tokens.
    Invalid or expired credentials return 401; inaccessible workspaces return 404 without exposing their existence.
-5. `POST /api/cli/logout` with that credential revokes it and returns 204. Expiry is absolute at eight hours;
-   no refresh token is issued. Login replaces the CLI's saved local session.
+5. Older relays issue an eight-hour access token without renewal. An additive refresh-capable relay advertises
+   `"refreshToken"` in the `capabilities` string array returned by `GET /api/service-info`. Its approved device grant
+   also includes `refreshToken`. Clients require both signals before enabling refresh.
+6. `POST /api/cli/refresh` with `{"refreshToken":"<secret>"}` returns `accessToken`, `refreshToken` and
+   `expiresIn: 28800`. Each refresh rotates the refresh token and invalidates its predecessor; reusing a predecessor
+   revokes the chain. The relay applies sliding and absolute refresh expiry and account eligibility checks. The
+   expected defaults are 30 days since last use and 90 days since sign-in; relay settings may shorten them.
+7. `POST /api/cli/logout` with the access credential revokes the session and returns 204. Refresh-capable clients
+   also include `{"refreshToken":"<secret>"}` so the whole refresh chain can be revoked. Login replaces the CLI's
+   saved local session. Logout always removes the client's local credentials and saved tunnel keys. Clients treat
+   HTTP 401 as already signed out and report successful logout; other remote failures remain visible as errors.
+
+Refresh is an optional additive contract; a relay that omits its capability retains the fixed eight-hour session.
+The client refreshes before a management call when fewer than five minutes remain, and on a 401 it refreshes and
+retries at most once. A current-user credential-file lock serializes refresh and credential updates across CLI,
+IDE and background processes. Each waiter reads the credential again after acquiring the lock, so it uses another
+process's rotated successor rather than replaying an old refresh token. Access and refresh tokens share the existing
+protected credential store and never enter project files, session discovery, IDE messages or logs.
+
+The IDE backend retains its authentication and remote-update loops after a management/refresh failure or client
+timeout. A rejected refresh reports expired authentication; signing in again restores updates in the existing backend
+process. Transient failures retain the normal polling/reconnect intervals, and EOF cancels the loops cleanly.
+Cancelling an open workspace event stream prevents another connection attempt; shutdown does not wait for another
+server event or for the caller to close its stdout reader.
 
 Credentials and polling secrets are never placed in URLs. Storage holds only their SHA-256 hashes, expiry,
 and the approved identity claims. Authorization records are global authentication infrastructure; all tunnel,
@@ -235,3 +259,26 @@ workspace."
   control back to agents.
 - `POST …/api-keys` with `{"name":"<label>"}` returns `{"id","name","created","key"}`; the plaintext `key` is
   shown once. `DELETE …/api-keys/<id>` revokes one.
+
+## IDE integrations
+
+The local CLI-to-IDE JSON-RPC contract is versioned separately in [IDE backend protocol](ide-protocol.md).
+
+Local completed-request telemetry may include the relay's validated `X-Groundhog-Request-Id`. This opaque identifier
+links a request in an IDE's local inspector to the relay's captured detail; it exposes no bodies, headers or credentials.
+IDE detail uses the existing request-detail and capture-body management endpoints, applies safe projections and
+redaction, and replays only to explicitly approved loopback targets. See the IDE contract for frame limits and fields.
+
+Local session telemetry includes the structured agent stop enum. IDE projections map that enum to fixed safe codes
+and text instead of forwarding raw reasons. For an IDE that observed a session before it exited, a separate private
+terminal marker preserves the enum and UTC timestamp under the exact random pipe identity for five minutes.
+It contains no names, targets, credentials or traffic, is written atomically before pipe shutdown, and is excluded from
+live discovery. Writes prune expired markers and retain at most 64; the IDE bounds its observed identities to 256.
+See the IDE contract for state transitions and terminal notice behavior.
+
+On Unix, the current-user local session pipe keeps its listener alive for the lifetime of the agent. Each bounded request
+uses a separate accepted connection, so closing one client does not discard queued status clients. Windows keeps its
+per-request handle lifecycle; both platforms retain the same two-second request deadline, including response I/O.
+
+The IDE stdio reader accepts exactly one optional UTF-8 preamble at stream start for .NET Framework process wrappers.
+All frame headers remain ASCII and retain their 8 KiB bound; repeated, malformed or midstream preambles are rejected.

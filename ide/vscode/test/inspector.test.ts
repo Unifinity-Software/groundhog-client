@@ -1,0 +1,61 @@
+import { JSDOM } from 'jsdom';
+import { afterEach, expect, it, vi } from 'vitest';
+import { matches, RequestModel, RequestRow } from '../../webview/src/model';
+import { SubscriptionBuffer } from '../src/subscription';
+import { DetailSelection } from '../src/detailSelection';
+import type { RequestDetail } from '../src/protocol';
+
+const row: RequestRow = { requestId: '1', completed: '2026-10-22T12:00:00Z', method: 'POST', path: '/webhooks', statusCode: 201, durationMs: 12, source: 'local' };
+afterEach(() => vi.unstubAllGlobals());
+it('preserves early subscription notifications and bounds unrelated pending traffic', () => {
+  const buffer = new SubscriptionBuffer();
+  for (let i = 0; i < 1100; i++) buffer.receive({ type: 'request', value: { subscriptionId: 'other', request: row } });
+  buffer.receive({ type: 'connection', value: { subscriptionId: 'mine', state: 'reconnecting' } });
+  expect(buffer.bind('mine')).toEqual([{ type: 'connection', value: { subscriptionId: 'mine', state: 'reconnecting' } }]);
+  expect(buffer.receive({ type: 'request', value: { subscriptionId: 'other', request: row } })).toEqual([]);
+});
+it('caps at 1000, deduplicates reconnect backfill and filters method/status/path', () => {
+  const model = new RequestModel(); model.add(Array.from({ length: 1100 }, (_, i) => ({ ...row, requestId: String(i), completed: new Date(Date.parse(row.completed) + i * 1000).toISOString() })));
+  expect(model.rows).toHaveLength(1000); const newest = model.rows[0]; model.add([newest]); expect(model.rows).toHaveLength(1000);
+  expect(matches(row, { method: 'POST', status: '2', path: 'HOOK' })).toBe(true);
+  expect(matches(row, { method: 'GET', status: '', path: '' })).toBe(false);
+  expect(matches(row, { method: '', status: '5', path: '' })).toBe(false);
+});
+it('keeps detail and action IDs together when responses and target discovery finish out of order', async () => {
+  const detail = (id: string): RequestDetail => ({ ...row, requestId: id, headers: {}, body: id, truncated: false, captureBodies: false, canCaptureBodies: false });
+  let finishFirst!: (detail: RequestDetail) => void;
+  const load = vi.fn((id: string) => id === 'a' ? new Promise<RequestDetail>(resolve => { finishFirst = resolve; }) : Promise.resolve(detail(id)));
+  const selection = new DetailSelection(load, async () => 'http://localhost:5173');
+  const first = selection.select('a'); await selection.select('b'); finishFirst(detail('a')); expect(await first).toBeUndefined();
+  expect(selection.displayed('b').body).toBe('b'); expect(() => selection.displayed('a')).toThrow('changed');
+  let finishTarget!: (target: string) => void;
+  const target = vi.fn().mockReturnValueOnce(new Promise<string>(resolve => { finishTarget = resolve; })).mockResolvedValue('http://localhost:6000');
+  const delayed = new DetailSelection(async id => detail(id), target);
+  const old = delayed.select('a'); await Promise.resolve(); await delayed.select('b'); finishTarget('http://localhost:5000'); await old;
+  expect(delayed.value).toMatchObject({ detail: { requestId: 'b' }, target: 'http://localhost:6000' });
+  delayed.dispose(); expect(() => delayed.displayed('b')).toThrow('changed');
+});
+it('webview smoke renders safely, filters, freezes display and resumes buffered traffic', async () => {
+  const dom = new JSDOM('<main id="app"></main>');
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const postMessage = vi.fn(); vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage }));
+  await import('../../webview/src/inspector.js');
+  expect(postMessage).toHaveBeenCalledWith({ type: 'ready' });
+  const send = (data: unknown) => dom.window.dispatchEvent(new dom.window.MessageEvent('message', { data }));
+  send({ type: 'requests', requests: [{ ...row, path: '<script>bad()</script>' }] });
+  expect(dom.window.document.querySelector('tbody')!.textContent).toContain('<script>bad()</script>'); expect(dom.window.document.querySelector('tbody script')).toBeNull();
+  dom.window.document.getElementById('pause')!.click(); send({ type: 'request', request: { ...row, requestId: '2' } }); expect(dom.window.document.querySelectorAll('tbody tr')).toHaveLength(1);
+  dom.window.document.getElementById('pause')!.click(); expect(dom.window.document.querySelectorAll('tbody tr')).toHaveLength(2);
+  const method = dom.window.document.getElementById('method') as HTMLSelectElement; method.value = 'GET'; method.dispatchEvent(new dom.window.Event('input')); expect(dom.window.document.querySelectorAll('tbody tr')).toHaveLength(0);
+  send({ type: 'connection', state: 'reconnecting' }); expect(dom.window.document.getElementById('source')!.textContent).toBe('Reconnecting…');
+  send({ type: 'detail', detail: { requestId: '1', method: 'POST', path: '/webhooks', headers: {}, body: 'captured', truncated: true, captureBodies: false, canCaptureBodies: false } });
+  expect((dom.window.document.getElementById('replay') as HTMLButtonElement).disabled).toBe(true);
+  expect((dom.window.document.getElementById('capture') as HTMLInputElement).disabled).toBe(true);
+  dom.window.document.getElementById('curl')!.click(); expect(postMessage).toHaveBeenLastCalledWith({ type: 'curl', requestId: '1', target: 'http://localhost:5173', headers: '{}', body: 'captured' });
+  await import('../../webview/src/access.js');
+  send({ type: 'access', access: { default: { allow: ['members'] }, rules: [{ path: '/hooks', allow: ['anyone'] }], ipRanges: ['203.0.113.0/24'], managedBy: 'dashboard', apiKeys: [{ id: 'key-1', name: '<script>key label</script>', created: row.completed }] } });
+  expect(dom.window.document.getElementById('keys')!.textContent).toContain('<script>key label</script>'); expect(dom.window.document.querySelector('#keys script')).toBeNull();
+  dom.window.document.getElementById('policy')!.dispatchEvent(new dom.window.Event('submit', { cancelable: true }));
+  expect(postMessage).toHaveBeenLastCalledWith({ type: 'save', default: { allow: ['members'] }, rules: [{ path: '/hooks', allow: ['anyone'] }], ipRanges: ['203.0.113.0/24'] });
+  dom.window.close();
+});

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="stdidcmd.h" /><Extern href="vsshlids.h" />
+  <Commands package="guidGroundhogPackage">
+    <Groups><Group guid="guidGroundhogCommands" id="GroundhogViewGroup" priority="0x0600"><Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_VIEW" /></Group></Groups>
+    <Buttons><Button guid="guidGroundhogCommands" id="ShowGroundhog" priority="0x0100" type="Button"><Parent guid="guidGroundhogCommands" id="GroundhogViewGroup" /><Strings><ButtonText>Groundhog Tunnels</ButtonText></Strings></Button></Buttons>
+  </Commands>
+  <Symbols>
+    <GuidSymbol name="guidGroundhogPackage" value="{5d817eb8-cc73-4807-98e4-35ad34ac0db6}" />
+    <GuidSymbol name="guidGroundhogCommands" value="{f5e29c41-0d66-4102-b45c-c9c4ff55d9a1}"><IDSymbol name="GroundhogViewGroup" value="0x1020" /><IDSymbol name="ShowGroundhog" value="0x0100" /></GuidSymbol>
+  </Symbols>
+</CommandTable>

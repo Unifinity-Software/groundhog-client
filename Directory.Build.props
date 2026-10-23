@@ -20,8 +20,8 @@
     the organisation-string guard (eng/check-org-strings.sh) allows exactly these elements.
   -->
   <PropertyGroup>
-    <VersionPrefix>1.2.0</VersionPrefix>
-    <VersionSuffix></VersionSuffix>
+    <VersionPrefix>1.3.0</VersionPrefix>
+    <VersionSuffix>preview.1</VersionSuffix>
     <Authors>Unifinity Software Corporation</Authors>
     <Company>Unifinity Software Corporation</Company>
     <Copyright>Copyright (c) Unifinity Software Corporation</Copyright>

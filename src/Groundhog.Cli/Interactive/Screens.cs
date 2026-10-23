@@ -1,3 +1,4 @@
+using Groundhog.Agent;
 using Groundhog.Cli.Views;
 using Groundhog.Protocol;
 using Spectre.Console;
@@ -855,7 +856,10 @@ internal sealed class AgentsScreen : Screen
     }
 
     internal static Screen StopConfirmation(InteractiveApp app, LocalAgent agent, bool closeDetail) =>
-        new ConfirmScreen($"Stop {agent.Snapshot.Name}?",
+        agent.Registration.Host == "Aspire"
+            ? new BusyScreen("Managed by Aspire", _ => Task.FromResult(new CommandResult(1, "",
+                LocalSessions.StopRefusal(agent.Registration.ProcessName, agent.Registration.ProcessId))))
+            : new ConfirmScreen($"Stop {agent.Snapshot.Name}?",
             "The local agent disconnects and its public address stops forwarding to this machine until you host it again.",
             "Stop agent", danger: true,
             () => Task.FromResult(Nav.Replace(new BusyScreen($"Stopping {agent.Snapshot.Name}…", async token =>

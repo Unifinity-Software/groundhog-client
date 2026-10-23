@@ -129,7 +129,11 @@ internal sealed class LocalForwarder : IDisposable
             status,
             _timeProvider.GetElapsedTime(started),
             isWebSocket,
-            groundhogError));
+            groundhogError)
+        {
+            RequestId = context.Request.Headers[GroundhogHeaders.RequestId].ToString() is { Length: 32 } requestId
+                && requestId.All(char.IsAsciiHexDigit) ? requestId : null
+        });
     }
 
     public void Dispose()

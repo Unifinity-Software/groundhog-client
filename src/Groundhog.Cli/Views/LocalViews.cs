@@ -25,7 +25,7 @@ internal static class LocalViews
         {
             var s = agents[i].Snapshot;
             var pointer = i == selected ? $"[bold {Theme.SignalTag}]▶[/]" : full ? " " : Theme.Dot(s.State);
-            var name = new Markup(i == selected ? $"[bold {Theme.SignalTag}]{Theme.Safe(s.Name)}[/]" : Theme.Strong(Theme.Safe(s.Name)))
+            var name = new Markup(i == selected ? $"[bold {Theme.SignalTag}]{Theme.Safe(s.Name + (s.Host == "Aspire" ? " (Aspire)" : ""))}[/]" : Theme.Strong(Theme.Safe(s.Name + (s.Host == "Aspire" ? " (Aspire)" : ""))))
             {
                 Overflow = Overflow.Ellipsis,
             };

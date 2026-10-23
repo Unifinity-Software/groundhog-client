@@ -1,9 +1,12 @@
 <Project>
   <PropertyGroup>
+    <ClientPackageVersion Condition="'$(ClientPackageVersion)' == ''">1.0.0</ClientPackageVersion>
+  </PropertyGroup>
+  <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.6.1" />
-    <PackageVersion Include="Groundhog.Aspire.Hosting" Version="1.0.0" />
+    <PackageVersion Include="Groundhog.Aspire.Hosting" Version="$(ClientPackageVersion)" />
   </ItemGroup>
 </Project>

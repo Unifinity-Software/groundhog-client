@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Id="Groundhog.VisualStudio" Version="0.1.0" Language="en-US" Publisher="unifinity" />
+    <DisplayName>Groundhog Tunnels</DisplayName>
+    <Description xml:space="preserve">Hosted HTTPS tunnels and request inspection beside your app.</Description>
+    <License>LICENSE</License>
+  </Metadata>
+  <Installation ExtensionType="VSSDK+VisualStudio.Extensibility">
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14,19.0)"><ProductArchitecture>amd64</ProductArchitecture></InstallationTarget>
+  </Installation>
+  <Prerequisites><Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.14,)" DisplayName="Visual Studio core editor" /></Prerequisites>
+  <Assets><Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="Groundhog.VisualStudio" Path="|Groundhog.VisualStudio;PkgdefProjectOutputGroup|" /></Assets>
+</PackageManifest>

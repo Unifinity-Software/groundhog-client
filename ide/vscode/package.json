@@ -1,0 +1,323 @@
+{
+  "name": "groundhog",
+  "displayName": "Groundhog",
+  "description": "Hosted HTTPS tunnels and request inspection beside your app.",
+  "version": "0.1.0",
+  "publisher": "unifinity",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Unifinity-Software/groundhog-client"
+  },
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.cjs",
+  "groundhog": {
+    "minimumCliVersion": "1.3.0-preview.1",
+    "bundledCliVersion": "1.3.0-preview.1",
+    "preRelease": true
+  },
+  "activationEvents": [
+    "onView:groundhog.tunnels",
+    "onMcpServerDefinitionProvider:groundhog.mcp"
+  ],
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "node scripts/lint.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:smoke": "node test/smoke/run.cjs",
+    "package": "vsce package --no-dependencies --out groundhog.vsix",
+    "vscode:prepublish": "npm run build"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "groundhog.signIn",
+        "title": "Groundhog: Sign in"
+      },
+      {
+        "command": "groundhog.signOut",
+        "title": "Groundhog: Sign out"
+      },
+      {
+        "command": "groundhog.installCli",
+        "title": "Groundhog: Install Groundhog CLI"
+      },
+      {
+        "command": "groundhog.refresh",
+        "title": "Groundhog: Refresh tunnels",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "groundhog.switchWorkspace",
+        "title": "Groundhog: Switch workspace",
+        "icon": "$(organization)"
+      },
+      {
+        "command": "groundhog.create",
+        "title": "Groundhog: Create tunnel",
+        "icon": "$(add)"
+      },
+      {
+        "command": "groundhog.start",
+        "title": "Groundhog: Start hosting"
+      },
+      {
+        "command": "groundhog.stop",
+        "title": "Groundhog: Stop hosting"
+      },
+      {
+        "command": "groundhog.restart",
+        "title": "Groundhog: Restart hosting"
+      },
+      {
+        "command": "groundhog.open",
+        "title": "Groundhog: Open in browser"
+      },
+      {
+        "command": "groundhog.copy",
+        "title": "Groundhog: Copy URL"
+      },
+      {
+        "command": "groundhog.rename",
+        "title": "Groundhog: Rename tunnel"
+      },
+      {
+        "command": "groundhog.delete",
+        "title": "Groundhog: Delete tunnel"
+      },
+      {
+        "command": "groundhog.enterKey",
+        "title": "Groundhog: Enter connection key"
+      },
+      {
+        "command": "groundhog.requests",
+        "title": "Groundhog: Inspect requests"
+      },
+      {
+        "command": "groundhog.rotateKey",
+        "title": "Groundhog: Rotate connection key"
+      },
+      {
+        "command": "groundhog.visitorAccess",
+        "title": "Groundhog: Edit visitor access"
+      },
+      {
+        "command": "groundhog.runDiagnostics",
+        "title": "Groundhog: Run diagnostics"
+      },
+      {
+        "command": "groundhog.configureLocalCa",
+        "title": "Groundhog: Use local CA"
+      },
+      {
+        "command": "groundhog.startApp",
+        "title": "Groundhog: Start my app"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "groundhog",
+          "title": "Groundhog",
+          "icon": "media/groundhog.svg"
+        }
+      ]
+    },
+    "views": {
+      "groundhog": [
+        {
+          "id": "groundhog.tunnels",
+          "name": "Tunnels"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "groundhog.tunnels",
+        "contents": "Expose your local app with a stable HTTPS URL.\n[Sign in](command:groundhog.signIn)\n[Install Groundhog CLI](command:groundhog.installCli)",
+        "when": "!groundhog.signedIn"
+      }
+    ],
+    "configuration": {
+      "title": "Groundhog",
+      "properties": {
+        "groundhog.cliPath": {
+          "type": "string",
+          "default": "groundhog",
+          "scope": "machine-overridable",
+          "description": "Path to the Groundhog CLI on the machine running this workspace."
+        },
+        "groundhog.useMockBackend": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use scripted demo data. Available only in extension development mode."
+        },
+        "groundhog.debugConfigurations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Debug configuration names that start hosting. Empty means all configurations."
+        },
+        "groundhog.stopHostingAfterDebugging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Stop agents started by debugging after the last related session ends. Existing agents are preserved."
+        },
+        "groundhog.notifyOnDisconnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when a tunnel disconnects."
+        },
+        "groundhog.notifyOn5xx": {
+          "type": "boolean",
+          "default": false,
+          "description": "Notify on the first server error after five quiet minutes."
+        },
+        "groundhog.enableMcp": {
+          "type": "boolean",
+          "default": true,
+          "description": "Offer the Groundhog MCP server to VS Code chat in trusted workspaces. Mutations remain subject to MCP confirmation."
+        }
+      }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "groundhog.switchWorkspace",
+          "when": "view == groundhog.tunnels && groundhog.signedIn",
+          "group": "navigation"
+        },
+        {
+          "command": "groundhog.create",
+          "when": "view == groundhog.tunnels && groundhog.signedIn",
+          "group": "navigation"
+        },
+        {
+          "command": "groundhog.refresh",
+          "when": "view == groundhog.tunnels",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "groundhog.start",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.stop",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/ && viewItem =~ /local/ && !(viewItem =~ /aspire/)"
+        },
+        {
+          "command": "groundhog.restart",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/ && viewItem =~ /local/ && !(viewItem =~ /aspire/)"
+        },
+        {
+          "command": "groundhog.open",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.copy",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.rename",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/ && viewItem =~ /rename/"
+        },
+        {
+          "command": "groundhog.delete",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/ && viewItem =~ /delete/"
+        },
+        {
+          "command": "groundhog.enterKey",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.requests",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.rotateKey",
+          "when": "view == groundhog.tunnels && viewItem =~ /local/ && !(viewItem =~ /aspire/)"
+        },
+        {
+          "command": "groundhog.visitorAccess",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        },
+        {
+          "command": "groundhog.runDiagnostics",
+          "when": "view == groundhog.tunnels && viewItem =~ /^tunnel/"
+        }
+      ]
+    },
+    "authentication": [
+      {
+        "id": "groundhog",
+        "label": "Groundhog"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "groundhog.mcp",
+        "label": "Groundhog"
+      }
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^26.6.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/semver": "^7.8.0",
+    "@types/vscode": "^1.101.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.13.0",
+    "jsdom": "^30.1.3",
+    "ovsx": "^1.3.0",
+    "playwright-core": "^1.64.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^5.0.5",
+    "yaml": "^2.9.1"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "semver": "^7.8.5",
+    "vscode-jsonrpc": "^10.0.0"
+  },
+  "icon": "media/icon.png",
+  "homepage": "https://groundhog.unifinity.com/docs",
+  "bugs": {
+    "url": "https://github.com/Unifinity-Software/groundhog-client/issues"
+  },
+  "keywords": [
+    "tunnels",
+    "webhooks",
+    "https",
+    "request inspector",
+    "dev containers"
+  ],
+  "galleryBanner": {
+    "color": "#101010",
+    "theme": "dark"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Groundhog starts local processes and accesses project targets; trust the workspace to enable it."
+    }
+  }
+}

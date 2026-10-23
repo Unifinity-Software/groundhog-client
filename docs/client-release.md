@@ -94,3 +94,57 @@ public Agent package. Protocol changes are client-first:
 publish the client PR, then submit the server package-version bump and run the real-agent integration suite.
 Stable promotion requires accessible public source, documentation and symbols, successful exact-version
 integration tests and an owner-reviewed go/no-go.
+## VS Code extension releases
+
+The extension is a separate release from the .NET packages. Publish the exact supporting `Groundhog.Cli`
+versions listed as `minimumCliVersion` and `bundledCliVersion` in `ide/vscode/package.json` first. The
+`release-vscode.yml` preflight verifies those exact versions exist on NuGet, verifies the tag matches the
+extension version, and requires a merged master PR whose latest Build run passed. A generic development
+VSIX still requires the global CLI; platform release VSIX files include their backend.
+
+Owner setup: create the `unifinity` Marketplace publisher and Open VSX namespace and accept Open VSX's publisher
+agreement. Add a Marketplace publishing token as the `VSCE_PAT` secret in GitHub environment `vscode`;
+the workflow defaults to this mode and fails before publication if the token is missing. Grant only Marketplace
+Manage and keep the publishing identity's membership limited to the intended publisher. Both VS Code and native
+Visual Studio release workflows use this same `VSCE_PAT` secret. Keep environment protections in place and never
+print or commit tokens.
+
+VSCE 4 includes `--oidc`, but Marketplace's trusted-publishing backend is not available as of October 22, 2026.
+The [maintainer's rollout update](https://github.com/microsoft/vscode-vsce/issues/1275#issuecomment-5990771209)
+tracks availability. Once the publisher's trusted policy can be configured for this repository and
+`.github/workflows/release-vscode.yml`, set the GitHub Actions `vscode` environment variable
+`MARKETPLACE_AUTH` to `oidc` (the workflow reads `vars.MARKETPLACE_AUTH`) to opt in.
+The job has `id-token: write`; an OIDC failure stops publishing without falling back to a token.
+
+For the first Open VSX release, add an `OVSX_PAT` secret to the GitHub `vscode` environment and publish with
+ordinary token authentication. A namespace contributor can publish while an ownership claim is pending; the
+extension remains unverified until ownership is granted. Trusted publishing requires namespace ownership, a signed
+Publisher Agreement and at least one active extension version. After those prerequisites are satisfied, register this repository and workflow for the extension
+`unifinity.groundhog`, pin the `vscode` environment, and remove `OVSX_PAT`; subsequent runs use
+`--trusted-publishing`. Keep at least one version active so token exchange remains available.
+See the [Open VSX prerequisites](https://github.com/eclipse-openvsx/openvsx/wiki/Trusted-Publishing#before-you-start),
+the official [Marketplace CLI](https://github.com/microsoft/vscode-vsce) and
+[Open VSX CLI](https://github.com/eclipse/openvsx/tree/master/cli) for publisher configuration.
+
+Before tagging, run the full client checks and extension lint, type checking, unit tests, production build,
+VSIX packaging and Electron smoke locally. Update the extension version and `groundhog.preRelease` marker,
+and keep the minimum and bundled CLI versions accurate. Push a tag such as `vscode-v0.1.0` on the tested
+master merge commit only after the owner-approved release decision. Preview packages use `--pre-release`.
+
+The release-only native matrix builds and exercises Windows x64/arm64, Linux x64/arm64, and macOS x64/arm64
+backends. Every runtime must pass version, IDE initialize/auth/EOF and read-only MCP smoke tests. Linux also
+opens the real bundled extension host. Publishing waits for all six VSIX artifacts and full validation;
+reruns safely skip already-published target versions. Normal PR CI remains one job.
+
+The supported backend profile is `eng/ide-bundle.pubxml`. It creates a compressed self-contained single-file
+application, with **trimming disabled**: existing CLI serializers and RPC dependencies need reflection, and
+attempting to trim currently fails warning-as-error validation. Do not suppress these warnings or describe
+the output as trimmed. A Windows x64 preview was measured at 50.72 MiB executable / 45.60 MiB packaged VSIX.
+
+To reproduce a native build, run `dotnet publish src/Groundhog.Cli/Groundhog.Cli.csproj -c Release -r win-x64
+-p:PublishProfileFullPath=<absolute-repo>/eng/ide-bundle.pubxml -o <task-output>`, copy `Groundhog.Cli.exe` to
+`ide/vscode/backend/groundhog.exe` (omit `.exe` on Unix), then run `node scripts/smoke-backend.cjs
+backend/groundhog.exe` from `ide/vscode`. Use `npx vsce package --no-dependencies --target win32-x64
+--pre-release` to create a platform package. The smoke script isolates its credential store and extraction
+cache and removes them afterward. Remove task build, backend and VSIX outputs after verification.
+

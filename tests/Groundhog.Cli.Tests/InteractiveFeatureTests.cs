@@ -1,3 +1,4 @@
+using Groundhog.Agent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
@@ -136,13 +137,74 @@ public sealed class InteractiveFeatureTests
 public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<TunnelFixture>
 {
     [Fact(Timeout = 30000)]
-    public async Task Real_cli_background_start_status_and_stop_use_the_saved_profile()
+    public async Task Aspire_agents_are_visible_to_cli_and_cannot_be_stopped_even_with_changed_registration_metadata()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var running = fixture.StartAgent("aspire-local-session", client: new("Groundhog.Aspire.Hosting", "1.2.0"));
+        while ((await running.NextStatusAsync()).State != GroundhogAgentState.Connected) { }
+        var registration = Assert.Single(LocalSessions.Registrations(), r => r.Name == "aspire-local-session");
+        var connection = await fixture.Relay.Tunnel("aspire-local-session").Connections.Reader.ReadAsync(ct);
+        using var response = await connection.Client.GetAsync("http://aspire-local-session.groundhog.unifinity.com/echo?secret=hidden", ct);
+        await running.NextRequestAsync();
+        foreach (var command in new[] { "ps", "status", "requests" })
+        {
+            var output = new StringWriter();
+            string[] args = command == "ps" ? [command, "--output", "json"] : [command, "aspire-local-session", "--output", "json"];
+            var commandError = new StringWriter();
+            var exit = await GroundhogCommand.RunAsync(args, _ => null, output, commandError, ct);
+            Assert.True(exit == 0, $"Local {command} exited {exit}: {commandError.ToString().Replace(fixture.Key, "[redacted]", StringComparison.Ordinal)}");
+            Assert.DoesNotContain("hidden", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains(command == "requests" ? "/echo" : "Aspire", output.ToString(), StringComparison.Ordinal);
+        }
+        var error = new StringWriter();
+        Assert.Equal(2, await GroundhogCommand.RunAsync(["stop", "aspire-local-session"], _ => null, new StringWriter(), error, ct));
+        Assert.Contains(registration.ProcessName!, error.ToString(), StringComparison.Ordinal);
+        // A stale or edited registration must not let a client cancel an AppHost-owned agent.
+        await Assert.ThrowsAsync<ArgumentException>(() => LocalSessions.QueryAsync(registration with { Host = "Cli" }, true, ct));
+        Assert.False(running.Run.IsCompleted);
+        Assert.Equal("Connected", (await LocalSessions.QueryAsync(registration, false, ct))!.State);
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task Background_start_discovers_project_in_parent_and_accepts_explicit_host_options()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(Path.GetTempPath(), "groundhog-project-host-" + Guid.NewGuid().ToString("N"));
+        var nested = Path.Combine(directory, "src");
+        var home = Path.Combine(directory, "home");
+        Directory.CreateDirectory(nested);
+        File.WriteAllText(Path.Combine(directory, "groundhog.json"),
+            """{"tunnel":"project-background","target":"http://localhost:1","allow":["anyone"]}""");
+        Process? process = null;
+        try
+        {
+            var started = await CliProcess.RunAsync(["start", "--target", fixture.LocalApp.ToString(), "--relay", fixture.Relay.Address.ToString(), "--pool", "1"], home, fixture.Key, ct, nested);
+            Assert.Equal(0, started.ExitCode);
+            var status = await CliProcess.RunAsync(["status", "project-background", "--output", "json"], home, fixture.Key, ct, nested);
+            var snapshot = JsonSerializer.Deserialize<SessionSnapshot>(status.Output)!;
+            Assert.Equal(fixture.LocalApp, new Uri(snapshot.Target));
+            process = Process.GetProcessById(snapshot.ProcessId);
+        }
+        finally
+        {
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            process ??= CliProcess.BackgroundProcess(home, "project-background");
+            await CliProcess.RunAsync(["stop", "project-background"], home, fixture.Key, cleanup.Token, nested);
+            if (process is not null) { await process.WaitForExitAsync(cleanup.Token); process.Dispose(); }
+            await CliProcess.DeleteExitedDirectoryAsync(directory, cleanup.Token);
+        }
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task Real_cli_background_start_status_and_stop_use_saved_profile_and_key_when_environment_key_is_empty()
     {
         var cancellation = TestContext.Current.CancellationToken;
         var directory = Path.Combine(Path.GetTempPath(), "groundhog-background-" + Guid.NewGuid().ToString("N"));
         var store = new ProfileStore(directory);
         store.Save(new("background-smoke", fixture.LocalApp.ToString(), fixture.Relay.Address.ToString()));
-        var stopped = false;
+        new CredentialStore(directory).Save(new(fixture.Relay.Address.ToString(), "unused-management-token", DateTimeOffset.UtcNow.AddHours(1),
+            "example", new() { ["example/background-smoke"] = fixture.Key }));
+        Process? process = null;
         try
         {
             var started = await RunProcessAsync(["start", "background-smoke", "--timeout", "5"]);
@@ -150,22 +212,24 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
             await fixture.Relay.Tunnel("background-smoke").Connections.Reader.ReadAsync(cancellation);
             var status = await RunProcessAsync(["status", "background-smoke", "--output", "json"]);
             Assert.Equal(0, status.ExitCode);
-            Assert.Equal("Connected", JsonSerializer.Deserialize<SessionSnapshot>(status.Output)!.State);
+            var snapshot = JsonSerializer.Deserialize<SessionSnapshot>(status.Output)!;
+            process = Process.GetProcessById(snapshot.ProcessId);
+            Assert.Equal("Connected", snapshot.State);
             Assert.DoesNotContain(fixture.Key, status.Output, StringComparison.Ordinal);
             var stop = await RunProcessAsync(["stop", "background-smoke"]);
             Assert.Equal(0, stop.ExitCode);
-            stopped = true;
         }
         finally
         {
-            if (!stopped) { await RunProcessAsync(["stop", "background-smoke"]); }
-            // The agent owns its registration file until it exits; retain this tiny temporary directory on a race.
-            if (!Directory.Exists(Path.Combine(directory, "sessions")) || !Directory.EnumerateFiles(Path.Combine(directory, "sessions")).Any())
-            { Directory.Delete(directory, true); }
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            process ??= CliProcess.BackgroundProcess(directory, "background-smoke");
+            await CliProcess.RunAsync(["stop", "background-smoke"], directory, fixture.Key, cleanup.Token);
+            if (process is not null) { await process.WaitForExitAsync(cleanup.Token); process.Dispose(); }
+            await CliProcess.DeleteExitedDirectoryAsync(directory, cleanup.Token);
         }
 
         Task<(int ExitCode, string Output)> RunProcessAsync(string[] args) =>
-            CliProcess.RunAsync(args, directory, fixture.Key, cancellation);
+            CliProcess.RunAsync(args, directory, "", cancellation);
     }
     [Fact(Timeout = 30000)]
     public async Task Another_invocation_can_query_traffic_and_stop_the_host_without_seeing_keys_or_query_strings()
@@ -199,16 +263,53 @@ public sealed class LocalSessionTests(TunnelFixture fixture) : IClassFixture<Tun
 /// <summary>Runs the real CLI in a child process with its own configuration directory.</summary>
 internal static class CliProcess
 {
+    internal static Process? BackgroundProcess(string home, string name)
+    {
+        var directory = Path.Combine(home, "sessions");
+        if (!Directory.Exists(directory)) { return null; }
+        foreach (var file in Directory.EnumerateFiles(directory, "groundhog-*.json"))
+        {
+            SessionRegistration? registration;
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                registration = JsonSerializer.Deserialize<SessionRegistration>(stream);
+            }
+            catch (IOException) { continue; }
+            if (registration is not { Host: "Cli" } || registration.Name != name) { continue; }
+            try { return Process.GetProcessById(registration.ProcessId); }
+            catch (ArgumentException) { /* The owned agent already exited. */ }
+        }
+        return null;
+    }
+
+    // Windows can briefly retain a shell-launched process's working-directory handle after the exact
+    // agent has signaled exit. Retry the actual deletion condition; never skip cleanup or wait unboundedly.
+    internal static async Task DeleteExitedDirectoryAsync(string directory, CancellationToken cancellation)
+    {
+        var full = Path.GetFullPath(directory);
+        if (Path.GetDirectoryName(full) != Path.TrimEndingDirectorySeparator(Path.GetTempPath())
+            || !Path.GetFileName(full).StartsWith("groundhog-", StringComparison.Ordinal))
+        { throw new ArgumentException("Cleanup must stay in the test-owned temporary directory.", nameof(directory)); }
+        while (true)
+        {
+            try { Directory.Delete(full, true); return; }
+            catch (IOException) when (!cancellation.IsCancellationRequested)
+            { await Task.Delay(20, cancellation); }
+        }
+    }
+
     /// <summary>
     /// Runs <c>groundhog</c> (the packed tool when <c>GROUNDHOG_CLI_SMOKE_PATH</c> is set) and returns its exit code
     /// with stdout and stderr combined.
     /// </summary>
     internal static async Task<(int ExitCode, string Output)> RunAsync(
-        string[] args, string home, string? key, CancellationToken cancellation)
+        string[] args, string home, string? key, CancellationToken cancellation, string? workingDirectory = null)
     {
         var executable = Environment.GetEnvironmentVariable("GROUNDHOG_CLI_SMOKE_PATH");
         var start = new ProcessStartInfo(executable ?? "dotnet")
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        if (workingDirectory is not null) { start.WorkingDirectory = workingDirectory; }
         if (executable is null) { start.ArgumentList.Add(typeof(GroundhogCommand).Assembly.Location); }
         foreach (var arg in args) { start.ArgumentList.Add(arg); }
         start.Environment["GROUNDHOG_HOME"] = home;
@@ -221,6 +322,6 @@ internal static class CliProcess
             await process.WaitForExitAsync(cancellation);
             return (process.ExitCode, await stdout + await stderr);
         }
-        finally { if (!process.HasExited) { process.Kill(entireProcessTree: true); } }
+        finally { if (!process.HasExited) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(CancellationToken.None); } }
     }
 }

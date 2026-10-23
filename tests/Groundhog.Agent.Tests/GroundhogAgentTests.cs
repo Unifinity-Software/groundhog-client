@@ -43,6 +43,7 @@ public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFi
             VersionPolicy = HttpVersionPolicy.RequestVersionExact,
         };
         request.Headers.Add("X-Forwarded-Host", "host-check.groundhog.unifinity.com");
+        request.Headers.Add(GroundhogHeaders.RequestId, "0123456789abcdef0123456789abcdef");
         using var response = await relay.Client.SendAsync(request, ct);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -52,6 +53,7 @@ public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFi
 
         var record = await agent.NextRequestAsync();
         Assert.Equal(("GET", "/echo", 200, false), (record.Method, record.Path, record.StatusCode, record.IsWebSocket));
+        Assert.Equal("0123456789abcdef0123456789abcdef", record.RequestId);
     }
 
     [Fact(Timeout = 30_000)]

@@ -29,11 +29,50 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ide/vscode/package-lock.json
+      - name: Extension checks and package
+        working-directory: ide/vscode
+        run: |
+          npm ci --no-audit --no-fund
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run package
+      - uses: actions/upload-artifact@v6
+        with:
+          name: groundhog-vscode
+          path: ide/vscode/groundhog.vsix
+      - name: Extension host smoke
+        working-directory: ide/vscode
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a npm run test:smoke
+          else
+            npm run test:smoke
+          fi
+      - name: Extension failure logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: groundhog-extension-failure-logs
+          path: |
+            ide/vscode/.vscode-test/user-data/logs
+            ide/vscode/test-results
+          if-no-files-found: ignore
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - name: Build
         run: dotnet build Groundhog.Client.slnx -c Release
+      - name: Visual Studio package check
+        if: runner.os == 'Windows'
+        run: |
+          dotnet build ide/visualstudio/Groundhog.VisualStudio.csproj -c Release
+          powershell.exe -NoProfile -File ide/visualstudio/Verify-Vsix.ps1
       - name: Full client tests
         run: dotnet test --solution Groundhog.Client.slnx -c Release --no-build
       - name: Pack
@@ -44,7 +83,7 @@ jobs:
           source="$GITHUB_WORKSPACE/artifacts/packages"
           cache="$RUNNER_TEMP/groundhog-consumer-packages"
           dotnet build samples/AspireQuickstart/AppHost/AppHost.csproj -c Release \
-            -p:RestoreAdditionalProjectSources="$source" -p:RestorePackagesPath="$cache"
+            -p:ClientPackageVersion="$version" -p:RestoreAdditionalProjectSources="$source" -p:RestorePackagesPath="$cache"
           dotnet test --project tests/Groundhog.Aspire.Hosting.Tests/Groundhog.Aspire.Hosting.Tests.csproj -c Release \
             -p:UsePublishedClientPackages=true -p:ClientPackageVersion="$version" \
             -p:RestoreAdditionalProjectSources="$source" -p:RestorePackagesPath="$cache"

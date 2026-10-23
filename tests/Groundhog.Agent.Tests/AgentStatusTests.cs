@@ -162,6 +162,38 @@ public class AgentStatusTests(TunnelFixture fixture) : IClassFixture<TunnelFixtu
         Assert.Equal("Credential", error.ParamName);
     }
 
+    [Fact(Timeout = 30_000)]
+    public async Task Running_agent_registers_pipe_status_and_removes_registration_after_stopping()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        SessionRegistration registration;
+        await using (var running = new RunningAgent(Options("agent-local-session")))
+        {
+            while ((await running.NextStatusAsync().WaitAsync(ct)).State != GroundhogAgentState.Connected) { }
+            registration = Assert.Single(LocalSessions.Registrations(), r => r.Name == "agent-local-session");
+            var snapshot = await LocalSessions.QueryAsync(registration, false, ct);
+            Assert.NotNull(snapshot);
+            Assert.Equal("Connected", snapshot.State);
+            Assert.Equal("Agent", snapshot.Host);
+            Assert.Equal(Environment.ProcessId, snapshot.ProcessId);
+            Assert.NotEmpty(snapshot.ProcessName!);
+            Assert.True(await LocalSessions.MatchesKeyAsync(registration, fixture.Key, ct));
+            Assert.False(await LocalSessions.MatchesKeyAsync(registration, Groundhog.Protocol.ConnectionKey.Generate(), ct));
+        }
+        Assert.DoesNotContain(LocalSessions.Registrations(), r => r.Pipe == registration.Pipe);
+    }
+
+    [Fact(Timeout = 30_000)]
+    public async Task Local_session_registration_can_be_disabled()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var options = Options("agent-session-disabled");
+        options.RegisterLocalSession = false;
+        await using var running = new RunningAgent(options);
+        while ((await running.NextStatusAsync().WaitAsync(ct)).State != GroundhogAgentState.Connected) { }
+        Assert.DoesNotContain(LocalSessions.Registrations(), r => r.Name == "agent-session-disabled");
+    }
+
     private GroundhogAgentOptions Options(string tunnelName) => new()
     {
         RelayAddress = fixture.Relay.Address,

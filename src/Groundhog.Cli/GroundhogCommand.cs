@@ -45,6 +45,7 @@ internal static class GroundhogCommand
 
         Usage:
           groundhog host <name> (--port <port> | --target <url>) [options]
+          groundhog host [<name>] [options]  (saved profile or groundhog.json)
           groundhog --version
           groundhog --help
           groundhog update [--check | --yes] [--prerelease]
@@ -55,10 +56,11 @@ internal static class GroundhogCommand
           groundhog status|stats <name> [--output json] [--watch]
           groundhog requests <name> [--output json] [--follow] [filters]
           groundhog stop <name>
-          groundhog start|restart <saved-profile>
+          groundhog start|restart [<name>] [host options]
           groundhog logs <name> [--follow] [--output json]
           groundhog wait <name> [--condition connected|ready] [--timeout <seconds>]
           groundhog doctor [--target <url>]
+          groundhog mcp [--allow-actions]
           groundhog login
           groundhog logout|whoami
           groundhog workspace list|use <slug>
@@ -67,7 +69,7 @@ internal static class GroundhogCommand
           groundhog create <name> [--workspace <slug>] [--project <file> [user secrets options]]
           groundhog rename <old-name> <new-name> [--workspace <slug>] [--yes]
           groundhog delete <name> [--workspace <slug>] [--yes]
-          groundhog key rotate <name> [--workspace <slug>] [--yes] [--project <file> [user secrets options]]
+          groundhog key rotate <name> [--no-downtime [--timeout <seconds>]] [--workspace <slug>] [--yes] [--project <file> [user secrets options]]
           groundhog key add <name> [--workspace <slug>] [--project <file> [user secrets options]]
           groundhog key list <name> [--workspace <slug>] [--output json]
           groundhog key revoke <name> [<key-id>] [--workspace <slug>] [--yes]
@@ -86,6 +88,8 @@ internal static class GroundhogCommand
         host <profile> and start <profile> need no other options. Profiles never store connection keys
         or API keys (only --api-key-env names); the connection key comes from GROUNDHOG_KEY, --key, or
         the key saved when you created the tunnel, added a key or rotated it here.
+        host, start, restart and init find groundhog.json in this directory or a parent.
+        Explicit options override the same-name saved profile, which overrides the project file.
         Status and traffic commands describe local sessions; history retains the last 1,000 requests.
         Global options: --no-interactive (disable menus), --no-color (disable colors; also NO_COLOR),
                         --no-update-check (skip the periodic update offer; also GROUNDHOG_NO_UPDATE_CHECK=1).
@@ -153,6 +157,13 @@ internal static class GroundhogCommand
 
             if (args is ["init"])
             {
+                if (ProjectConfiguration.Find(Environment.CurrentDirectory) is { } project)
+                {
+                    var store = new ProfileStore(ProfileStore.DefaultDirectory);
+                    store.Save(ProjectConfiguration.ProfileForInitialization(project.Profile, store, Environment.CurrentDirectory));
+                    output.WriteLine($"Profile saved from {project.Path}. Host it with: groundhog host {project.Profile.Name}");
+                    return 0;
+                }
                 if (!InteractiveCli.Available) { error.WriteLine("groundhog: init requires an interactive terminal. Use profile save instead."); return ExitCodes.BadArguments; }
                 await InteractiveCli.SetupAsync(new(ProfileStore.DefaultDirectory), cancellationToken);
                 return 0;
@@ -216,13 +227,14 @@ internal static class GroundhogCommand
         CancellationToken cancellationToken,
         HostView? view = null)
     {
-        if (args.Length == 1)
+        try
         {
-            var profile = new ProfileStore(ProfileStore.DefaultDirectory).Read().SingleOrDefault(p => p.Name == args[0]);
-            if (profile is not null)
-            {
-                args = profile.ToHostArguments();
-            }
+            args = ProjectConfiguration.ResolveHostArguments(args, new(ProfileStore.DefaultDirectory), Environment.CurrentDirectory);
+        }
+        catch (UsageException ex)
+        {
+            error.WriteLine($"groundhog: {ex.Message}");
+            return ExitCodes.BadArguments;
         }
         var credential = getEnvironmentVariable(HostArguments.KeyVariable);
         if (string.IsNullOrWhiteSpace(credential) && StoredKey(args) is { } storedKey)
@@ -244,7 +256,6 @@ internal static class GroundhogCommand
             return ExitCodes.BadArguments;
         }
 
-        var telemetry = new SessionTelemetry(arguments.Name, arguments.LocalTarget);
         var interactive = view is not null || (ReferenceEquals(output, Console.Out) && InteractiveCli.Available);
         var reporter = new StatusReporter(output, error, arguments.LocalTarget, arguments.Verbose, arguments.VisitorAccess is not null);
         GroundhogAgent agent;
@@ -261,7 +272,7 @@ internal static class GroundhogCommand
                 PoolSize = arguments.Pool ?? ConnectionPool.DefaultSize,
                 VisitorAccess = arguments.VisitorAccess,
                 Client = GroundhogClientInfo.FromAssembly("Groundhog.Cli", typeof(GroundhogCommand).Assembly),
-                OnRequestCompleted = request => { telemetry.OnRequest(request); if (!interactive) { reporter.OnRequest(request); } },
+                OnRequestCompleted = request => { if (!interactive) { reporter.OnRequest(request); } },
             });
         }
         catch (ArgumentException ex)
@@ -278,10 +289,10 @@ internal static class GroundhogCommand
         }
 
         using var hostStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        await using var sessions = new LocalSessions(telemetry, hostStop);
+        var telemetry = agent.Telemetry;
 
         // The stream ends after the agent's Stopped status, so awaiting it means every status has been reported.
-        var watching = ReportStatusAsync(agent.WatchStatusAsync(CancellationToken.None), telemetry, interactive ? null : reporter);
+        var watching = ReportStatusAsync(agent.WatchStatusAsync(CancellationToken.None), interactive ? null : reporter);
         GroundhogAgentStopReason reason;
         if (interactive)
         {
@@ -345,11 +356,10 @@ internal static class GroundhogCommand
     }
 
     private static async Task ReportStatusAsync(
-        IAsyncEnumerable<GroundhogAgentStatus> statuses, SessionTelemetry telemetry, StatusReporter? reporter)
+        IAsyncEnumerable<GroundhogAgentStatus> statuses, StatusReporter? reporter)
     {
         await foreach (var status in statuses)
         {
-            telemetry.OnStatus(status);
             reporter?.OnStatus(status);
         }
     }
