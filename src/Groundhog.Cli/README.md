@@ -3,13 +3,17 @@
 The `groundhog` command of Groundhog, the hosted HTTPS tunnel service for local development: give a dev server on
 your machine a public HTTPS address through the Groundhog service.
 
+The installation examples below select **1.3.0-preview.1**, a preview release. The IDE backend and MCP server require
+this version or later. For an existing global installation, use
+`dotnet tool update --global Groundhog.Cli --version 1.3.0-preview.1`.
+
 Before hosting, [create your free workspace](https://groundhog.unifinity.com/docs/workspace) and
 [create a tunnel](https://groundhog.unifinity.com/docs/create-tunnel). Use its name in place of `myapp` below
 and supply its connection key through `GROUNDHOG_KEY`. Keep the key out of source files and shell history.
 The example expects your local app to be running on port 5173.
 
 ```
-dotnet tool install --global Groundhog.Cli --version 1.0.0
+dotnet tool install --global Groundhog.Cli --version 1.3.0-preview.1
 groundhog host myapp --port 5173
 ```
 
@@ -36,6 +40,19 @@ key each agent uses, and `key revoke <name> <key-id>` then revokes the old key, 
 parameter names.
 Read commands support `--output json`; `--no-interactive` selects script behavior and `--no-color` disables colors.
 See the [illustrated CLI guide](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/cli.md).
+
+Share a tunnel name, local target and visitor rules with
+[groundhog.json](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/cli.md#project-configuration).
+Connection keys stay in the local credential store or environment, outside the project file. Aspire-hosted tunnels
+appear in CLI and IDE discovery; their AppHost owns stopping them.
+
+The [VS Code preview](https://github.com/Unifinity-Software/groundhog-client/blob/master/ide/vscode/README.md) and
+[Visual Studio preview](https://github.com/Unifinity-Software/groundhog-client/blob/master/ide/visualstudio/README.md)
+reuse the CLI's sign-in and hosting services. Their guides describe separate extension release and host requirements.
+For an AI assistant, use the [local MCP server](https://github.com/Unifinity-Software/groundhog-client/blob/master/docs/mcp.md).
+`groundhog mcp` starts read-only over stdio using your shared CLI sign-in and current-user local agents. Service calls
+honor your account's workspace permissions. Enabling `--allow-actions` also requires explicit confirmation for each
+action. There is no public HTTP MCP endpoint.
 
 Use `groundhog update --check` to check for a newer CLI, `groundhog update` to confirm and install it,
 or `groundhog update --yes` for an explicitly requested noninteractive update. Interactive commands also offer
@@ -64,7 +81,7 @@ environment configuration; avoid a literal key in command history. Create a tunn
 and use its name and connection key. The hosted service address is automatic.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
-`dotnet tool install Groundhog.Cli --version 1.0.0` and `dotnet tool run groundhog -- --help`.
+`dotnet tool install Groundhog.Cli --version 1.3.0-preview.1` and `dotnet tool run groundhog -- --help`.
 Source and the full guide are available in the public Groundhog client repository.
 
 MIT licensed.
