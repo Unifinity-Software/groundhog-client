@@ -217,6 +217,29 @@ public sealed class IdeBackendTests
         Assert.False(fixture.Handler.AuthenticatedServiceInfo);
     }
 
+    [Fact(Timeout = 10_000)]
+    public async Task Device_token_timeout_reports_signed_out_and_later_login_recovers_with_clean_EOF()
+    {
+        await using var fixture = new Fixture(signedIn: false);
+        fixture.Handler.DeviceTokenError = new TaskCanceledException("Device token request timed out.");
+        await fixture.InitializeAsync();
+        await fixture.CallAsync("auth/login", new { });
+        fixture.Time.Advance(TimeSpan.FromSeconds(1));
+        await fixture.AuthSignedOut.Task.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Null(fixture.Store.Read());
+
+        fixture.Handler.DeviceTokenError = null;
+        await fixture.CallAsync("auth/login", new { });
+        fixture.Time.Advance(TimeSpan.FromSeconds(1));
+        await fixture.AuthChanged.Task.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("signedIn", (await fixture.CallAsync("auth/status", new { })).GetProperty("state").GetString());
+        await fixture.ToServer.Writer.CompleteAsync();
+        await fixture.Server.WaitAsync(TestContext.Current.CancellationToken);
+        Assert.True(fixture.Server.IsCompletedSuccessfully);
+        Assert.DoesNotContain("private-device-code", fixture.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain(Fixture.Token, fixture.Output, StringComparison.Ordinal);
+    }
+
     [Theory(Timeout = 10_000)]
     [InlineData(false, false)]
     [InlineData(false, true)]
@@ -600,6 +623,7 @@ public sealed class IdeBackendTests
         internal FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero));
         internal TaskCompletionSource AuthChanged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource AuthExpired { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource AuthSignedOut { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource RequestReceived { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource WorkspaceEventReceived { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal ConcurrentQueue<JsonElement> Requests { get; } = new();
@@ -625,6 +649,7 @@ public sealed class IdeBackendTests
             {
                 if (value.GetProperty("state").GetString() == "signedIn") { AuthChanged.TrySetResult(); }
                 if (value.GetProperty("state").GetString() == "expired") { AuthExpired.TrySetResult(); }
+                if (value.GetProperty("state").GetString() == "signedOut") { AuthSignedOut.TrySetResult(); }
             });
             Register("agents/changed", value => { AgentChanges.Enqueue(value.Clone()); _poll.TrySetResult(); });
             Register("tunnels/changed", _ => { _tunnelChanged.TrySetResult(); if (++Changes >= 2) { WorkspaceEventReceived.TrySetResult(); } });
@@ -679,6 +704,7 @@ public sealed class IdeBackendTests
         internal bool RefreshTokens { get; set; }
         internal int Refreshes { get; private set; }
         internal Exception? RefreshError { get; set; }
+        internal Exception? DeviceTokenError { get; set; }
         internal bool RejectRefresh { get; set; }
         private int _failedRefreshes;
         internal TaskCompletionSource RefreshFailuresReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -693,6 +719,8 @@ public sealed class IdeBackendTests
             if (path == "/api/service-info" && request.Headers.Authorization is not null)
             { AuthenticatedServiceInfo = true; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)); }
             if (path == "/api/cli/device") { DeviceRequest = request.Content!.ReadAsStringAsync(cancellationToken); }
+            if (path == "/api/cli/token" && DeviceTokenError is { } tokenError)
+            { return Task.FromException<HttpResponseMessage>(tokenError); }
             if (path == "/api/cli/refresh" && RejectRefresh)
             { return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)); }
             if (path == "/api/cli/refresh" && RefreshError is { } refreshError)

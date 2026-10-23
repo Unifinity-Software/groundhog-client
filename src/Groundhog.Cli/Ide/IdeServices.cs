@@ -298,7 +298,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
             await Notify("auth/changed", new IdeAuth("expired"));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-        catch (Exception ex) when (ex is ManagementException or HttpRequestException or IOException)
+        catch (Exception ex) when (BackgroundFailure(ex, ct) || ex is IOException)
         { await Notify("auth/changed", new IdeAuth("signedOut")); }
     }
 
