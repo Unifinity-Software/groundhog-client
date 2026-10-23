@@ -14,10 +14,12 @@ const { runTests } = require('@vscode/test-electron');
   await new Promise(resolve => portProbe.close(resolve));
   const token = randomBytes(16).toString('hex');
   let browser;
+  // Keep one CDP client for both capture requests and close it after the host exits.
+  let browserConnection;
   const server = http.createServer(async (request, response) => {
     if (!['/' + token, '/' + token + '/access'].includes(request.url) || request.method !== 'POST') { response.writeHead(404).end(); return; }
     try {
-      browser = await chromium.connectOverCDP('http://127.0.0.1:' + debugPort);
+      browser = await (browserConnection ??= chromium.connectOverCDP('http://127.0.0.1:' + debugPort));
       const page = browser.contexts()[0].pages().find(page => page.url().includes('workbench')) ?? browser.contexts()[0].pages()[0];
       const frame = page.frameLocator('iframe.webview:visible').frameLocator('iframe#active-frame');
       await fs.mkdir('test-results', { recursive: true });
@@ -70,7 +72,8 @@ const { runTests } = require('@vscode/test-electron');
       extensionTestsEnv: { GROUNDHOG_SMOKE_CAPTURE_URL: 'http://127.0.0.1:' + server.address().port + '/' + token }
     });
   } finally {
-    await browser?.close();
+    const connectedBrowser = await browserConnection?.catch(() => undefined);
+    await connectedBrowser?.close();
     await new Promise(resolve => server.close(resolve));
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
