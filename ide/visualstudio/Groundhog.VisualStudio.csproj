@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RegisterWithCodebase>true</RegisterWithCodebase>
+  </PropertyGroup>
   <ItemGroup>
     <Reference Include="System.Design" />
     <PackageReference Include="Microsoft.VisualStudio.SDK" ExcludeAssets="runtime" />

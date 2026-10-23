@@ -16,6 +16,10 @@ try {
     if (-not $registration.Contains('5d817eb8-cc73-4807-98e4-35ad34ac0db6') -or -not $registration.Contains('ToolWindows')) {
         throw 'The native package or tool window is not registered.'
     }
+    $packageRegistration = [regex]::Match($registration, '(?ms)^\[\$RootKey\$\\Packages\\\{5d817eb8-cc73-4807-98e4-35ad34ac0db6\}\]\r?\n(?<values>.*?)(?=^\[|\z)').Groups['values'].Value
+    if ($packageRegistration -notmatch '(?m)^"CodeBase"="\$PackageFolder\$\\Groundhog\.VisualStudio\.dll"\r?$') {
+        throw 'The native package must register its DLL CodeBase in the VSIX package folder.'
+    }
 } finally { $archive.Dispose() }
 
 # Exercise the actual shipping StreamJsonRpc client against an isolated framed-stdio peer.
