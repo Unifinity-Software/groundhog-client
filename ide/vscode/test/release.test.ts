@@ -3,14 +3,17 @@ import { createRequire } from 'node:module';
 import { expect, it, vi } from 'vitest';
 
 const require = createRequire(process.cwd() + '/test/release.test.ts');
+// Load the real publishing dependency graph once during this file's fixture setup.
+// Cold SDK/module initialization is not a Marketplace response-behavior assertion.
+const { RestClient } = require('typed-rest-client/RestClient');
+const { GalleryApi } = require('azure-devops-node-api/GalleryApi');
+const util = require('@vscode/vsce/out/util');
+const zip = require('@vscode/vsce/out/zip');
+const fs = require('node:fs');
+const manifest = require('../package.json');
+const publisher = require('@vscode/vsce/out/publish');
 
 it('rejects Marketplace HTTP 404 before the installed vsce can report Published', async () => {
-  const { RestClient } = require('typed-rest-client/RestClient');
-  const { GalleryApi } = require('azure-devops-node-api/GalleryApi');
-  const util = require('@vscode/vsce/out/util');
-  const zip = require('@vscode/vsce/out/zip');
-  const fs = require('node:fs');
-  const manifest = require('../package.json');
   const rest = new RestClient('offline-regression');
   let status = 404;
   let published = false;
@@ -37,7 +40,7 @@ it('rejects Marketplace HTTP 404 before the installed vsce can report Published'
       if (String(args[0]).includes('Skipping publish.')) skipped = true;
     });
     vi.spyOn(console, 'log').mockImplementation((text: string) => { messages.push(text); });
-    const publish = () => require('@vscode/vsce/out/publish').publish({ packagePath: ['offline.vsix'], skipDuplicate: true, pat: 'synthetic-not-a-credential' });
+    const publish = () => publisher.publish({ packagePath: ['offline.vsix'], skipDuplicate: true, pat: 'synthetic-not-a-credential' });
     await publish();
     expect(published).toBe(true); // Demonstrates the installed dependency's false success without the guard.
     require(guard);
