@@ -62,7 +62,7 @@ public class GroundhogPeer {
     private static void Run(string[] args) {
         if (args.Length == 1 && args[0] == "--version") {
             Phase("version");
-            Console.WriteLine(Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).EndsWith("-old") ? "1.2.0" : "1.3.0-preview.1"); return;
+            Console.WriteLine(Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).EndsWith("-old") ? "1.2.0" : Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).EndsWith("-legacy") ? "1.3.0-preview.1" : "1.3.0-preview.2"); return;
         }
         Phase("stdio-start");
         var input = Console.OpenStandardInput(); var output = Console.OpenStandardOutput();
@@ -98,7 +98,8 @@ public class GroundhogPeer {
                 var parameters = (Dictionary<string,object>)request["params"];
                 if ((string)parameters["clientName"] != "Groundhog for Visual Studio") { Phase("client-name-mismatch"); return; }
             }
-            var result = method == "initialize" ? "{\"protocolVersion\":1,\"capabilities\":[\"deviceLogin\"]}" : "{\"state\":\"signedOut\"}";
+            var result = method == "initialize" ? "{\"protocolVersion\":1,\"capabilities\":[\"deviceLogin\",\"loginPending\"]}" : "{\"state\":\"signedOut\"}";
+            if (method == "initialize" && Path.GetFileNameWithoutExtension(Environment.GetCommandLineArgs()[0]).EndsWith("-legacy")) result = "{\"protocolVersion\":1,\"capabilities\":[\"deviceLogin\"]}";
             if (method == "requests/subscribe") {
                 Send(output, "{\"jsonrpc\":\"2.0\",\"method\":\"requests/event\",\"params\":{\"subscriptionId\":\"early-sub\",\"request\":{\"requestId\":\"early-request\"}}}");
                 result = "{\"subscriptionId\":\"early-sub\",\"requests\":[],\"source\":\"remote\"}";
@@ -184,12 +185,17 @@ public static class NativeBehaviorSmoke {
         var signIn = Activator.CreateInstance(signInType, true);
         var notice = signInType.GetMethod("Notice", Instance);
         var verification = signInType.GetMethod("Verification", Instance);
+        var beforeLogin = Read(signIn,"Revision");
         signInType.GetMethod("Begin", Instance).Invoke(signIn, new object[] {"ABCD-EFGH","https://groundhog.unifinity.com/cli-login",now.AddMinutes(10)});
-        if (!((string)notice.Invoke(signIn, new object[] {"signedOut",now.AddSeconds(31)})).Contains("ABCD-EFGH")) throw new Exception("Periodic refresh lost the pending code.");
-        notice.Invoke(signIn, new object[] {"signedIn",now.AddSeconds(32)});
+        if (!((string)notice.Invoke(signIn, new object[] {"signedIn",now,true,null})).Contains("ABCD-EFGH")
+            || verification.Invoke(signIn,new object[] {now}) == null) throw new Exception("An existing signed-in session hid the new challenge.");
+        if (!((string)notice.Invoke(signIn,new object[] {"signedIn",now,false,beforeLogin})).Contains("ABCD-EFGH"))
+            throw new Exception("A status response issued before login hid the first code.");
+        if (!((string)notice.Invoke(signIn, new object[] {"signedOut",now.AddSeconds(31),true,null})).Contains("ABCD-EFGH")) throw new Exception("Periodic refresh lost the pending code.");
+        notice.Invoke(signIn, new object[] {"signedIn",now.AddSeconds(32),false,null});
         if (verification.Invoke(signIn, new object[] {now.AddSeconds(33)}) != null) throw new Exception("Completed login retained the approval action.");
         signInType.GetMethod("Begin", Instance).Invoke(signIn, new object[] {"EXPIRED","https://groundhog.unifinity.com/cli-login",now});
-        if (((string)notice.Invoke(signIn, new object[] {"signedOut",now})).Contains("EXPIRED")) throw new Exception("Expired user code remained active.");
+        if (((string)notice.Invoke(signIn, new object[] {"signedOut",now,false,null})).Contains("EXPIRED")) throw new Exception("Expired user code remained active.");
 
         var settings = assembly.GetType("Groundhog.VisualStudio.ProjectSettings", true);
         var project = Path.Combine(temporary,"project"); var nested = Path.Combine(project,"src"); Directory.CreateDirectory(nested);
@@ -253,6 +259,7 @@ public static class NativeBehaviorSmoke {
 }
 '@
     [NativeBehaviorSmoke]::Verify($assembly, $temporary)
+    Write-Output 'Native pending sign-in, stale status response and terminal/expiry checks passed.'
     $type = $assembly.GetType('Groundhog.VisualStudio.BackendClient', $true)
     $client = [Activator]::CreateInstance($type, $true)
     $flags = [Reflection.BindingFlags]'Instance,NonPublic'
@@ -266,7 +273,9 @@ public static class NativeBehaviorSmoke {
     } finally { $client.Dispose() }
     $oldPeer = Join-Path $temporary 'groundhog-peer-old.exe'
     Copy-Item -LiteralPath $peer -Destination $oldPeer
-    foreach ($invalidCli in @((Join-Path $temporary 'missing-groundhog.exe'), $oldPeer)) {
+    $legacyPeer = Join-Path $temporary 'groundhog-peer-legacy.exe'
+    Copy-Item -LiteralPath $peer -Destination $legacyPeer
+    foreach ($invalidCli in @((Join-Path $temporary 'missing-groundhog.exe'), $oldPeer, $legacyPeer)) {
         $invalidClient = [Activator]::CreateInstance($type, $true)
         try {
             $task = $type.GetMethod('StartAsync', $flags).Invoke($invalidClient, @($invalidCli.ToString(), [Threading.CancellationToken]::None))

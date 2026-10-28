@@ -96,6 +96,13 @@ Stable promotion requires accessible public source, documentation and symbols, s
 integration tests and an owner-reviewed go/no-go.
 ## VS Code extension releases
 
+The pending-login correction targets co-versioned **1.3.0-preview.2** .NET packages, native extension **0.1.0**
+(not previously published) and VS Code **0.1.1** prerelease. Publish/verify the new exact CLI packages first, then
+qualify the native sign-in correction and the VS Code release's six bundled runtimes before their separate approved
+publications. Native and VS Code adapters require the `loginPending` capability; an explicitly configured older CLI
+must show install/update guidance. Existing published CLI 1.3.0-preview.1 and VS Code 0.1.0 artifacts/tags remain
+immutable historical releases. A source version change does not authorize or claim another publication.
+
 The extension is a separate release from the .NET packages. Publish the exact supporting `Groundhog.Cli`
 versions listed as `minimumCliVersion` and `bundledCliVersion` in `ide/vscode/package.json` first. The
 `release-vscode.yml` preflight verifies those exact versions exist on NuGet, verifies the tag matches the

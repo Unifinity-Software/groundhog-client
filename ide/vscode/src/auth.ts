@@ -33,17 +33,23 @@ export class GroundhogAuthentication implements vscode.AuthenticationProvider, v
     if (!hostedUrl(login.verificationUri)) throw new Error('Groundhog returned an invalid sign-in URL.');
     await vscode.env.clipboard.writeText(login.userCode);
     await vscode.env.openExternal(vscode.Uri.parse(login.verificationUri));
-    const sessions = await this.getSessions();
-    if (sessions.length) return sessions[0];
+    await this.getSessions();
+    const completed = () => this.status.loginId === login.loginId && this.status.loginOutcome === 'approved' && !this.status.loginPending ? this.sessions()[0] : undefined;
+    const failed = () => this.status.loginId === login.loginId && !this.status.loginPending && this.status.loginOutcome && this.status.loginOutcome !== 'approved';
+    const session = completed(); if (session) return session;
+    if (failed()) throw new Error('Groundhog sign-in did not complete. Try signing in again.');
     return new Promise((resolve, reject) => {
       const finish = () => { clearTimeout(timer); subscription.dispose(); this.cancelWait = undefined; };
       const timer = setTimeout(() => { finish(); reject(new Error('Groundhog sign-in expired. Try signing in again.')); }, Math.min(600000, Math.max(0, Date.parse(login.expiresAt) - Date.now())));
-      const subscription = this.onDidChangeSessions(event => {
-        if (event.added?.[0]) { finish(); resolve(event.added[0]); }
+      const subscription = this.onDidChangeSessions(() => {
+        const session = completed();
+        if (session) { finish(); resolve(session); }
+        else if (failed()) { finish(); reject(new Error('Groundhog sign-in did not complete. Try signing in again.')); }
       });
       this.cancelWait = () => { finish(); reject(new vscode.CancellationError()); };
       // An auth notification may have arrived after the awaited status read.
-      const current = this.sessions()[0]; if (current) { finish(); resolve(current); }
+      const current = completed(); if (current) { finish(); resolve(current); }
+      else if (failed()) { finish(); reject(new Error('Groundhog sign-in did not complete. Try signing in again.')); }
     });
   }
   async removeSession(): Promise<void> { await this.backend.request('auth/logout', {}); }

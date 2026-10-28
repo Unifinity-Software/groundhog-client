@@ -3,7 +3,7 @@ export interface Workspace { slug: string; name: string; role: string }
 export interface Tunnel { workspace: string; name: string; url: string; state: string; location?: 'local' | 'remote' | 'offline'; actions: string[]; hasKey: boolean; target?: string; requestsLastMinute?: number; captureBodies?: boolean; canCaptureBodies?: boolean }
 export type ConnectionReasonCode = 'credentialRejected' | 'replaced' | 'tunnelNotFound' | 'notAllowed' | 'unsupportedProtocol' | 'visitorAccessUnsupported' | 'cancelled';
 export interface Agent { name: string; target: string; url?: string; state: string; source: 'cli' | 'aspire' | 'agent'; processId: number; created?: boolean; reasonCode?: ConnectionReasonCode; reason?: string }
-export interface AuthStatus { state: 'signedIn' | 'signedOut' | 'expired'; workspace?: string | null; expiresAt?: string | null }
+export interface AuthStatus { state: 'signedIn' | 'signedOut' | 'expired'; workspace?: string | null; expiresAt?: string | null; loginPending?: boolean; loginId?: string | null; loginOutcome?: 'approved' | 'failed' | 'expired' | 'cancelled' | null }
 export interface RequestSummary { requestId: string; completed: string; method: string; path: string; statusCode: number; durationMs: number; source: 'local' | 'remote' }
 export interface TunnelRef { workspace: string; name: string }
 export type Empty = Record<string, never>;
@@ -14,7 +14,7 @@ export interface RequestRef extends TunnelRef { requestId: string }
 export interface Methods {
   initialize: [{ clientVersion: string; protocolVersions: number[]; clientName?: string }, InitializeResult];
   'auth/status': [Empty, AuthStatus];
-  'auth/login': [Empty, { userCode: string; verificationUri: string; expiresAt: string }];
+  'auth/login': [Empty, { userCode: string; verificationUri: string; expiresAt: string; loginId: string }];
   'auth/logout': [Empty, Empty];
   'workspaces/list': [Empty, { workspaces: Workspace[]; selected: string | null }];
   'workspaces/use': [{ workspace: string }, { workspace: string }];

@@ -2,7 +2,7 @@ import { Agent, AuthStatus, Backend, BackendEvents, Disposable, Methods, Notific
 
 /** Scripted demo backend; never reads credentials or contacts the hosted service. */
 export class MockBackend implements Backend {
-  readonly capabilities = ['deviceLogin', 'localAgents', 'liveRequests', 'requestDetail', 'requestReplay', 'requestExportHttp', 'captureBodies', 'rotateWithoutDowntime', 'visitorAccess', 'demo'];
+  readonly capabilities = ['deviceLogin', 'loginPending', 'localAgents', 'liveRequests', 'requestDetail', 'requestReplay', 'requestExportHttp', 'captureBodies', 'rotateWithoutDowntime', 'visitorAccess', 'demo'];
   private readonly events = new BackendEvents();
   private auth: AuthStatus = { state: 'signedIn', workspace: 'example' };
   private tunnels: Tunnel[] = ['my-tunnel', 'service-a', 'service-b'].map((name, i) => ({
@@ -24,11 +24,11 @@ export class MockBackend implements Backend {
     const ref = params as TunnelRef;
     let result: unknown = {};
     switch (method) {
-      case 'initialize': result = { protocolVersion: 1, cliVersion: '1.2.0', capabilities: this.capabilities }; break;
+      case 'initialize': result = { protocolVersion: 1, cliVersion: '1.3.0-preview.2', capabilities: this.capabilities }; break;
       case 'auth/status': result = this.auth; break;
       case 'auth/login':
-        result = { userCode: 'DEMO-CODE', verificationUri: 'https://groundhog.unifinity.com/cli-login', expiresAt: new Date(Date.now() + 600000).toISOString() };
-        queueMicrotask(() => { this.auth = { state: 'signedIn', workspace: 'example' }; this.events.emit('auth/changed', this.auth); });
+        result = { userCode: 'DEMO-CODE', verificationUri: 'https://groundhog.unifinity.com/cli-login', expiresAt: new Date(Date.now() + 600000).toISOString(), loginId: 'demo-login' };
+        queueMicrotask(() => { this.auth = { state: 'signedIn', workspace: 'example', loginPending: false, loginId: 'demo-login', loginOutcome: 'approved' }; this.events.emit('auth/changed', this.auth); });
         break;
       case 'auth/logout':
         this.auth = { state: 'signedOut' };

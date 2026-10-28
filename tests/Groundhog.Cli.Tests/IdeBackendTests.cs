@@ -16,7 +16,7 @@ using StreamJsonRpc;
 
 namespace Groundhog.Cli.Tests;
 
-public sealed class IdeBackendTests
+public sealed partial class IdeBackendTests
 {
     [Theory]
     [InlineData(GroundhogAgentState.Reconnecting)]
@@ -652,6 +652,7 @@ public sealed class IdeBackendTests
         internal TaskCompletionSource AuthChanged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource AuthExpired { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource AuthSignedOut { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource AuthSettled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource RequestReceived { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource WorkspaceEventReceived { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal ConcurrentQueue<JsonElement> Requests { get; } = new();
@@ -675,7 +676,9 @@ public sealed class IdeBackendTests
             _rpc = new(new HeaderDelimitedMessageHandler(ToServer.Writer.AsStream(), _fromServer.Reader.AsStream(), formatter));
             Register("auth/changed", value =>
             {
-                if (value.GetProperty("state").GetString() == "signedIn") { AuthChanged.TrySetResult(); }
+                var pending = value.TryGetProperty("loginPending", out var flag) && flag.GetBoolean();
+                if (!pending) { AuthSettled.TrySetResult(); }
+                if (value.GetProperty("state").GetString() == "signedIn" && !pending) { AuthChanged.TrySetResult(); }
                 if (value.GetProperty("state").GetString() == "expired") { AuthExpired.TrySetResult(); }
                 if (value.GetProperty("state").GetString() == "signedOut") { AuthSignedOut.TrySetResult(); }
             });
@@ -756,6 +759,8 @@ public sealed class IdeBackendTests
         internal int Refreshes { get; private set; }
         internal Exception? RefreshError { get; set; }
         internal Exception? DeviceTokenError { get; set; }
+        internal string GrantState { get; set; } = "approved";
+        internal Func<CancellationToken, Task<HttpResponseMessage>>? DeviceResponse { get; set; }
         internal bool RejectRefresh { get; set; }
         private int _failedRefreshes;
         internal TaskCompletionSource RefreshFailuresReached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -770,6 +775,7 @@ public sealed class IdeBackendTests
             if (path == "/api/service-info" && request.Headers.Authorization is not null)
             { AuthenticatedServiceInfo = true; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)); }
             if (path == "/api/cli/device") { DeviceRequest = request.Content!.ReadAsStringAsync(cancellationToken); }
+            if (path == "/api/cli/device" && DeviceResponse is { } device) { return device(cancellationToken); }
             if (path == "/api/cli/token" && DeviceTokenError is { } tokenError)
             { return Task.FromException<HttpResponseMessage>(tokenError); }
             if (path == "/api/cli/refresh" && RejectRefresh)
@@ -832,7 +838,7 @@ public sealed class IdeBackendTests
             return Task.FromResult(new HttpResponseMessage(result is null ? HttpStatusCode.NoContent : HttpStatusCode.OK)
             { Content = result is null ? null : JsonContent.Create(result) });
         }
-        private DeviceToken Grant() { PollReached.TrySetResult(); return new("approved", Fixture.Token, 3600, RefreshTokens ? "private-login-refresh-token" : null); }
+        private DeviceToken Grant() { PollReached.TrySetResult(); return new(GrantState, Fixture.Token, 3600, RefreshTokens ? "private-login-refresh-token" : null); }
         private DeviceToken Refresh() { Refreshes++; return new("approved", "private-refreshed-access-token", 3600, "private-refreshed-refresh-token"); }
         private TunnelInfo[] List() { Lists++; ListReached.TrySetResult(); return [Tunnel("my-tunnel")]; }
         private static TunnelInfo Tunnel(string name) => new(name, $"https://{name}.groundhog.unifinity.com", "disconnected",

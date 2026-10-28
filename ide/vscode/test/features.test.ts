@@ -7,10 +7,44 @@ import { asCurl, localTarget, parseHeaders, RequestActions, signatureWarning } f
 import { ActiveRequestStats } from '../src/stats';
 import { selectCli } from '../src/cliSelection';
 import { accessDraft } from '../src/visitorAccess';
+import { AuthStatus, Backend, BackendEvents } from '../src/protocol';
 
 afterEach(() => vi.useRealTimers());
 async function stoppedBackend() { const backend = new MockBackend(); await backend.request('agents/stop', { workspace: 'example', name: 'my-tunnel' }); return backend; }
 describe('IDE feature behavior', () => {
+  it.each(['approved', 'failed', 'expired'] as const)('waits for this login outcome instead of accepting the old valid account (%s)', async outcome => {
+    vi.useFakeTimers();
+    const events = new BackendEvents();
+    let status: AuthStatus = { state: 'signedIn', workspace: 'old' };
+    const backend: Backend = {
+      capabilities: ['loginPending'], start: async () => {}, dispose: () => events.dispose(),
+      on: (name, listener) => events.on(name, listener),
+      request: async method => {
+        if (method === 'auth/login') {
+          status = { ...status, loginId: 'current', loginPending: true };
+          return { userCode: 'PUBLIC-CODE', verificationUri: 'https://groundhog.unifinity.com/cli-login', expiresAt: new Date(Date.now() + 600000).toISOString(), loginId: 'current' } as never;
+        }
+        if (method === 'auth/status') return status as never;
+        throw new Error('Unexpected fixture request');
+      }
+    };
+    const auth = new GroundhogAuthentication(backend);
+    let settled = false;
+    const login = auth.createSession();
+    void login.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    expect((await auth.getSessions())[0].account.id).toBe('old');
+    // Another attempt or a proactive refresh cannot complete this attempt.
+    events.emit('auth/changed', { state: 'signedIn', workspace: 'old', loginPending: false, loginId: 'previous', loginOutcome: 'approved' });
+    await vi.advanceTimersByTimeAsync(0); expect(settled).toBe(false);
+    status = { state: 'signedIn', workspace: outcome === 'approved' ? 'new' : 'old', loginPending: false, loginId: 'current', loginOutcome: outcome };
+    const assertion = outcome === 'approved' ? expect(login).resolves.toMatchObject({ account: { id: 'new' } }) : expect(login).rejects.toThrow('did not complete');
+    events.emit('auth/changed', status);
+    await assertion;
+    auth.dispose(); backend.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('shows actual local connection transitions in CodeLens instead of stale connected relay state', async () => {
     const backend = new MockBackend(); const { tunnels, agents } = await backend.request('tunnels/list', { workspace: 'example' });
     expect(tunnelCodeLensTitle(tunnels[0], agents)).toBe(`● connected · ${tunnels[0].url}`);

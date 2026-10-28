@@ -8,8 +8,10 @@ hosting, stopping, restarting, opening/copying URLs, key entry and authorized re
 
 Choose **Sign in**, compare the displayed user code, then **Open browser**. The pending code remains visible through
 refresh until sign-in completes or the code expires. Connection keys and login tokens remain in
-the CLI credential store. If the CLI is missing or older than 1.3.0-preview.1, choose **Install / update CLI**; installation
+the CLI credential store. If the CLI is missing or older than 1.3.0-preview.2, choose **Install / update CLI**; installation
 requires your confirmation and a .NET SDK. A custom executable path is under **Tools > Options > Groundhog**.
+An existing signed-in workspace remains usable while another device login is pending. Ordinary refreshes,
+including a status request issued before the code appeared, retain that code and its verification action.
 
 Double-click a tunnel to inspect requests. The WebView2 control hosts the same `ide/webview` bundle as VS Code and maps
 Visual Studio theme colors to its existing CSS variables. Request detail, body capture, replay and HTTP export require

@@ -15,7 +15,7 @@ export function spawnSession(cliPath: string): BackendSession {
 }
 
 export class ProtocolVersionError extends Error {
-  constructor() { super('This Groundhog CLI uses an unsupported IDE protocol. Update Groundhog CLI and the extension.'); }
+  constructor(message = 'This Groundhog CLI uses an unsupported IDE protocol. Update Groundhog CLI and the extension.') { super(message); }
 }
 
 /** One process per extension host. Failed mutations are never replayed. */
@@ -50,15 +50,17 @@ export class RpcBackend implements Backend {
     try {
       const result = await this.send('initialize', { clientVersion: this.version, protocolVersions: [1], clientName: 'Groundhog for VS Code' });
       if (result.protocolVersion !== 1) throw new ProtocolVersionError();
+      if (!result.capabilities.includes('loginPending')) throw new ProtocolVersionError('Groundhog CLI 1.3.0-preview.2 or newer is required for sign-in progress. Install or update Groundhog CLI.');
       this.capabilities = (result as InitializeResult).capabilities;
       this.connectedAt = Date.now();
       this.events.emit('backend/state', { state: 'ready' });
     } catch (error) {
       if (error instanceof ProtocolVersionError || (error as { code?: number }).code === -32001) {
+        const failure = error instanceof ProtocolVersionError ? error : new ProtocolVersionError();
         this.stopped = true;
-        this.events.emit('backend/state', { state: 'stopped', message: new ProtocolVersionError().message });
+        this.events.emit('backend/state', { state: 'stopped', message: failure.message });
         session.dispose();
-        throw new ProtocolVersionError();
+        throw failure;
       }
       session.dispose();
       this.disconnected(session);

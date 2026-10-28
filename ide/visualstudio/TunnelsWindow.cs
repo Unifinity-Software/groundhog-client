@@ -123,9 +123,10 @@ internal sealed class TunnelsControl : UserControl
         try
         {
             await Package.EnsureBackendAsync(_stop.Token);
+            var signInRevision = _signIn.Revision;
             var auth = await Package.Backend.RequestAsync("auth/status", new { }, _stop.Token);
             var state = (string?)auth["state"];
-            _notice.Text = _signIn.Notice(state, DateTimeOffset.UtcNow);
+            _notice.Text = _signIn.Notice(state, DateTimeOffset.UtcNow, (bool?)auth["loginPending"], signInRevision);
             if (state != "signedIn") { Selection.Rebuild([], () => _tree.Items.Clear()); return; }
             if (Package.ActiveName is null && await Package.StartupDirectoryAsync(_stop.Token) is { } directory
                 && ProjectSettings.ForDebug(directory, null, null) is { } configured && (string?)auth["workspace"] is { } defaultWorkspace)
