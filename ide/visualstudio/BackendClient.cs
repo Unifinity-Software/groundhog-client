@@ -31,7 +31,7 @@ internal sealed class BackendClient : IDisposable
             catch (Exception ex) when (ex is InvalidOperationException || ex is OperationCanceledException && !cancellation.IsCancellationRequested)
             { throw new CliUnavailableException("Groundhog CLI could not run. Choose Install / update CLI, or check the configured executable and .NET SDK."); }
             if (!Version.TryParse(version.Trim().Split('-')[0], out var parsed) || parsed < new Version(1, 3, 0))
-            { throw new CliUnavailableException("Groundhog CLI 1.3.0-preview.1 or newer is required. Choose Install / update CLI."); }
+            { throw new CliUnavailableException("Groundhog CLI 1.3.0-preview.2 or newer is required. Choose Install / update CLI."); }
             var start = StartInfo(executable, "ide --stdio");
             _process = Process.Start(start) ?? throw new IOException("Groundhog CLI could not start.");
             _ = DrainAsync(_process.StandardError);
@@ -41,6 +41,8 @@ internal sealed class BackendClient : IDisposable
             var initialized = await RequestAsync("initialize", new { clientName = "Groundhog for Visual Studio", clientVersion = "0.1.0", protocolVersions = new[] { 1 } }, cancellation).ConfigureAwait(false);
             if ((int?)initialized["protocolVersion"] != 1) { throw new CliUnavailableException("The CLI and extension have no common protocol version. Choose Install / update CLI."); }
             Capabilities = initialized["capabilities"]?.ToObject<string[]>() ?? [];
+            if (!Capabilities.Contains("loginPending"))
+            { throw new CliUnavailableException("Groundhog CLI 1.3.0-preview.2 or newer is required for sign-in progress. Choose Install / update CLI."); }
         }
         catch { Reset(); throw; }
         finally { _starting.Release(); }

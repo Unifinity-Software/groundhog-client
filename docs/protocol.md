@@ -282,3 +282,8 @@ per-request handle lifecycle; both platforms retain the same two-second request 
 
 The IDE stdio reader accepts exactly one optional UTF-8 preamble at stream start for .NET Framework process wrappers.
 All frame headers remain ASCII and retain their 8 KiB bound; repeated, malformed or midstream preambles are rejected.
+
+IDE device-login progress is separate from stored-credential state. CLI 1.3.0-preview.2 adds the `loginPending`
+capability and safe attempt identity/outcome fields so an old valid session cannot hide a pending code or count as
+a newly approved login. Refresh and workspace notifications retain the attempt. See [the IDE contract](ide-protocol.md).
+The relay agent framing and authentication protocol are unchanged by this local IDE addition.

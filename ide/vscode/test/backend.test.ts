@@ -40,7 +40,7 @@ describe('typed RPC backend', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const sessions: ReturnType<typeof wire>[] = [];
     const create = vi.fn(() => {
-      const pair = wire(server => server.onRequest('initialize', () => ({ protocolVersion: 1, cliVersion: '1.2.0', capabilities: [] })));
+      const pair = wire(server => server.onRequest('initialize', () => ({ protocolVersion: 1, cliVersion: '1.3.0-preview.2', capabilities: ['loginPending'] })));
       sessions.push(pair); return pair.session;
     });
     const backend = new RpcBackend(create, '0.1.0'); disposables.push(backend);
@@ -53,9 +53,9 @@ describe('typed RPC backend', () => {
     await vi.advanceTimersByTimeAsync(1); await backend.start(); expect(create).toHaveBeenCalledTimes(3);
     backend.dispose(); await vi.advanceTimersByTimeAsync(60000); expect(create).toHaveBeenCalledTimes(3);
   });
-  it('reports protocol mismatch clearly without a restart loop', async () => {
+  it.each([1, 2])('reports missing sign-in progress or protocol mismatch without a restart loop (protocol %s)', async protocolVersion => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const create = vi.fn(() => wire(server => server.onRequest('initialize', () => ({ protocolVersion: 2, cliVersion: '2.0.0', capabilities: [] }))).session);
+    const create = vi.fn(() => wire(server => server.onRequest('initialize', () => ({ protocolVersion, cliVersion: '1.3.0-preview.1', capabilities: [] }))).session);
     const backend = new RpcBackend(create, '0.1.0'); disposables.push(backend);
     await expect(backend.start()).rejects.toBeInstanceOf(ProtocolVersionError);
     await vi.advanceTimersByTimeAsync(60000); expect(create).toHaveBeenCalledTimes(1);
@@ -66,7 +66,7 @@ describe('typed RPC backend', () => {
     const started = new Promise<void>(resolve => { begin = resolve; });
     const cancellation = new Promise<void>(resolve => { cancelled = resolve; });
     const { session } = wire(server => {
-      server.onRequest('initialize', () => ({ protocolVersion: 1, cliVersion: '1.2.0', capabilities: [] }));
+      server.onRequest('initialize', () => ({ protocolVersion: 1, cliVersion: '1.3.0-preview.2', capabilities: ['loginPending'] }));
       server.onRequest('tunnels/create', (_, token) => new Promise(resolve => { begin(); token.onCancellationRequested(() => { cancelled(); resolve({}); }); }));
     });
     const backend = new RpcBackend(() => session, '0.1.0', 100); disposables.push(backend); await backend.start();

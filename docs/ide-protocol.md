@@ -104,6 +104,10 @@ exchange after initialization. `workspace` is a slug and is explicit on tunnel m
 
 `auth/status` reads the shared credential store without contacting the relay. State is `signedOut`, `signedIn` or
 `expired`. Signed-in/expired status may include `workspace` and `expiresAt`, never credentials.
+The `loginPending` capability (CLI 1.3.0-preview.2+) adds `loginPending`, an opaque nonsecret `loginId`,
+and nullable `loginOutcome` (`approved`, `failed`, `expired` or `cancelled`). Credential state and workspace
+stay usable during a new device login. Refreshing old credentials or changing workspaces does not complete it.
+Only the current/last attempt is retained in this backend's memory; logout clears it. No login identifier is a credential.
 
 ```json
 {"jsonrpc":"2.0","id":2,"method":"auth/status","params":{}}
@@ -116,8 +120,13 @@ The extension opens the verification URL only on a user gesture. Closing the bac
 
 ```json
 {"jsonrpc":"2.0","id":3,"method":"auth/login","params":{}}
-{"jsonrpc":"2.0","id":3,"result":{"userCode":"ABCD-EFGH","verificationUri":"https://groundhog.unifinity.com/cli-login","expiresAt":"2026-10-22T12:10:00Z"}}
+{"jsonrpc":"2.0","id":3,"result":{"userCode":"ABCD-EFGH","verificationUri":"https://groundhog.unifinity.com/cli-login","expiresAt":"2026-10-22T12:10:00Z","loginId":"opaque-attempt-id"}}
 ```
+
+Clients retain an unexpired public code/verification URL while `loginPending` is true, including when state is
+already `signedIn`. Login completion requires the matching `loginId` with `loginOutcome: "approved"`;
+a failed/expired attempt must not return the old account as a new login. A status read issued before the challenge
+must not dismiss that newer challenge. Older clients may ignore these additive fields; updated clients require the capability.
 
 `auth/logout` cancels pending login, revokes the remote CLI session when reachable and always deletes local credentials
 and saved tunnel keys. It cancels authenticated subscriptions and emits `auth/changed`, even if remote revocation fails.

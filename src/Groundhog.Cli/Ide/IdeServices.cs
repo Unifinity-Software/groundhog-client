@@ -7,7 +7,8 @@ using StreamJsonRpc;
 
 namespace Groundhog.Cli.Ide;
 
-internal sealed record IdeAuth(string State, string? Workspace = null, DateTimeOffset? ExpiresAt = null);
+internal sealed record IdeAuth(string State, string? Workspace = null, DateTimeOffset? ExpiresAt = null,
+    bool LoginPending = false, string? LoginId = null, string? LoginOutcome = null);
 internal sealed record IdeAgent(string Name, string Target, string? Url, string State, string Source, int ProcessId, string? ReasonCode = null, string? Reason = null);
 internal sealed record IdeTunnel(string Workspace, string Name, string Url, string State, string[] Actions, bool HasKey,
     string Location, long RequestsLastMinute, bool CaptureBodies, bool CanCaptureBodies, string? Target = null);
@@ -35,7 +36,15 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private readonly ConcurrentDictionary<string, Subscription> _subscriptions = new();
     private readonly SemaphoreSlim _subscriptionSlots = new(16, 16);
     private readonly List<Task> _background = [];
-    private CancellationTokenSource? _login;
+    private sealed class LoginAttempt(CancellationTokenSource cancellation)
+    {
+        internal CancellationTokenSource Cancellation { get; } = cancellation;
+        internal CancellationToken Token { get; } = cancellation.Token;
+        internal string Id { get; } = Guid.NewGuid().ToString("N");
+        internal long Expires = long.MaxValue;
+        internal string? Outcome;
+    }
+    private LoginAttempt? _login;
     private CancellationTokenSource? _workspaceEvents;
     private bool _workspaceEventsSupported;
     private bool _refreshSupported;
@@ -44,7 +53,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private string? _lastTunnels;
     private string? _lastAgents;
     private string _deviceClientName = "Groundhog IDE";
-    private readonly List<string> _capabilities = ["deviceLogin", "localAgents", "liveRequests", "requestDetail", "requestReplay", "requestExportHttp", "captureBodies", "visitorAccess", "rotateWithoutDowntime"];
+    private readonly List<string> _capabilities = ["deviceLogin", "loginPending", "localAgents", "liveRequests", "requestDetail", "requestReplay", "requestExportHttp", "captureBodies", "visitorAccess", "rotateWithoutDowntime"];
     internal Func<string, object, Task> Notify { get; set; } = (_, _) => Task.CompletedTask;
 
     internal IdeServices(string? directory = null, Func<string, string?, ManagementClient>? client = null,
@@ -92,7 +101,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
             if (ex.Status == HttpStatusCode.Unauthorized)
             {
                 var saved = _credentials.Read();
-                await Notify("auth/changed", new IdeAuth("expired", saved?.Workspace, saved?.Expires));
+                await Notify("auth/changed", Auth() with { State = "expired", Workspace = saved?.Workspace, ExpiresAt = saved?.Expires });
             }
             throw FromManagement(ex);
         }
@@ -153,7 +162,11 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private IdeAuth Auth()
     {
         var session = _credentials.Read();
-        return session is null ? new("signedOut") : new(session.Expires <= _time.GetUtcNow() ? "expired" : "signedIn", session.Workspace, session.Expires);
+        var login = Volatile.Read(ref _login);
+        var outcome = login is null ? null : Volatile.Read(ref login.Outcome)
+            ?? (login.Token.IsCancellationRequested ? "cancelled" : Volatile.Read(ref login.Expires) <= _time.GetUtcNow().UtcTicks ? "expired" : null);
+        return new(session is null ? "signedOut" : session.Expires <= _time.GetUtcNow() ? "expired" : "signedIn",
+            session?.Workspace, session?.Expires, login is not null && outcome is null, login?.Id, outcome);
     }
 
     private async Task<LoginSession> SessionAsync(CancellationToken ct)
@@ -167,7 +180,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
     {
         if (method == "auth/logout")
         {
-            _login?.Cancel();
+            CancelLogin();
             try
             {
                 await _authentication.LogoutAsync(ct);
@@ -251,33 +264,48 @@ internal sealed partial class IdeServices : IAsyncDisposable
 
     private async Task<object> LoginAsync(CancellationToken ct)
     {
-        _login?.Cancel();
-        _login?.Dispose();
-        _login = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-        var relay = GroundhogService.DefaultRelayAddress;
-        using var client = _client(relay, null);
-        var auth = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device", new { clientName = _deviceClientName }, ct);
-        if (!Uri.TryCreate(auth.VerificationUri, UriKind.Absolute, out var verification)
-            || verification.GetLeftPart(UriPartial.Authority) != relay.TrimEnd('/') || verification.AbsolutePath != "/cli-login"
-            || verification.UserInfo.Length > 0 || auth.ExpiresIn is < 1 or > 600 || auth.Interval is < 1 or > 30
-            || string.IsNullOrWhiteSpace(auth.UserCode) || auth.UserCode.Any(char.IsControl))
-        { throw Fault(-32015, "relayUnreachable", "The service returned an invalid sign-in challenge."); }
-        var expires = _time.GetUtcNow().AddSeconds(auth.ExpiresIn);
-        Track(CompleteLoginAsync(relay, auth, expires, _login.Token));
-        return new { userCode = auth.UserCode, verificationUri = verification.ToString(), expiresAt = expires };
+        await _mutations.WaitAsync(ct);
+        var login = new LoginAttempt(CancellationTokenSource.CreateLinkedTokenSource(_stop.Token));
+        try { CancelLogin(); Volatile.Write(ref _login, login); }
+        finally { _mutations.Release(); }
+        using var request = CancellationTokenSource.CreateLinkedTokenSource(ct, login.Token);
+        try
+        {
+            var relay = GroundhogService.DefaultRelayAddress;
+            using var client = _client(relay, null);
+            var auth = await client.SendAsync<DeviceAuthorization>(HttpMethod.Post, "/api/cli/device", new { clientName = _deviceClientName }, request.Token);
+            request.Token.ThrowIfCancellationRequested();
+            if (!Uri.TryCreate(auth.VerificationUri, UriKind.Absolute, out var verification)
+                || verification.GetLeftPart(UriPartial.Authority) != relay.TrimEnd('/') || verification.AbsolutePath != "/cli-login"
+                || verification.UserInfo.Length > 0 || auth.ExpiresIn is < 1 or > 600 || auth.Interval is < 1 or > 30
+                || string.IsNullOrWhiteSpace(auth.UserCode) || auth.UserCode.Any(char.IsControl))
+            { throw Fault(-32015, "relayUnreachable", "The service returned an invalid sign-in challenge."); }
+            var expires = _time.GetUtcNow().AddSeconds(auth.ExpiresIn);
+            Volatile.Write(ref login.Expires, expires.UtcTicks);
+            Track(CompleteLoginAsync(relay, auth, expires, login));
+            return new { userCode = auth.UserCode, verificationUri = verification.ToString(), expiresAt = expires, loginId = login.Id };
+        }
+        catch
+        {
+            await EndLoginAsync(login, login.Token.IsCancellationRequested ? "cancelled" : "failed");
+            throw;
+        }
     }
 
-    private async Task CompleteLoginAsync(string relay, DeviceAuthorization auth, DateTimeOffset expires, CancellationToken ct)
+    private async Task CompleteLoginAsync(string relay, DeviceAuthorization auth, DateTimeOffset expires, LoginAttempt login)
     {
+        var ct = login.Token;
+        var outcome = "expired";
         try
         {
             using var client = _client(relay, null);
             while (_time.GetUtcNow() < expires)
             {
                 await Task.Delay(TimeSpan.FromSeconds(auth.Interval), _time, ct);
+                if (_time.GetUtcNow() >= expires) { break; }
                 var grant = await client.SendAsync<DeviceToken>(HttpMethod.Post, "/api/cli/token", new { auth.DeviceCode }, ct);
                 if (grant.State == "pending") { continue; }
-                if (grant.State != "approved" || grant.AccessToken is null || grant.ExpiresIn is < 1 or > 28800) { break; }
+                if (grant.State != "approved" || grant.AccessToken is null || grant.ExpiresIn is < 1 or > 28800) { outcome = "failed"; break; }
                 using var signed = _client(relay, grant.AccessToken);
                 var account = await signed.SendAsync<AccountInfo>(HttpMethod.Get, "/api/me", null, ct);
                 await DiscoverCapabilitiesAsync(relay, ct);
@@ -285,6 +313,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
                 try
                 {
                     ct.ThrowIfCancellationRequested();
+                    if (!ReferenceEquals(Volatile.Read(ref _login), login)) { return; }
                     // Preserve saved keys when renewing an existing login for the same relay.
                     await _credentials.UpdateAsync(old => new(relay, grant.AccessToken, _time.GetUtcNow().AddSeconds(grant.ExpiresIn),
                         old?.Relay == relay ? old.Workspace : (account.Workspaces.Length == 1 ? account.Workspaces[0].Slug : null),
@@ -292,14 +321,30 @@ internal sealed partial class IdeServices : IAsyncDisposable
                         _refreshSupported && grant.RefreshToken is not null, Guid.NewGuid().ToString("N")), ct);
                 }
                 finally { _mutations.Release(); }
-                await EmitAuthAsync();
+                outcome = "approved";
                 return;
             }
-            await Notify("auth/changed", new IdeAuth("expired"));
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { outcome = "cancelled"; }
         catch (Exception ex) when (BackgroundFailure(ex, ct) || ex is IOException)
-        { await Notify("auth/changed", new IdeAuth("signedOut")); }
+        { outcome = "failed"; }
+        finally { await EndLoginAsync(login, outcome); }
+    }
+
+    private void CancelLogin()
+    {
+        var login = Interlocked.Exchange(ref _login, null);
+        if (login is null) { return; }
+        try { login.Cancellation.Cancel(); }
+        catch (ObjectDisposedException) { } // Its owning request/poll has already completed.
+    }
+
+    private async Task EndLoginAsync(LoginAttempt login, string outcome)
+    {
+        Volatile.Write(ref login.Outcome, outcome);
+        var current = ReferenceEquals(Volatile.Read(ref _login), login);
+        login.Cancellation.Dispose();
+        if (current) { await EmitAuthAsync(); }
     }
 
     private async Task<object> AgentAsync(string method, JsonElement p, LoginSession session, string workspace, string name, CancellationToken ct)
@@ -541,7 +586,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
     private Task EmitExpiredAsync()
     {
         var session = _credentials.Read();
-        return Notify("auth/changed", new IdeAuth("expired", session?.Workspace, session?.Expires));
+        return Notify("auth/changed", Auth() with { State = "expired", Workspace = session?.Workspace, ExpiresAt = session?.Expires });
     }
 
     private static bool BackgroundFailure(Exception exception, CancellationToken cancellation) =>
@@ -603,12 +648,12 @@ internal sealed partial class IdeServices : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _stop.CancelAsync();
-        _login?.Cancel();
+        CancelLogin();
         foreach (var id in _subscriptions.Keys) { await UnsubscribeAsync(id); }
         Task[] tasks; lock (_background) { tasks = _background.ToArray(); }
         try { await Task.WhenAll(tasks); }
         catch (Exception ex) when (ex is OperationCanceledException or ConnectionLostException or ObjectDisposedException or IOException) { }
-        _login?.Dispose(); _workspaceEvents?.Dispose(); _stop.Dispose(); _mutations.Dispose(); _subscriptionSlots.Dispose();
+        _workspaceEvents?.Dispose(); _stop.Dispose(); _mutations.Dispose(); _subscriptionSlots.Dispose();
     }
 
     private async Task FollowWorkspaceAsync()
