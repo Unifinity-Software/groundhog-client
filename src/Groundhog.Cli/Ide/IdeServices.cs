@@ -26,6 +26,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
         "visitorAccess/get", "visitorAccess/set", "visitorAccess/createKey", "visitorAccess/deleteKey", "visitorAccess/handBack", "visitorAccess/saveKey"];
     private static readonly object Empty = new { };
     private readonly string _directory;
+    private readonly string? _terminalDirectory;
     private readonly CredentialStore _credentials;
     private readonly SessionAuthentication _authentication;
     private readonly Func<string, string?, ManagementClient> _client;
@@ -57,9 +58,10 @@ internal sealed partial class IdeServices : IAsyncDisposable
     internal Func<string, object, Task> Notify { get; set; } = (_, _) => Task.CompletedTask;
 
     internal IdeServices(string? directory = null, Func<string, string?, ManagementClient>? client = null,
-        TimeProvider? time = null, Func<SessionRegistration[]>? registrations = null)
+        TimeProvider? time = null, Func<SessionRegistration[]>? registrations = null, string? terminalDirectory = null)
     {
         _directory = directory ?? ProfileStore.DefaultDirectory;
+        _terminalDirectory = terminalDirectory;
         _credentials = new(_directory);
         _client = client ?? ((relay, token) => new(relay, token));
         _time = time ?? TimeProvider.System;
@@ -434,7 +436,7 @@ internal sealed partial class IdeServices : IAsyncDisposable
                 foreach (var (pipe, observed) in _observedAgents.ToArray())
                 {
                     if (live.ContainsKey(pipe)) { continue; }
-                    if (TerminalStatusStore.Read(pipe, _time) is { } reason)
+                    if (TerminalStatusStore.Read(pipe, _time, _terminalDirectory) is { } reason)
                     {
                         var safe = SafeStopReason(reason);
                         agents.Add(observed.Agent with { State = "Stopped", ReasonCode = safe.Code, Reason = safe.Text });

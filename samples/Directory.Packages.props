@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <ClientPackageVersion Condition="'$(ClientPackageVersion)' == ''">1.0.0</ClientPackageVersion>
+    <ClientPackageVersion Condition="'$(ClientPackageVersion)' == ''">1.3.0</ClientPackageVersion>
   </PropertyGroup>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>

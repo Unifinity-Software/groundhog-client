@@ -15,14 +15,16 @@ internal sealed class LocalSessions : IAsyncDisposable
     private readonly SessionTelemetry _telemetry;
     private readonly CancellationTokenSource _hostStop;
     private readonly TunnelKeyCredential? _key;
+    private readonly string? _terminalDirectory;
     internal static string DirectoryPath => Path.Combine(Environment.GetEnvironmentVariable("GROUNDHOG_HOME") is { Length: > 0 } configured
         ? Path.GetFullPath(configured) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Groundhog"), "sessions");
 
-    internal LocalSessions(SessionTelemetry telemetry, CancellationTokenSource hostStop, TunnelKeyCredential? key = null)
+    internal LocalSessions(SessionTelemetry telemetry, CancellationTokenSource hostStop, TunnelKeyCredential? key = null, string? terminalDirectory = null)
     {
         _telemetry = telemetry;
         _hostStop = hostStop;
         _key = key;
+        _terminalDirectory = terminalDirectory;
         Directory.CreateDirectory(DirectoryPath);
         _file = Path.Combine(DirectoryPath, $"{_pipe}.json");
         File.WriteAllText(_file, JsonSerializer.Serialize(new SessionRegistration(telemetry.Snapshot().Name, _pipe, Environment.ProcessId, telemetry.Host, telemetry.ProcessName)));
@@ -169,7 +171,7 @@ internal sealed class LocalSessions : IAsyncDisposable
     {
         var snapshot = _telemetry.Snapshot();
         if (snapshot.State == "Stopped" && snapshot.StopReason is { } reason)
-        { TerminalStatusStore.Write(_pipe, reason, _telemetry.Clock); }
+        { TerminalStatusStore.Write(_pipe, reason, _telemetry.Clock, _terminalDirectory); }
         await _shutdown.CancelAsync();
         await _server;
         _shutdown.Dispose();

@@ -31,7 +31,7 @@ public sealed partial class IdeBackendTests
         var name = "ide-reuse-" + Guid.NewGuid().ToString("N")[..8];
         var telemetry = new SessionTelemetry(name, new Uri("http://localhost:5173"), fixture.Time);
         telemetry.OnStatus(new(state));
-        await using var session = new LocalSessions(telemetry, hostStop);
+        await using var session = new LocalSessions(telemetry, hostStop, terminalDirectory: fixture.TerminalDirectory);
         fixture.Registrations = [Assert.Single(LocalSessions.Registrations(), r => r.Name == name)];
         fixture.Store.Update(saved => saved! with { TunnelKeys = new() { ["example/" + name] = fixture.Handler.Key } });
         var reused = await fixture.CallAsync("agents/start", new { workspace = "example", name, target = "http://localhost:5173" });
@@ -323,7 +323,7 @@ public sealed partial class IdeBackendTests
         var name = "ide-terminal-" + Guid.NewGuid().ToString("N")[..8];
         var telemetry = new SessionTelemetry(name, new Uri("http://localhost:5173"), fixture.Time);
         telemetry.OnStatus(new(GroundhogAgentState.Reconnecting, Reason: "private-raw-reason"));
-        var session = new LocalSessions(telemetry, hostStop);
+        var session = new LocalSessions(telemetry, hostStop, terminalDirectory: fixture.TerminalDirectory);
         var registration = Assert.Single(LocalSessions.Registrations(), r => r.Name == name);
         fixture.Registrations = [registration];
         try
@@ -363,7 +363,7 @@ public sealed partial class IdeBackendTests
         finally
         {
             if (File.Exists(Path.Combine(LocalSessions.DirectoryPath, registration.Pipe + ".json"))) { await session.DisposeAsync(); }
-            TerminalStatusStore.Forget(registration.Pipe);
+            TerminalStatusStore.Forget(registration.Pipe, fixture.TerminalDirectory);
         }
     }
 
@@ -407,7 +407,7 @@ public sealed partial class IdeBackendTests
         var name = "ide-inspector-" + Guid.NewGuid().ToString("N")[..8];
         var telemetry = new SessionTelemetry(name, new Uri("http://localhost:5173"), fixture.Time, "Aspire");
         telemetry.Record(new(fixture.Time.GetUtcNow(), "GET", "/webhooks", 200, 1, false, null));
-        await using var session = new LocalSessions(telemetry, hostStop);
+        await using var session = new LocalSessions(telemetry, hostStop, terminalDirectory: fixture.TerminalDirectory);
         fixture.Registrations = [Assert.Single(LocalSessions.Registrations(), r => r.Name == name)];
         await fixture.InitializeAsync();
         var subscribed = await fixture.CallAsync("requests/subscribe", new { workspace = "example", name, source = "local" });
@@ -641,6 +641,8 @@ public sealed partial class IdeBackendTests
         private readonly CancellationTokenSource _stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         private TaskCompletionSource _poll = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Pipe ToServer { get; } = new();
+        // A real-time agent must not expire a marker written with this fixture's fake clock.
+        internal string TerminalDirectory => Path.Combine(_directory, "terminal");
         internal CredentialStore Store { get; }
         internal ProfileStore Profiles => new(_directory);
         internal ConcurrentQueue<JsonElement> AgentChanges { get; } = new();
@@ -671,7 +673,7 @@ public sealed partial class IdeBackendTests
             Store = new(_directory);
             if (signedIn) { Store.Save(new("https://groundhog.unifinity.com", Token, Time.GetUtcNow().AddHours(1), "example", new())); }
             _output = new(_fromServer.Writer.AsStream());
-            _services = new(_directory, (relay, token) => new ManagementClient(relay, token, Handler), Time, () => Registrations);
+            _services = new(_directory, (relay, token) => new ManagementClient(relay, token, Handler), Time, () => Registrations, terminalDirectory: TerminalDirectory);
             var formatter = new SystemTextJsonFormatter { JsonSerializerOptions = new(JsonSerializerDefaults.Web) };
             _rpc = new(new HeaderDelimitedMessageHandler(ToServer.Writer.AsStream(), _fromServer.Reader.AsStream(), formatter));
             Register("auth/changed", value =>

@@ -5,6 +5,23 @@ The four client packages share one semantic version: `Groundhog.Protocol`, `Grou
 publishes them to nuget.org and attaches packages and symbols to a GitHub Release. The server is not published
 as a NuGet package. Preview versions use a suffix such as `0.4.0-preview.3`.
 
+## Stable 1.3.0 release scope
+
+Promote `Groundhog.Protocol`, `Groundhog.Agent`, `Groundhog.Aspire.Hosting` and `Groundhog.Cli` together to
+**1.3.0**, based on `1.3.0-preview.2`. The IDE test fixture isolates fake-time terminal-status storage from
+other agents. Installation instructions and the package-only Aspire sample use the same version. This is a client package release; it does not publish the relay or either
+IDE extension. The VS Code and Visual Studio extensions retain their preview status and existing CLI pins.
+
+Since stable 1.2.0, the client includes shared project configuration, local agent discovery for Aspire and
+library hosts, serialized refresh-token updates, the IDE stdio backend, request replay and export, key rotation,
+visitor access management, diagnostics, and MCP stdio tools. The preview fixes also preserve debug-agent
+ownership, tunnel selection, terminal state, and device-login progress. IDE adapter behavior remains preview.
+
+The remaining client backlog is separate: Visual Studio pre-launch connection (#54), verified backend trimming
+(#52), and completion of the IDE extension epic (#33/#49). None changes the package version promotion.
+Stable publication still follows the local preflight, supported-platform qualification and exact-commit owner
+review below.
+
 ## One-time publishing setup
 
 1. Choose a NuGet login profile and package owner. A user can own packages directly; an organization can own
@@ -43,9 +60,9 @@ Run the complete affected local suites before pushing code or creating the relea
 local work. Fix failures and repeat affected checks after corrections.
 
 ```text
-dotnet build Groundhog.Client.slnx -c Release -p:Version=1.0.0
+dotnet build Groundhog.Client.slnx -c Release -p:Version=1.3.0
 dotnet test --solution Groundhog.Client.slnx -c Release --no-build
-dotnet pack Groundhog.Client.slnx -c Release --no-build -p:Version=1.0.0 -o artifacts/packages
+dotnet pack Groundhog.Client.slnx -c Release --no-build -p:Version=1.3.0 -o artifacts/packages
 ```
 
 The full client solution uses local fake relays and does not require Azurite, a server checkout or production
