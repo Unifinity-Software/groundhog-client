@@ -123,7 +123,7 @@ internal sealed partial class IdeServices
             while (true)
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(500), _time, ct);
-                var terminal = TerminalStatusStore.Read(registration.Pipe, _time);
+                var terminal = TerminalStatusStore.Read(registration.Pipe, _time, _terminalDirectory);
                 var snapshot = terminal is null ? await LocalSessions.QueryAsync(registration, false, ct) : null;
                 var current = LocalConnection(snapshot?.State ?? "Stopped", snapshot?.StopReason ?? terminal);
                 if (current != previous)
