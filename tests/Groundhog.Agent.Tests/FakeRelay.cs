@@ -242,10 +242,14 @@ public sealed class AgentConnection : IAsyncDisposable
 
     internal Task Released => _released.Task;
 
+    /// <summary>Sends a close frame while keeping the relay request alive for the agent's reply.</summary>
+    public Task SendCloseAsync(int closeCode, CancellationToken cancellationToken) =>
+        _webSocket.CloseOutputAsync((WebSocketCloseStatus)closeCode, "test", cancellationToken);
+
     /// <summary>Closes the WebSocket with a protocol close code, as the relay does.</summary>
     public async Task CloseAsync(int closeCode, CancellationToken cancellationToken)
     {
-        await _webSocket.CloseOutputAsync((WebSocketCloseStatus)closeCode, "test", cancellationToken);
+        await SendCloseAsync(closeCode, cancellationToken);
         Release();
     }
 
