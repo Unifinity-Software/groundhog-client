@@ -115,7 +115,9 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
                 await response.Content.ReadAsStringAsync(cancellation));
 
             phase = "sending SessionReplaced";
-            await connection.CloseAsync(GroundhogCloseCodes.SessionReplaced, cancellation);
+            // Keep the relay request alive until the CLI consumes the close and exits. Ending it here
+            // can dispose the HTTP/2 client before the replacement reason reaches the agent.
+            await connection.SendCloseAsync(GroundhogCloseCodes.SessionReplaced, cancellation);
             phase = "waiting for CLI exit";
             Assert.Equal(ExitCodes.Stopped, await running.WaitAsync(cancellation));
             Assert.Contains("https://cli-smoke.groundhog.unifinity.com", output.ToString(), StringComparison.Ordinal);
@@ -123,6 +125,7 @@ public sealed class HostSmokeTests(TunnelFixture fixture) : IClassFixture<Tunnel
         }
         finally
         {
+            tunnel.ReleaseAll();
             stop.Cancel();
             if (process is { HasExited: false })
             {
