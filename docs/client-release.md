@@ -5,6 +5,17 @@ The four client packages share one semantic version: `Groundhog.Protocol`, `Grou
 publishes them to nuget.org and attaches packages and symbols to a GitHub Release. The server is not published
 as a NuGet package. Preview versions use a suffix such as `0.4.0-preview.3`.
 
+## Stable 1.3.1 release scope
+
+Release `Groundhog.Protocol`, `Groundhog.Agent`, `Groundhog.Aspire.Hosting` and `Groundhog.Cli` together as
+**1.3.1**, based on stable `1.3.0`. Interactive CLI navigation now writes each frame once, avoids redundant
+redraws for background results already shown, and checks for input every 10 milliseconds. Keyboard shortcuts,
+commands and the relay protocol are unchanged. The package-only sample and current installation examples
+select 1.3.1. This release does not publish the relay or either IDE extension.
+
+The Aspire integration and sample require Aspire 13.6.5, which fixes CVE-2026-120006. The central
+MessagePack pin is 2.5.307 to match that Aspire dependency graph.
+
 ## Stable 1.3.0 release scope
 
 Promote `Groundhog.Protocol`, `Groundhog.Agent`, `Groundhog.Aspire.Hosting` and `Groundhog.Cli` together to
@@ -60,9 +71,9 @@ Run the complete affected local suites before pushing code or creating the relea
 local work. Fix failures and repeat affected checks after corrections.
 
 ```text
-dotnet build Groundhog.Client.slnx -c Release -p:Version=1.3.0
+dotnet build Groundhog.Client.slnx -c Release -p:Version=1.3.1
 dotnet test --solution Groundhog.Client.slnx -c Release --no-build
-dotnet pack Groundhog.Client.slnx -c Release --no-build -p:Version=1.3.0 -o artifacts/packages
+dotnet pack Groundhog.Client.slnx -c Release --no-build -p:Version=1.3.1 -o artifacts/packages
 ```
 
 The full client solution uses local fake relays and does not require Azurite, a server checkout or production
