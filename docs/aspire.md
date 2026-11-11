@@ -15,15 +15,15 @@ once it's connected (reconnecting, what your app sees).
 
 ## Install
 
-This guide uses **1.3.0**.
+This guide uses **1.3.1**.
 
 Add the `Groundhog.Aspire.Hosting` package to the AppHost project from nuget.org:
 
 ```
-dotnet add package Groundhog.Aspire.Hosting --version 1.3.0
+dotnet add package Groundhog.Aspire.Hosting --version 1.3.1
 ```
 
-It needs Aspire 13.6.1 or later and .NET 10. The complete runnable package consumer is
+It needs Aspire 13.6.5 or later and .NET 10. The complete runnable package consumer is
 [samples/AspireQuickstart](../samples/AspireQuickstart/README.md). Earlier previews were built before this
 public repository existed; releases from this repository include public source links. The NuGet README
 contains the essential setup.

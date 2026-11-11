@@ -64,7 +64,7 @@ internal sealed record AppOptions(bool Boot = true, bool AlternateScreen = true)
 /// </summary>
 internal sealed class InteractiveApp
 {
-    private static readonly TimeSpan _poll = TimeSpan.FromMilliseconds(30);
+    private static readonly TimeSpan _poll = TimeSpan.FromMilliseconds(10);
     private readonly List<Screen> _screens = [];
     private readonly AppOptions _options;
     private Action<IRenderable>? _present;
@@ -191,7 +191,8 @@ internal sealed class InteractiveApp
         // No cancellation token: Ctrl+C stops the agent through its own token, and the view ends when the agent stops,
         // so the command still prints "Stopped." and returns its exit code as before.
         var app = new InteractiveApp(AnsiConsole.Console, new ConsoleKeySource(), TimeProvider.System, new HostedServices(),
-            CancellationToken.None) { Standalone = true };
+            CancellationToken.None)
+        { Standalone = true };
         return app.InFrameAsync(() => app.RunHostViewAsync(session));
     }
 
@@ -323,6 +324,9 @@ internal sealed class InteractiveApp
 
     private void Draw()
     {
+        // This frame includes changes already reported by background work. Keep invalidations that arrive
+        // while rendering so a newer result still gets its own frame.
+        Interlocked.Exchange(ref _dirty, 0);
         var screen = _screens[^1];
         var size = Size;
         var path = _screens.Skip(Standalone ? 0 : 1).Select(s => s.Title).ToArray();
@@ -417,7 +421,7 @@ internal sealed class InteractiveApp
                 continue;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(50), Time, Cancellation);
+            await Task.Delay(_poll, Time, Cancellation);
         }
     }
 
@@ -459,11 +463,8 @@ internal sealed class InteractiveApp
             .Cropping(VerticalOverflowCropping.Bottom)
             .StartAsync(async context =>
             {
-                _present = frame =>
-                {
-                    context.UpdateTarget(frame);
-                    context.Refresh();
-                };
+                // UpdateTarget also refreshes; refreshing again renders and writes the entire frame twice.
+                _present = context.UpdateTarget;
                 try
                 {
                     await body();
