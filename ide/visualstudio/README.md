@@ -63,6 +63,9 @@ The same PowerShell 5 process checks hostile body, header and path values genera
 instead of starting a second PowerShell process inside the Node unit suite. Prepare the VS Code npm dependencies
 as shown above; the verifier's Node case emitter has a five-second bound.
 
+The release workflow checks the Marketplace publisher from the project's restored SDK build tools, including
+when publication is disabled. It does not require a separate Visual Studio extension-development workload on the runner.
+
 ## Host smoke checklist
 
 Before publishing, install the built VSIX in an experimental Visual Studio 2022 17.14+ instance and repeat on Visual
