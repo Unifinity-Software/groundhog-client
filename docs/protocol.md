@@ -6,6 +6,11 @@ This section is precise on purpose: the relay and the agent are built in paralle
 interoperate on first contact. The protocol version is **1**. Shared constants and types live in
 `Groundhog.Protocol`.
 
+When an agent or Aspire AppHost stops, the agent sends WebSocket close code 1000 after draining its
+HTTP/2 output. It allows up to one second for the relay's reply before disposing the socket. Kestrel's
+input cancellation does not abort the WebSocket receive. Network loss and forced connection aborts remain
+abnormal disconnects; protocol close codes sent by the relay retain their existing meaning.
+
 ### Approach
 
 The agent opens a WebSocket to the relay. Inside that WebSocket, the two sides speak ordinary **HTTP/2 without

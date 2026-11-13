@@ -3,8 +3,8 @@
 The `groundhog` command of Groundhog, the hosted HTTPS tunnel service for local development: give a dev server on
 your machine a public HTTPS address through the Groundhog service.
 
-The installation examples below select stable **1.3.1**. For an existing global installation, use
-`dotnet tool update --global Groundhog.Cli --version 1.3.1`.
+The installation examples below select stable **1.3.2**. For an existing global installation, use
+`dotnet tool update --global Groundhog.Cli --version 1.3.2`.
 
 Before hosting, [create your free workspace](https://groundhog.unifinity.com/docs/workspace) and
 [create a tunnel](https://groundhog.unifinity.com/docs/create-tunnel). Use its name in place of `myapp` below
@@ -12,7 +12,7 @@ and supply its connection key through `GROUNDHOG_KEY`. Keep the key out of sourc
 The example expects your local app to be running on port 5173.
 
 ```
-dotnet tool install --global Groundhog.Cli --version 1.3.1
+dotnet tool install --global Groundhog.Cli --version 1.3.2
 groundhog host myapp --port 5173
 ```
 
@@ -80,7 +80,7 @@ environment configuration; avoid a literal key in command history. Create a tunn
 and use its name and connection key. The hosted service address is automatic.
 
 For a repository-local tool, run `dotnet new tool-manifest`, then
-`dotnet tool install Groundhog.Cli --version 1.3.1` and `dotnet tool run groundhog -- --help`.
+`dotnet tool install Groundhog.Cli --version 1.3.2` and `dotnet tool run groundhog -- --help`.
 Source and the full guide are available in the public Groundhog client repository.
 
 MIT licensed.

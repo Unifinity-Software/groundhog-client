@@ -18,19 +18,24 @@ internal sealed class TunnelConnection : ConnectionContext
     private static long s_nextId;
 
     private readonly WebSocketDuplexStream _stream;
+    private readonly TimeProvider _time;
+    private readonly Pipe _input = new();
+    private readonly Task _receive;
     private readonly CancellationTokenSource _closed = new();
     private readonly TaskCompletionSource<ConnectionEnd> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _disposed;
 
-    public TunnelConnection(WebSocket webSocket)
+    public TunnelConnection(WebSocket webSocket, TimeProvider time)
     {
         _stream = new WebSocketDuplexStream(webSocket);
+        _time = time;
         Transport = new DuplexPipe(
-            PipeReader.Create(_stream, new StreamPipeReaderOptions(leaveOpen: true)),
+            _input.Reader,
             PipeWriter.Create(_stream, new StreamPipeWriterOptions(leaveOpen: true)));
         ConnectionId = $"groundhog-{Interlocked.Increment(ref s_nextId)}";
         ConnectionClosed = _closed.Token;
+        _receive = ReceiveAsync();
     }
 
     /// <summary>Completes when the connection is over, with the relay's close code if it sent one.</summary>
@@ -64,14 +69,31 @@ internal sealed class TunnelConnection : ConnectionContext
             // Completing the output flushes Kestrel's last buffered write (its GOAWAY, say), which fails when the
             // relay is already gone. That is simply the connection ending; it must never keep the owner from
             // seeing the end, or the agent would wait forever instead of reconnecting.
-            await CompleteQuietlyAsync(Transport.Input.CompleteAsync).ConfigureAwait(false);
             await CompleteQuietlyAsync(Transport.Output.CompleteAsync).ConfigureAwait(false);
 
             // The relay's close code, read before the agent's own close reply.
             end = new ConnectionEnd((int?)webSocket.CloseStatus, webSocket.CloseStatusDescription);
 
-            // Answers the relay's close, or closes normally if the agent ended the connection.
+            // Kestrel has stopped reading. Finish the WebSocket handshake before disposing the stream, which
+            // also releases any receive still pending inside the pipe reader. A silent peer cannot block shutdown.
+            if (webSocket.State == WebSocketState.Open)
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(1), _time);
+                try
+                {
+                    await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, deadline.Token)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is WebSocketException or IOException or ObjectDisposedException
+                    or OperationCanceledException or InvalidOperationException)
+                {
+                    // A disconnected or unresponsive peer is disposed below.
+                }
+            }
+
             await _stream.DisposeAsync().ConfigureAwait(false);
+            await CompleteQuietlyAsync(Transport.Input.CompleteAsync).ConfigureAwait(false);
+            await _receive.ConfigureAwait(false);
         }
         finally
         {
@@ -105,5 +127,39 @@ internal sealed class TunnelConnection : ConnectionContext
         public PipeReader Input { get; } = input;
 
         public PipeWriter Output { get; } = output;
+    }
+
+    // The producer owns the socket receive independently of Kestrel's input cancellation. Cancelling a
+    // Pipe read stops Kestrel promptly; only the close handshake (or Abort) ends the WebSocket receive.
+    private async Task ReceiveAsync()
+    {
+        Exception? error = null;
+        try
+        {
+            while (true)
+            {
+                var count = await _stream.ReadAsync(_input.Writer.GetMemory(), CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (count == 0)
+                {
+                    break;
+                }
+                _input.Writer.Advance(count);
+                var flush = await _input.Writer.FlushAsync().ConfigureAwait(false);
+                if (flush.IsCompleted || flush.IsCanceled)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or WebSocketException or ObjectDisposedException
+            or OperationCanceledException or InvalidOperationException)
+        {
+            error = ex;
+        }
+        finally
+        {
+            await _input.Writer.CompleteAsync(error).ConfigureAwait(false);
+        }
     }
 }

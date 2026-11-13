@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.WebSockets;
+using System.IO.Pipelines;
 using System.Threading.Channels;
 using Groundhog.Protocol;
 using Microsoft.AspNetCore.Builder;
@@ -213,10 +214,14 @@ public sealed class AgentConnection : IAsyncDisposable
     private readonly WebSocket _webSocket;
     private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _streamHandedOut;
+    private readonly Pipe _incoming = new();
+    private readonly TaskCompletionSource<WebSocketCloseStatus?> _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly Task _receive;
 
     public AgentConnection(WebSocket webSocket)
     {
         _webSocket = webSocket;
+        _receive = ReceiveAsync();
         var handler = new SocketsHttpHandler
         {
             UseProxy = false,
@@ -225,7 +230,7 @@ public sealed class AgentConnection : IAsyncDisposable
             PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
             PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
             ConnectCallback = (_, _) => Interlocked.Exchange(ref _streamHandedOut, 1) == 0
-                ? ValueTask.FromResult<Stream>(new WebSocketDuplexStream(_webSocket, ownsWebSocket: false))
+                ? ValueTask.FromResult<Stream>(new RelayStream(_incoming.Reader.AsStream(leaveOpen: true), new WebSocketDuplexStream(_webSocket, ownsWebSocket: false)))
                 : throw new IOException("An agent WebSocket carries exactly one HTTP/2 connection."),
         };
 
@@ -240,6 +245,46 @@ public sealed class AgentConnection : IAsyncDisposable
     /// <summary>Sends requests to the agent. Use absolute http:// URIs; their host becomes <c>:authority</c>.</summary>
     public HttpClient Client { get; }
 
+    /// <summary>The close frame observed on the wire, or null for an aborted connection.</summary>
+    public Task<WebSocketCloseStatus?> Closed => _closed.Task;
+
+    // Read even an idle connection, as the real relay does, so shutdown receives a close reply without a timer.
+    private async Task ReceiveAsync()
+    {
+        Exception? error = null;
+        try
+        {
+            while (true)
+            {
+                var result = await _webSocket.ReceiveAsync(_incoming.Writer.GetMemory(), CancellationToken.None);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    _closed.TrySetResult(_webSocket.CloseStatus);
+                    if (_webSocket.State == WebSocketState.CloseReceived)
+                    {
+                        await _webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
+                    }
+                    break;
+                }
+                _incoming.Writer.Advance(result.Count);
+                var flush = await _incoming.Writer.FlushAsync();
+                if (flush.IsCompleted)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is WebSocketException or IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            error = ex;
+        }
+        finally
+        {
+            _closed.TrySetResult(null);
+            await _incoming.Writer.CompleteAsync(error);
+        }
+    }
+
     internal Task Released => _released.Task;
 
     /// <summary>Sends a close frame while keeping the relay request alive for the agent's reply.</summary>
@@ -250,6 +295,7 @@ public sealed class AgentConnection : IAsyncDisposable
     public async Task CloseAsync(int closeCode, CancellationToken cancellationToken)
     {
         await SendCloseAsync(closeCode, cancellationToken);
+        await Closed.WaitAsync(cancellationToken);
         Release();
     }
 
@@ -260,12 +306,41 @@ public sealed class AgentConnection : IAsyncDisposable
         Release();
     }
 
-    internal void Release() => _released.TrySetResult();
+    internal void Release()
+    {
+        _webSocket.Abort();
+        _released.TrySetResult();
+    }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         Release();
         Client.Dispose();
-        return ValueTask.CompletedTask;
+        await _incoming.Reader.CompleteAsync();
+        await _receive;
+    }
+
+    private sealed class RelayStream(Stream input, Stream output) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanWrite => true;
+        public override bool CanSeek => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            input.ReadAsync(buffer, cancellationToken);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            input.ReadAsync(buffer, offset, count, cancellationToken);
+        public override int Read(byte[] buffer, int offset, int count) => input.Read(buffer, offset, count);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            output.WriteAsync(buffer, cancellationToken);
+        public override void Write(byte[] buffer, int offset, int count) => output.Write(buffer, offset, count);
+        public override void Flush() => output.Flush();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
     }
 }
