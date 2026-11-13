@@ -23,7 +23,7 @@ You need the .NET 10 SDK or runtime (including the ASP.NET Core runtime, which t
 Install the CLI from nuget.org:
 
 ```text
-dotnet tool install --global Groundhog.Cli --version 1.3.1
+dotnet tool install --global Groundhog.Cli --version 1.3.2
 groundhog --version
 ```
 
@@ -31,7 +31,7 @@ For a local tool scoped to your repository:
 
 ```text
 dotnet new tool-manifest
-dotnet tool install Groundhog.Cli --version 1.3.1
+dotnet tool install Groundhog.Cli --version 1.3.2
 dotnet tool run groundhog -- --help
 ```
 
@@ -170,7 +170,7 @@ and the response carries `X-Groundhog-Error: local-unreachable`.
 Add the published `Groundhog.Agent` package from nuget.org:
 
 ```text
-dotnet add package Groundhog.Agent --version 1.3.1
+dotnet add package Groundhog.Agent --version 1.3.2
 ```
 
 `Groundhog.Protocol` is restored as a dependency. Like the CLI and Aspire, the library connects to the hosted

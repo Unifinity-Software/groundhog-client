@@ -11,6 +11,21 @@ namespace Groundhog.Agent.Tests;
 public class GroundhogAgentTests(TunnelFixture fixture) : IClassFixture<TunnelFixture>
 {
     [Fact(Timeout = 30_000)]
+    public async Task Stopping_the_agent_sends_a_normal_websocket_close_to_the_relay()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        Task<WebSocketCloseStatus?> close;
+        await using (var agent = fixture.StartAgent("clean-shutdown"))
+        {
+            var relay = await fixture.Relay.Tunnel("clean-shutdown").Connections.Reader.ReadAsync(ct);
+            using var response = await relay.Client.GetAsync("http://clean-shutdown.groundhog.unifinity.com/echo", ct);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            close = relay.Closed;
+        }
+        Assert.Equal(WebSocketCloseStatus.NormalClosure, await close.WaitAsync(ct));
+    }
+
+    [Fact(Timeout = 30_000)]
     public async Task Hosting_package_reports_its_own_version_instead_of_the_agent_version()
     {
         await using var agent = fixture.StartAgent("client-metadata", client: new GroundhogClientInfo("Groundhog.Aspire.Hosting", "1.2.3-preview.4"));

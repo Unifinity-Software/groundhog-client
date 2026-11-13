@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Net.WebSockets;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Eventing;
@@ -20,6 +21,28 @@ public sealed partial class GroundhogTunnelTests(TunnelFixture fixture) : IClass
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(15);
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
+
+    [Fact(Timeout = 30_000)]
+    public async Task AppHost_shutdown_sends_a_normal_websocket_close_to_the_relay()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var builder = CreateBuilder();
+        var key = builder.AddParameter("shutdown-key", fixture.Key, secret: true);
+        var web = builder.AddExecutable("web", "web", ".").WithHttpEndpoint(name: "http");
+        var tunnel = builder.AddGroundhogTunnel("tunnel", fixture.Relay.Address.ToString(), "apphost-shutdown", key)
+            .WithReference(web.GetEndpoint("http"));
+        Allocate(web.Resource, fixture.LocalApp);
+        await using var host = new TestAppHost(builder);
+        await host.InitializeAsync(tunnel.Resource);
+        await host.WaitForStateAsync("tunnel", KnownResourceStates.Running);
+        var relay = await fixture.Relay.Tunnel("apphost-shutdown").Connections.Reader.ReadAsync(Cancellation);
+        using var response = await relay.Client.GetAsync("http://apphost-shutdown.groundhog.unifinity.com/echo", ct);
+        var close = relay.Closed;
+
+        await host.StopAsync();
+
+        Assert.Equal(WebSocketCloseStatus.NormalClosure, await close.WaitAsync(s_timeout, Cancellation));
+    }
 
     [Fact]
     public async Task HostedServiceNeedsOnlyTunnelNameAndSecretKey()

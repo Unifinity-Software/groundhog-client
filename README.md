@@ -11,7 +11,7 @@ This repository owns the MIT-licensed developer clients: the Aspire integration,
 
 ## Aspire
 
-The setup below uses **1.3.1**.
+The setup below uses **1.3.2**.
 
 Before running a client, [sign in to Groundhog](https://groundhog.unifinity.com) and create your free workspace.
 Follow [Create your free workspace](https://groundhog.unifinity.com/docs/workspace), then
@@ -21,7 +21,7 @@ key private while you configure your app. Your workspace address is a dashboard 
 Requires .NET 10 and Aspire 13.6.5 or later. In your AppHost directory:
 
 ```text
-dotnet add package Groundhog.Aspire.Hosting --version 1.3.1
+dotnet add package Groundhog.Aspire.Hosting --version 1.3.2
 ```
 
 ```csharp
@@ -47,7 +47,7 @@ does not discover this package.
 ## CLI
 
 ```text
-dotnet tool install --global Groundhog.Cli --version 1.3.1
+dotnet tool install --global Groundhog.Cli --version 1.3.2
 groundhog host my-tunnel --port 5173
 ```
 
@@ -67,7 +67,7 @@ service automatically.
 Start with the [client handbook](docs/README.md) for client selection and an end-to-end verification checklist.
 Use [troubleshooting](docs/troubleshooting.md) for key changes, HTTPS, reconnecting and public-host errors.
 
-CLI **1.3.1** supports the [VS Code preview](ide/vscode/README.md),
+CLI **1.3.2** supports the [VS Code preview](ide/vscode/README.md),
 [Visual Studio preview](ide/visualstudio/README.md) and [local MCP server](docs/mcp.md) for AI assistants.
 Follow each extension's guide for package availability and supported-host qualification; these are separate from
 the CLI package release. Share a tunnel's settings through [groundhog.json](docs/cli.md#project-configuration).

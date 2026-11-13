@@ -9,7 +9,7 @@ and lets other resources use that address.
 Requires .NET 10 and Aspire 13.6.5 or later. Add the package to your AppHost:
 
 ```text
-dotnet add package Groundhog.Aspire.Hosting --version 1.3.1
+dotnet add package Groundhog.Aspire.Hosting --version 1.3.2
 ```
 
 Use `dotnet add package` for this integration. Aspire CLI integration discovery currently accepts the

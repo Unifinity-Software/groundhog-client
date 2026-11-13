@@ -209,7 +209,7 @@ internal sealed class AgentRun
         ConnectOutcome.Connected connected,
         CancellationToken cancellationToken)
     {
-        var connection = new TunnelConnection(connected.WebSocket);
+        var connection = new TunnelConnection(connected.WebSocket, _time);
         if (!_listener.TryAdd(connection))
         {
             await connection.DisposeAsync().ConfigureAwait(false);
